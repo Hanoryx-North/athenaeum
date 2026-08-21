@@ -1,0 +1,41 @@
+# Athenaeum — workspace root.
+#
+# Layout is deliberately "library first": `athenaeum-core` is a plain Rust
+# library with no UI, no Tauri and no network dependency. Everything else in
+# this workspace — the CLI, the desktop shell — is a consumer of it. That is
+# what keeps the Windows/macOS/Linux builds from drifting apart: the part that
+# holds the knowledge is identical on every platform, and only the thin shell
+# around it is platform-aware.
+[workspace]
+resolver = "2"
+members = [
+    "crates/athenaeum-core",
+    "crates/athenaeum-providers",
+    "crates/athenaeum-cli",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# Matches the floor used by the Tauri 2 toolchain we build the shell with.
+rust-version = "1.82"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+thiserror = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+# Unwind rather than abort so a panic inside a third-party parser can be
+# caught at the command boundary and turned into an error the UI can show,
+# instead of taking the whole app down. Same rationale as llm_wiki.
+panic = "unwind"
+strip = true

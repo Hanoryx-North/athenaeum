@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # GitHub-hosted runners intermittently hit crates.io HTTP/2 stream resets on
+  # large dependency graphs. Retries plus HTTP/1.1 make this far less flaky.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  CARGO_NET_RETRY: "5"
+
+jobs:
+  lint:
+    name: Format and lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Tauri's crate is a workspace member, so even `cargo clippy` needs the
+      # Linux webview headers present.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: cargo fmt --all --check
+
+      # Warnings fail the build here rather than accumulating until nobody
+      # reads the output any more.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The three platforms the app ships on. The knowledge library is
+        # identical on all of them — including a statically linked SQLite —
+        # so any divergence here is a bug worth failing the build over.
+        platform: [ubuntu-22.04, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.platform }}
+
+      - name: Install Linux build dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Run the test suite
+        run: cargo test --workspace --all-targets
+
+      - name: Run doc tests
+        run: cargo test --workspace --doc
+
+      # Proves the shipped binary actually links and runs on this platform,
+      # not merely that it compiled.
+      - name: Smoke-test the CLI
+        shell: bash
+        run: |
+          cargo run -q -p athenaeum-cli -- --version
+          mkdir -p "$RUNNER_TEMP/smoke"
+          cd "$RUNNER_TEMP/smoke"
+          CLI="cargo run -q --manifest-path $GITHUB_WORKSPACE/Cargo.toml -p athenaeum-cli --"
+          $CLI init
+          $CLI add --type decision "Use SQLite" -s "Local-first; no server to run."
+          $CLI add --type gotcha "WAL on network shares" -s "Use a local path."
+          $CLI link "Use SQLite" has_gotcha "WAL on network shares" --derived "ci smoke"
+          $CLI brief "why sqlite" | tee brief.txt
+          grep -q "WAL on network shares" brief.txt
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  icons:
+    name: Icons are reproducible
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # The icons are generated, so a hand-edited binary that no longer
+      # matches its generator would silently drift. Regenerate and diff.
+      - name: Regenerate and compare
+        run: |
+          python3 scripts/generate_icons.py
+          git diff --exit-code -- src-tauri/icons

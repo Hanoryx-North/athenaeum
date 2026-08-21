@@ -1,0 +1,22 @@
+[package]
+name = "athenaeum-providers"
+description = "Provider-agnostic model access for Athenaeum: Anthropic, OpenAI, Azure, Google, Ollama and OpenAI-compatible endpoints, addressed by role."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+futures = "0.3"
+# rustls rather than native-tls: no OpenSSL to find, so the Windows, macOS and
+# Linux builds all link the same TLS stack instead of three different ones.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+    "stream",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
