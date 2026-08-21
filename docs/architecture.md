@@ -184,31 +184,31 @@ the knowledge belongs to the user.
 | Phase | State |
 | --- | --- |
 | 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
-| 1 — External model agent: agent loop, tools, permissions, sessions | **Repository 2 responsibility; intentionally not built here** |
+| 1 — External model agent: agent loop, tools, permissions, sessions | **Runtime responsibility; intentionally not built here.** DeepSeek Harness serves it |
 | 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic foundation done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go symbols and imports, local dependency edges and Git modification history. Full AST call graphs and broader language-specific extractors remain. |
 | 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
-| 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; Wiki agent belongs to Repository 2 |
-| 5 — Agent + wiki integration | **Library side done:** protocol v1, typed service and CLI bridge; Repository 2 adapter pending |
+| 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
+| 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
 | 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation done:** exact, symbol, fingerprint and stale outcomes are searched and persisted; semantic/model revalidation remains external |
-| 7 — Obsidian-style app | Deliberately minimal |
+| 7 — Obsidian-style app | Deliberately minimal here; the product shell starts from the `llm_wiki` desktop application rather than a new one |
 
-Phase 5 remains the real product milestone. This repository now provides its
-side without absorbing runtime responsibilities: Repository 2 can negotiate
-capabilities, request trust-wrapped context, submit model-attributed curation
-proposals and report which knowledge was useful, all without knowing the
-storage implementation.
+Phase 5 was the real product milestone, and it is met without this repository
+absorbing runtime responsibilities. The runtime negotiates capabilities,
+requests trust-wrapped context, submits model-attributed curation proposals and
+reports which knowledge was useful, all without knowing the storage
+implementation — over the published protocol, from a different language.
 
 ## Next
 
-1. **Repository 2 adapter** (Phase 5 product milestone) — consume the published
-   protocol fixtures and implement `WikiProvider` there, without adding its
-   runtime interface to this repository.
-2. **Deeper structural extraction** (Phase 2 tail) — compiler-grade AST
+1. **Deeper structural extraction** (Phase 2 tail) — compiler-grade AST
    identities, calls, implements/exports, test discovery and additional
    languages where measured project value justifies them.
-3. **Verification workflows** (Phase 6 tail) — contradiction review and
-   semantic revalidation belong behind the existing protocol and Repository
-   2's verifier policy; the local library continues to own persisted outcomes.
+2. **Verification workflows** (Phase 6 tail) — contradiction review and
+   semantic revalidation belong behind the existing protocol and the runtime's
+   verifier policy; the local library continues to own persisted outcomes.
+3. **The product shell** (Phase 7) — the visible layer starts from the working
+   `llm_wiki` desktop application, whose own agent runtime is replaced by the
+   harness this library now serves.
 
 ## Deterministic repository knowledge
 

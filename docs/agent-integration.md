@@ -181,27 +181,30 @@ runtime can report utility with:
 
 ## Runtime-side adapter
 
-Repository 2 should define its own small interface in runtime terms. The
-minimum useful shape is:
+The runtime defines the interface in its own terms and translates it to
+protocol v1. That interface exists: the
+[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) bundle
+declares a knowledge capability on the DeepSeek Harness context, with a
+provider that speaks this protocol over the CLI bridge:
 
 ```text
-WikiProvider
+ctx.wiki                       the capability, with provider selection
   capabilities()
-  get_context(task, workspace)
-  execute(request)
+  execute(request)             any protocol v1 operation
+  context(task, budgets)       nothing when a brief would be empty
+  recordUse(nodes, session)
 
-NoWikiProvider
-  get_context(...) -> no additional context
+athenaeum provider             one-shot bridge, negotiated once
 ```
 
-The Athenaeum adapter translates those calls to protocol v1. `NoWikiProvider`
-keeps the coding agent independently usable. The primary agent can register
-the read methods as `wiki.*` tools; curator-controlled flows can additionally
-register mutation methods.
+Read methods reach the model as `wiki_*` tools; the mutation methods are
+registered only for curator-enabled deployments. A runtime with no provider
+registered is the equivalent of the null implementation, and stays a
+legitimate coding agent.
 
-Do not make this crate implement Repository 2's interface directly. That
-would reverse the dependency and couple the standalone runtime to this
-storage implementation.
+Do not make this crate implement the runtime's interface directly. That would
+reverse the dependency and couple the standalone runtime to this storage
+implementation.
 
 ## Trust, permissions and provenance
 
@@ -255,6 +258,8 @@ pin envelope shape, casing, vocabularies, limits and the retrieval trust
 wrapper. The Rust suite round-trips every fixture through the production types
 and compares the capabilities fixture with the actual service response.
 
-Repository 2 should run the same files through its adapter tests. The fixtures
-are examples of the wire contract, not permission grants and not an interface
-definition for the runtime.
+The runtime runs the same files through its adapter tests: `athenaeum_agent`
+vendors this directory with the commit it was taken from, compares every
+request it builds against the published envelopes, and replays every response
+through its production client. The fixtures are examples of the wire contract,
+not permission grants and not an interface definition for the runtime.

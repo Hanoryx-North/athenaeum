@@ -35,10 +35,12 @@ What works:
 - Source-anchor relocation by symbol and region fingerprint.
 
 The coding-agent runtime is intentionally **not built in this repository**.
-It is a separate foundation repository that owns providers, streaming, tools,
-permissions and sessions. Athenaeum exposes a versioned, storage-independent
-Wiki contract for it: typed in-process Rust through `WikiService`, or JSON
-over the `athenaeum bridge` command. See
+It is [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), which
+owns providers, streaming, tools, permissions and sessions, with
+[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the
+bundle that plugs this library into it. Athenaeum exposes a versioned,
+storage-independent Wiki contract for that: typed in-process Rust through
+`WikiService`, or JSON over the `athenaeum bridge` command. See
 [docs/agent-integration.md](docs/agent-integration.md).
 
 ---

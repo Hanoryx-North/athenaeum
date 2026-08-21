@@ -36,13 +36,12 @@ desktop application; there is no file that transfers directly.
 It was used as a **reference** for two things:
 
 - The shape of a tool contract — name, JSON-schema input, permission check,
-  rendered result — which is what Phase 1's tool system should look like.
+  rendered result.
 - The separation between a tool's implementation and its prompt text.
 
-The agent loop belongs to Repository 2. Its reuse audit should begin with
-`src/Tool.ts`, `src/tools/*/prompt.ts` and
-`src/services/tools/toolOrchestration.ts`; no adaptation of those systems
-belongs in this Wiki Library repository.
+The agent loop is no longer anyone's port of it: the runtime is DeepSeek
+Harness, which owns tools, permissions, sessions and providers as plugins.
+Nothing of that belongs in this Wiki Library repository either way.
 
 ## Generated, not copied
 
