@@ -10,9 +10,24 @@ use crate::model::{
     Authority, KnowledgeNode, NodeStatus, NodeType, NodeVersion, Provenance, Scope,
 };
 
-const NODE_COLUMNS: &str = "id, type, title, summary, content, scope, authority, status, \
+/// The node columns, in the order [`map_node`] reads them by position.
+///
+/// Declared once and shared with [`super::search`], because a second
+/// hand-written copy that drifts out of order would not fail to compile — it
+/// would quietly map one column's value into another column's field.
+pub(crate) const NODE_COLUMNS: &str =
+    "id, type, title, summary, content, scope, authority, status, \
      provenance_source, provenance_detail, provenance_session, last_verified_at, \
      created_at, updated_at, version";
+
+/// [`NODE_COLUMNS`] qualified with a table alias, for queries that join.
+pub(crate) fn node_columns_for(alias: &str) -> String {
+    NODE_COLUMNS
+        .split(',')
+        .map(|column| format!("{alias}.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Which nodes to list.
 ///
@@ -79,29 +94,29 @@ impl KnowledgeStore {
         let session = node.provenance.session.clone();
         let tx = self.conn.transaction()?;
 
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT id FROM nodes WHERE id = ?1",
-                params![node.id],
-                |r| r.get(0),
-            )
-            .ok();
-        if existing.is_some() {
-            return Err(Error::DuplicateTitle {
-                title: node.title.clone(),
-                existing: node.id.clone(),
-            });
+        // `.ok()` here would discard a genuine SQLite failure as though it
+        // meant "no such row", and the caller would then see a confusing
+        // constraint error instead of the real fault.
+        match tx.query_row(
+            "SELECT 1 FROM nodes WHERE id = ?1",
+            params![node.id],
+            |_| Ok(()),
+        ) {
+            Ok(()) => return Err(Error::DuplicateId(node.id.clone())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(e.into()),
         }
 
         tx.execute(
-            "INSERT INTO nodes (id, type, title, summary, content, scope, authority, status,
+            "INSERT INTO nodes (id, type, title, title_key, summary, content, scope, authority, status,
                                 provenance_source, provenance_detail, provenance_session,
                                 last_verified_at, created_at, updated_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 node.id,
                 node.node_type.as_str(),
                 node.title,
+                title_key(&node.title),
                 node.summary,
                 node.content,
                 node.scope.as_str(),
@@ -169,6 +184,29 @@ impl KnowledgeStore {
         }
     }
 
+    /// Find conservative title lookalikes without scanning the node table.
+    ///
+    /// The key intentionally recognizes only case, whitespace, `_` and `-`
+    /// variations. Plurals, abbreviations and spelling similarity still need
+    /// human or curator judgement; silently merging those would be worse than
+    /// retaining a duplicate.
+    pub fn find_nodes_by_title_key(&self, title: &str) -> Result<Vec<KnowledgeNode>> {
+        let key = title_key(title);
+        if key.chars().count() < 5 {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {NODE_COLUMNS} FROM nodes
+             WHERE title_key = ?1 AND title != ?2 COLLATE NOCASE
+             ORDER BY CASE status WHEN 'valid' THEN 0 ELSE 1 END, updated_at DESC, id ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let nodes = stmt
+            .query_map(params![key, title], map_node)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(nodes)
+    }
+
     /// List nodes matching `filter`, most recently updated first.
     pub fn list_nodes(&self, filter: &NodeFilter) -> Result<Vec<KnowledgeNode>> {
         let mut sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE 1 = 1");
@@ -195,7 +233,8 @@ impl KnowledgeStore {
         }
         sql.push_str(" ORDER BY updated_at DESC");
         if let Some(limit) = filter.limit {
-            sql.push_str(&format!(" LIMIT {limit}"));
+            args.push(Box::new(limit));
+            sql.push_str(&format!(" LIMIT ?{}", args.len()));
         }
 
         let mut stmt = self.conn.prepare(&sql)?;
@@ -216,6 +255,31 @@ impl KnowledgeStore {
         node: KnowledgeNode,
         reason: Option<String>,
     ) -> Result<KnowledgeNode> {
+        let actor = node.provenance.clone();
+        self.update_node_with_actor(node, reason, actor)
+    }
+
+    /// Replace a node while attributing the edit independently from the
+    /// claim's original provenance.
+    ///
+    /// A model editing a user-stated decision must not turn that decision
+    /// into a model-originated claim. The actor belongs in the journal; the
+    /// node keeps describing where the knowledge itself came from.
+    pub fn update_node_attributed(
+        &mut self,
+        node: KnowledgeNode,
+        reason: Option<String>,
+        actor: Provenance,
+    ) -> Result<KnowledgeNode> {
+        self.update_node_with_actor(node, reason, actor)
+    }
+
+    fn update_node_with_actor(
+        &mut self,
+        node: KnowledgeNode,
+        reason: Option<String>,
+        actor: Provenance,
+    ) -> Result<KnowledgeNode> {
         let previous = self.get_node(&node.id)?;
 
         let mut updated = node;
@@ -224,7 +288,7 @@ impl KnowledgeStore {
         updated.created_at = previous.created_at;
 
         let snapshot = NodeVersion::snapshot(&previous, reason);
-        let session = updated.provenance.session.clone();
+        let session = actor.session.clone();
 
         let tx = self.conn.transaction()?;
 
@@ -246,15 +310,17 @@ impl KnowledgeStore {
         )?;
 
         tx.execute(
-            "UPDATE nodes SET type = ?2, title = ?3, summary = ?4, content = ?5, scope = ?6,
-                              authority = ?7, status = ?8, provenance_source = ?9,
-                              provenance_detail = ?10, provenance_session = ?11,
-                              last_verified_at = ?12, updated_at = ?13, version = ?14
+            "UPDATE nodes SET type = ?2, title = ?3, title_key = ?4, summary = ?5,
+                              content = ?6, scope = ?7, authority = ?8, status = ?9,
+                              provenance_source = ?10, provenance_detail = ?11,
+                              provenance_session = ?12, last_verified_at = ?13,
+                              updated_at = ?14, version = ?15
              WHERE id = ?1",
             params![
                 updated.id,
                 updated.node_type.as_str(),
                 updated.title,
+                title_key(&updated.title),
                 updated.summary,
                 updated.content,
                 updated.scope.as_str(),
@@ -271,8 +337,12 @@ impl KnowledgeStore {
 
         super::search::reindex_node(&tx, &updated)?;
 
-        let mut event = NewEvent::about(EventKind::NodeUpdated, &updated.id)
-            .with_detail(serde_json::json!({ "version": updated.version }));
+        let mut event =
+            NewEvent::about(EventKind::NodeUpdated, &updated.id).with_detail(serde_json::json!({
+                "version": updated.version,
+                "actorSource": actor.source.as_str(),
+                "actorDetail": actor.detail,
+            }));
         if let Some(session) = session {
             event = event.with_session(session);
         }
@@ -423,4 +493,90 @@ pub(crate) fn map_node(row: &Row<'_>) -> rusqlite::Result<KnowledgeNode> {
         updated_at: parse_time(&row.get::<_, String>(13)?)?,
         version: row.get(14)?,
     })
+}
+
+/// Stable, deliberately conservative key shared by migration-compatible
+/// writes and Wiki-boundary entity resolution.
+pub(crate) fn title_key(title: &str) -> String {
+    title
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && *ch != '-' && *ch != '_')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::NodeType;
+
+    #[test]
+    fn a_clashing_id_is_reported_as_an_id_clash_not_a_title_clash() {
+        // A caller supplying its own readable id needs to be told which id
+        // collided. Naming the incoming title instead points at a node that
+        // does not exist.
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Validate state first")
+                    .with_id("Decision_042"),
+            )
+            .unwrap();
+
+        let err = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Something else").with_id("Decision_042"),
+            )
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(matches!(err, Error::DuplicateId(_)), "got {err:?}");
+        assert!(message.contains("Decision_042"), "got {message}");
+        assert!(!message.contains("Something else"), "got {message}");
+    }
+
+    #[test]
+    fn a_rejected_duplicate_leaves_nothing_behind() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(KnowledgeNode::new(NodeType::Fact, "One").with_id("dup"))
+            .unwrap();
+        let _ = store.create_node(KnowledgeNode::new(NodeType::Fact, "Two").with_id("dup"));
+
+        assert_eq!(store.stats().unwrap().nodes, 1);
+        assert_eq!(
+            store.get_node(&NodeId::from_existing("dup")).unwrap().title,
+            "One"
+        );
+    }
+
+    #[test]
+    fn the_column_list_and_its_aliased_form_stay_in_step() {
+        // `map_node` reads by position, so these must describe the same
+        // columns in the same order or rows silently map into wrong fields.
+        let plain: Vec<&str> = NODE_COLUMNS.split(',').map(str::trim).collect();
+        let aliased = node_columns_for("n");
+        let qualified: Vec<String> = aliased.split(',').map(|c| c.trim().to_string()).collect();
+
+        assert_eq!(plain.len(), qualified.len());
+        for (plain, qualified) in plain.iter().zip(&qualified) {
+            assert_eq!(qualified, &format!("n.{plain}"));
+        }
+    }
+
+    #[test]
+    fn near_title_lookup_is_separator_aware_but_not_fuzzy() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let existing = store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+
+        let matches = store.find_nodes_by_title_key("auth_service").unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, existing.id);
+        assert!(store
+            .find_nodes_by_title_key("AuthServices")
+            .unwrap()
+            .is_empty());
+    }
 }

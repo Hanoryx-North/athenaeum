@@ -3,8 +3,8 @@
 ## The one decision everything else follows from
 
 The knowledge library is a plain Rust library with no UI, no Tauri, no HTTP
-client and no model dependency. Everything else — the CLI, the desktop shell,
-eventually the agent — is a consumer of it.
+client and no model dependency. The CLI and desktop shell consume it locally;
+the separately built agent runtime consumes its versioned Wiki contract.
 
 ```text
                     ┌──────────────────────┐
@@ -16,19 +16,21 @@ eventually the agent — is a consumer of it.
                     │  authority + trust   │
                     └──────────┬───────────┘
                                │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-      athenaeum-cli      src-tauri +        (next: the
-      the `athenaeum`    src/ — desktop      agent loop)
-      command            shell
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ athenaeum-providers  │
-                    │ Anthropic / OpenAI / │
-                    │ Google / Ollama / …  │
-                    └──────────────────────┘
+              ┌────────────────┼─────────────────┐
+              ▼                ▼                 ▼
+      athenaeum-cli      src-tauri +       Wiki protocol v1
+      the `athenaeum`    src/ — desktop    typed + JSON bridge
+      command            shell                   │
+                                                  ▼
+                                      ┌──────────────────────┐
+                                      │ external Repository 2│
+                                      │ agent · providers ·  │
+                                      │ tools · permissions  │
+                                      └──────────────────────┘
 ```
+
+The boundary is specified in [agent-integration.md](agent-integration.md).
+Repository 2 never reaches through it into `KnowledgeStore` or SQLite.
 
 Three things fall out of it, and they are the reasons for the arrangement:
 
@@ -43,8 +45,9 @@ slashes. What differs between platforms is confined to four small
 `athenaeum-core`. Losing access to a provider entirely does not make an
 existing knowledge base less readable.
 
-**It is testable without an API key.** All 128 tests run offline, in under two
-seconds, including the end-to-end acceptance test for the product thesis.
+**It is testable without an API key.** The full test suite runs offline,
+including the end-to-end acceptance test for the product thesis, repository
+extraction, anchor relocation and protocol fixture compatibility.
 
 ## Why the graph view is not here yet
 
@@ -137,7 +140,8 @@ repository data.
 
 ## Model roles
 
-`athenaeum-providers` addresses models by role rather than by name (§5, §6):
+The existing bootstrap provider crate addresses models by role rather than by
+name (§5, §6):
 
 | Role | Does | Typically |
 | --- | --- | --- |
@@ -150,7 +154,9 @@ Only `Primary` is required; the rest fall back to it, so a user with one model
 configured gets a working system — just one paying primary prices for graph
 navigation, which `is_explicitly_assigned` lets the UI point out. Roles can
 span providers: GPT primary with a Claude wiki agent is a configuration, not a
-fork.
+fork. The provider crate predates the two-repository split. Runtime provider
+ownership and further development now belong to Repository 2; it connects to
+this library through the Wiki protocol, not through this compatibility code.
 
 ## Storage
 
@@ -177,29 +183,55 @@ the knowledge belongs to the user.
 
 | Phase | State |
 | --- | --- |
-| 0 — Foundation: config, SQLite, schema, journal, CLI, provider abstraction | **Done** |
-| 1 — External model agent: agent loop, tools, permissions, sessions | Not started |
-| 2 — Repository understanding: file/symbol/AST indexes, git history | Not started |
-| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**, minus the curator |
-| 4 — Wiki agent: navigation, briefs, role configuration | Navigation, briefs and roles done; the agent that drives them is not |
-| 5 — Agent + wiki integration | Not started — this is the milestone that matters |
-| 6 — Verification: anchor relocation, staleness, contradictions | Model and detection in place; relocation is not |
-| 7 — Obsidian-style app | Deliberately minimal |
+| 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
+| 1 — External model agent: agent loop, tools, permissions, sessions | **Runtime responsibility; intentionally not built here.** DeepSeek Harness serves it |
+| 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic foundation done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go symbols and imports, local dependency edges and Git modification history. Full AST call graphs and broader language-specific extractors remain. |
+| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
+| 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
+| 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
+| 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation done:** exact, symbol, fingerprint and stale outcomes are searched and persisted; semantic/model revalidation remains external |
+| 7 — Obsidian-style app | Deliberately minimal here; the product shell starts from the `llm_wiki` desktop application rather than a new one |
 
-Phase 5 is the real product milestone, and the honest summary of this base app
-is that it builds the floor Phase 5 stands on. The knowledge side is done well
-enough to hold a session's discoveries; what is missing is the loop that puts
-them there automatically.
+Phase 5 was the real product milestone, and it is met without this repository
+absorbing runtime responsibilities. The runtime negotiates capabilities,
+requests trust-wrapped context, submits model-attributed curation proposals and
+reports which knowledge was useful, all without knowing the storage
+implementation — over the published protocol, from a different language.
 
 ## Next
 
-1. **The agent loop** (Phase 1) — tool calling, permissions, session state,
-   driven through `athenaeum-providers`.
-2. **The curator** (Phase 3) — entity resolution and duplicate detection so
-   sessions attach evidence to existing nodes instead of spawning
-   near-duplicates. `find_node_by_title` is the hook it plugs into.
-3. **Repository understanding** (Phase 2) — deterministic extraction of
-   imports, symbols and git history. These produce `Valid` edges directly and
-   are the cheapest real knowledge available.
-4. **Anchor relocation** (Phase 6) — `AnchorResolution` describes the outcomes;
-   nothing implements the search yet.
+1. **Deeper structural extraction** (Phase 2 tail) — compiler-grade AST
+   identities, calls, implements/exports, test discovery and additional
+   languages where measured project value justifies them.
+2. **Verification workflows** (Phase 6 tail) — contradiction review and
+   semantic revalidation belong behind the existing protocol and the runtime's
+   verifier policy; the local library continues to own persisted outcomes.
+3. **The product shell** (Phase 7) — the visible layer starts from the working
+   `llm_wiki` desktop application, whose own agent runtime is replaced by the
+   harness this library now serves.
+
+## Deterministic repository knowledge
+
+`athenaeum index` performs a bounded, read-only scan. Generated and private
+workspace directories are skipped, non-text and oversized files are not read,
+and stable identities make repeated indexing idempotent. File containment,
+resolved local imports and Git modification history become `Valid` edges with
+deterministic provenance. Removed imports are reconciled and source objects
+that disappear are retained as `stale_requires_review`.
+
+The first parser set covers the languages used by this repository plus common
+agent projects: Rust, TypeScript/JavaScript, Python and Go. It extracts named
+declarations and import structure conservatively. It is not presented as a
+full compiler AST: call graphs, implements relationships, exports and richer
+language coverage remain Phase 2 work.
+
+`athenaeum relocate` checks every anchored evidence record. An unchanged
+file or region stays exact; a unique named declaration updates by symbol; a
+unique identical line region updates by fingerprint; and an unresolved anchor
+makes its node stale or review-required without deleting knowledge. Paths are
+validated as repository-relative before any read.
+
+Language-neutral v1 fixtures live under
+`fixtures/wiki-protocol/v1/`. Tests require every advertised operation to
+have a request fixture and pin the capabilities response to the production
+vocabulary and budgets.

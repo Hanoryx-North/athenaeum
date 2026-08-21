@@ -52,6 +52,11 @@ impl Evidence {
         }
     }
 
+    pub fn with_id(mut self, id: impl Into<EvidenceId>) -> Self {
+        self.id = id.into();
+        self
+    }
+
     pub fn with_anchor(mut self, anchor: SourceAnchor) -> Self {
         self.anchor = Some(anchor);
         self

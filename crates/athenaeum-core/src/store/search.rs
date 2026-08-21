@@ -7,7 +7,8 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use super::{nodes::map_node, KnowledgeStore};
+use super::nodes::{map_node, node_columns_for, NODE_COLUMNS};
+use super::KnowledgeStore;
 use crate::error::Result;
 use crate::id::NodeId;
 use crate::model::KnowledgeNode;
@@ -50,21 +51,24 @@ impl KnowledgeStore {
     }
 
     fn search_matching(&self, match_expr: &str, limit: u32) -> Result<Vec<SearchHit>> {
-        let sql = "SELECT n.id, n.type, n.title, n.summary, n.content, n.scope, n.authority,
-                          n.status, n.provenance_source, n.provenance_detail,
-                          n.provenance_session, n.last_verified_at, n.created_at,
-                          n.updated_at, n.version, bm25(nodes_fts) AS rank
-                   FROM nodes_fts
-                   JOIN nodes n ON n.id = nodes_fts.id
-                   WHERE nodes_fts MATCH ?1
-                     AND n.status IN ('valid', 'stale', 'stale_requires_review')
-                   ORDER BY rank
-                   LIMIT ?2";
+        // `rank` sits immediately after the node columns, which is the index
+        // `map_node` stops at.
+        let rank_column = NODE_COLUMNS.split(',').count();
+        let sql = format!(
+            "SELECT {}, bm25(nodes_fts) AS rank
+             FROM nodes_fts
+             JOIN nodes n ON n.id = nodes_fts.id
+             WHERE nodes_fts MATCH ?1
+               AND n.status IN ('valid', 'stale', 'stale_requires_review')
+             ORDER BY rank
+             LIMIT ?2",
+            node_columns_for("n")
+        );
 
-        let mut stmt = self.conn.prepare(sql)?;
+        let mut stmt = self.conn.prepare(&sql)?;
         let hits = stmt
             .query_map(params![match_expr, limit], |row| {
-                let bm25: f64 = row.get(15)?;
+                let bm25: f64 = row.get(rank_column)?;
                 Ok(SearchHit {
                     node: map_node(row)?,
                     score: -bm25 as f32,
@@ -83,16 +87,13 @@ impl KnowledgeStore {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM nodes_fts", [])?;
         {
-            let sql = "SELECT id, type, title, summary, content, scope, authority, status,
-                              provenance_source, provenance_detail, provenance_session,
-                              last_verified_at, created_at, updated_at, version
-                       FROM nodes";
-            let mut stmt = tx.prepare(sql)?;
-            let nodes = stmt
-                .query_map([], map_node)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            for node in &nodes {
-                index_node(&tx, node)?;
+            let sql = format!("SELECT {NODE_COLUMNS} FROM nodes");
+            let mut stmt = tx.prepare(&sql)?;
+            let mut rows = stmt.query([])?;
+            // Streamed rather than collected: a rebuild on a large knowledge
+            // base should not need the whole nodes table in memory at once.
+            while let Some(row) = rows.next()? {
+                index_node(&tx, &map_node(row)?)?;
             }
         }
         tx.commit()?;

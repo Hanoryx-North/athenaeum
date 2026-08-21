@@ -7,10 +7,9 @@
 
 use std::sync::Mutex;
 
-use athenaeum_core::graph;
 use athenaeum_core::journal::Event;
-use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
+use athenaeum_core::wiki::{WikiNodeDetail, WikiService};
 use serde::{Deserialize, Serialize};
 
 use crate::panic_guard::run_guarded;
@@ -40,34 +39,6 @@ impl AppState {
         let store = guard.as_mut().ok_or("no project is open")?;
         f(store).map_err(|e| e.to_string())
     }
-}
-
-/// A node together with everything the detail pane shows about it.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeDetail {
-    pub node: KnowledgeNode,
-    pub relationships: Vec<RelatedNode>,
-    pub evidence: Vec<Evidence>,
-    pub history: Vec<NodeVersion>,
-    pub utility: NodeUtility,
-}
-
-/// A neighbour with its title resolved, so the UI does not have to make one
-/// request per edge to render a list of links.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RelatedNode {
-    pub id: NodeId,
-    pub title: String,
-    #[serde(rename = "type")]
-    pub node_type: NodeType,
-    pub edge_type: EdgeType,
-    pub edge_id: EdgeId,
-    pub outbound: bool,
-    /// False for edges that are still only proposed, so the UI can show them
-    /// differently rather than implying they are established (§20).
-    pub established: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,35 +133,9 @@ pub fn list_nodes(
 pub fn node_detail(
     state: tauri::State<'_, AppState>,
     id: NodeId,
-) -> std::result::Result<NodeDetail, String> {
+) -> std::result::Result<WikiNodeDetail, String> {
     run_guarded("node_detail", || {
-        state.with(|store| {
-            let node = store.get_node(&id)?;
-
-            // Proposed edges are included so the user can review and accept
-            // them; the `established` flag tells the UI to mark them.
-            let mut relationships = Vec::new();
-            for neighbor in store.neighbors(&id, &EdgeFilter::all())? {
-                let other = store.get_node(&neighbor.node)?;
-                relationships.push(RelatedNode {
-                    id: other.id,
-                    title: other.title,
-                    node_type: other.node_type,
-                    edge_type: neighbor.edge_type,
-                    edge_id: neighbor.edge.id.clone(),
-                    outbound: neighbor.outbound,
-                    established: neighbor.edge.is_traversable(),
-                });
-            }
-
-            Ok(NodeDetail {
-                relationships,
-                evidence: store.evidence_for(&id)?,
-                history: store.history(&id)?,
-                utility: store.utility(&id)?,
-                node,
-            })
-        })
+        state.with(|store| WikiService::new(store).open(id.as_str()))
     })
 }
 
@@ -335,7 +280,7 @@ pub fn search(
     limit: Option<u32>,
 ) -> std::result::Result<Vec<SearchHit>, String> {
     run_guarded("search", || {
-        state.with(|store| store.search(&query, limit.unwrap_or(20)))
+        state.with(|store| WikiService::new(store).search(&query, limit))
     })
 }
 
@@ -347,10 +292,7 @@ pub fn navigate_from(
     max_nodes: Option<usize>,
 ) -> std::result::Result<Vec<Reached>, String> {
     run_guarded("navigate_from", || {
-        let options = NavigationOptions::default()
-            .depth(depth.unwrap_or(2))
-            .max_nodes(max_nodes.unwrap_or(25));
-        state.with(|store| graph::navigate(store, std::slice::from_ref(&id), &options))
+        state.with(|store| WikiService::new(store).navigate(id.as_str(), depth, max_nodes))
     })
 }
 
@@ -362,19 +304,15 @@ pub fn assemble_brief(
     depth: Option<u8>,
 ) -> std::result::Result<KnowledgeBrief, String> {
     run_guarded("assemble_brief", || {
-        let options = NavigationOptions::default().depth(depth.unwrap_or(2));
         state.with(|store| {
-            // With no seeds supplied, find them the way the wiki agent would:
-            // search the knowledge base for the task text.
-            let seeds = match &seeds {
-                Some(seeds) if !seeds.is_empty() => seeds.clone(),
-                _ => store
-                    .search(&task, 5)?
-                    .into_iter()
-                    .map(|hit| hit.node.id)
-                    .collect(),
-            };
-            KnowledgeBrief::assemble(store, &task, &seeds, &options)
+            let seeds = seeds
+                .unwrap_or_default()
+                .into_iter()
+                .map(NodeId::into_string)
+                .collect::<Vec<_>>();
+            Ok(WikiService::new(store)
+                .context(&task, &seeds, depth, None)?
+                .brief)
         })
     })
 }
@@ -391,21 +329,42 @@ pub fn journal(
 
 /// The vocabularies the UI needs to populate its dropdowns.
 ///
+/// A typed struct rather than a hand-built `serde_json::Value`: the key
+/// names are half of a contract with `src/api.ts`, and a hand-written key is
+/// a contract the compiler cannot check.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vocabularies {
+    pub node_types: Vec<&'static str>,
+    pub edge_types: Vec<&'static str>,
+    pub authorities: Vec<&'static str>,
+    pub scopes: Vec<&'static str>,
+    pub evidence_kinds: Vec<&'static str>,
+    pub model_roles: Vec<&'static str>,
+}
+
 /// Served from the library rather than duplicated in TypeScript, so adding a
 /// node type in Rust cannot leave the UI silently unable to offer it.
 #[tauri::command]
-pub fn vocabularies() -> serde_json::Value {
-    serde_json::json!({
-        "nodeTypes": NodeType::ALL.iter().map(|t| t.as_str()).collect::<Vec<_>>(),
-        "edgeTypes": EdgeType::ALL.iter().map(|t| t.as_str()).collect::<Vec<_>>(),
-        "authorities": Authority::ALL.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
-        "scopes": Scope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        "evidenceKinds": EvidenceKind::ALL.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
-        "modelRoles": athenaeum_providers::ModelRole::ALL
-            .iter()
-            .map(|r| r.as_str())
-            .collect::<Vec<_>>(),
-    })
+pub fn vocabularies() -> Vocabularies {
+    fn spellings<T: 'static>(
+        all: &'static [T],
+        as_str: fn(&T) -> &'static str,
+    ) -> Vec<&'static str> {
+        all.iter().map(as_str).collect()
+    }
+
+    Vocabularies {
+        node_types: spellings(NodeType::ALL, NodeType::as_str),
+        edge_types: spellings(EdgeType::ALL, EdgeType::as_str),
+        authorities: spellings(Authority::ALL, Authority::as_str),
+        scopes: spellings(Scope::ALL, Scope::as_str),
+        evidence_kinds: spellings(EvidenceKind::ALL, EvidenceKind::as_str),
+        model_roles: spellings(
+            athenaeum_providers::ModelRole::ALL,
+            athenaeum_providers::ModelRole::as_str,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -423,14 +382,34 @@ mod tests {
     fn vocabularies_cover_every_variant_the_library_defines() {
         // If these drift, the UI offers a subset of what the model can store.
         let vocab = vocabularies();
+        assert_eq!(vocab.node_types.len(), NodeType::ALL.len());
+        assert_eq!(vocab.edge_types.len(), EdgeType::ALL.len());
+        assert_eq!(vocab.authorities.len(), Authority::ALL.len());
+        assert_eq!(vocab.scopes.len(), Scope::ALL.len());
+        assert_eq!(vocab.evidence_kinds.len(), EvidenceKind::ALL.len());
+        // Against `ALL`, not a literal: a fifth role should fail this test
+        // for the right reason, or not at all.
         assert_eq!(
-            vocab["nodeTypes"].as_array().unwrap().len(),
-            NodeType::ALL.len()
+            vocab.model_roles.len(),
+            athenaeum_providers::ModelRole::ALL.len()
         );
-        assert_eq!(
-            vocab["edgeTypes"].as_array().unwrap().len(),
-            EdgeType::ALL.len()
-        );
-        assert_eq!(vocab["modelRoles"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn vocabularies_serialize_with_the_keys_the_frontend_reads() {
+        // `src/api.ts` declares these names by hand; this is the assertion
+        // that keeps the two halves of that contract together.
+        let json = serde_json::to_value(vocabularies()).unwrap();
+        for key in [
+            "nodeTypes",
+            "edgeTypes",
+            "authorities",
+            "scopes",
+            "evidenceKinds",
+            "modelRoles",
+        ] {
+            assert!(json.get(key).is_some(), "missing key {key}");
+        }
+        assert_eq!(json["nodeTypes"][0], "project");
     }
 }

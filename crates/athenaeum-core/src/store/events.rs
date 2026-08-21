@@ -53,9 +53,35 @@ impl KnowledgeStore {
 
     /// Record that a set of nodes was returned to an agent.
     pub fn record_retrieval(&mut self, ids: &[NodeId]) -> Result<()> {
+        self.record_node_events(EventKind::NodeRetrieved, ids, None)
+    }
+
+    /// Record that an agent actually used a set of retrieved nodes.
+    ///
+    /// The external runtime reports this after completing work. Keeping the
+    /// write here, rather than letting it touch the journal directly, makes
+    /// the whole report atomic and preserves the storage boundary.
+    pub fn record_use(
+        &mut self,
+        ids: &[NodeId],
+        session: Option<&crate::id::SessionId>,
+    ) -> Result<()> {
+        self.record_node_events(EventKind::NodeUsed, ids, session)
+    }
+
+    fn record_node_events(
+        &mut self,
+        kind: EventKind,
+        ids: &[NodeId],
+        session: Option<&crate::id::SessionId>,
+    ) -> Result<()> {
         let tx = self.conn.transaction()?;
         for id in ids {
-            record_in(&tx, &NewEvent::about(EventKind::NodeRetrieved, id))?;
+            let mut event = NewEvent::about(kind, id);
+            if let Some(session) = session {
+                event = event.with_session(session.clone());
+            }
+            record_in(&tx, &event)?;
         }
         tx.commit()?;
         Ok(())
@@ -82,7 +108,8 @@ impl KnowledgeStore {
         }
         sql.push_str(" ORDER BY seq DESC");
         if let Some(limit) = filter.limit {
-            sql.push_str(&format!(" LIMIT {limit}"));
+            args.push(Box::new(limit));
+            sql.push_str(&format!(" LIMIT ?{}", args.len()));
         }
 
         let mut stmt = self.conn.prepare(&sql)?;

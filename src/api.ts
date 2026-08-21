@@ -118,6 +118,23 @@ export interface KnowledgeBrief {
   truncated: boolean;
 }
 
+/** One step of a walk, as `graph::Reached` serializes it. */
+export interface Reached {
+  node: KnowledgeNode;
+  depth: number;
+  via?: { from: string; edgeType: string };
+}
+
+/** One entry of the append-only journal. */
+export interface JournalEvent {
+  seq: number;
+  at: string;
+  kind: string;
+  subject?: string;
+  session?: string;
+  detail?: unknown;
+}
+
 export interface Vocabularies {
   nodeTypes: string[];
   edgeTypes: string[];
@@ -170,8 +187,11 @@ export const api = {
   }) => invoke<Evidence>("attach_evidence", args),
 
   search: (query: string, limit?: number) => invoke<SearchHit[]>("search", { query, limit }),
+  navigateFrom: (id: string, depth?: number, maxNodes?: number) =>
+    invoke<Reached[]>("navigate_from", { id, depth, maxNodes }),
   assembleBrief: (task: string, seeds?: string[], depth?: number) =>
     invoke<KnowledgeBrief>("assemble_brief", { task, seeds, depth }),
+  journal: (limit?: number) => invoke<JournalEvent[]>("journal", { limit }),
 };
 
 /** Tauri returns command errors as plain strings; surface them as such. */

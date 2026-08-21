@@ -5,6 +5,8 @@
 //! them, the source anchors worth opening, and the warnings that would
 //! otherwise be rediscovered the hard way.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
@@ -72,26 +74,37 @@ impl KnowledgeBrief {
         seeds: &[NodeId],
         options: &NavigationOptions,
     ) -> Result<Self> {
-        let reached = navigate(store, seeds, options)?;
-        let truncated = reached.len() >= options.max_nodes;
+        // Walk one node past the budget purely to learn whether more exists:
+        // `reached.len() == max_nodes` alone cannot distinguish "the budget
+        // cut the walk short" from "the graph holds exactly this much", and
+        // telling a reader there is more to find when there is not is worse
+        // than saying nothing.
+        let probe = options
+            .clone()
+            .max_nodes(options.max_nodes.saturating_add(1));
+        let mut reached = navigate(store, seeds, &probe)?;
+        let truncated = reached.len() > options.max_nodes;
+        reached.truncate(options.max_nodes);
 
         let mut nodes = Vec::with_capacity(reached.len());
         let mut relationships = Vec::new();
         let mut anchors: Vec<String> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
 
-        // Titles are far more legible than ids in a brief a model has to
-        // read, so relationships are rendered by title.
-        let title_of = |id: &NodeId| -> String {
-            reached
-                .iter()
-                .find(|r| &r.node.id == id)
-                .map(|r| r.node.title.clone())
-                .unwrap_or_else(|| id.to_string())
-        };
+        // Titles are far more legible than ids in a brief a model has to read,
+        // so relationships are rendered by title. Indexed once rather than
+        // re-scanned per relationship: the walk is budgeted, but the budget is
+        // the caller's to raise, and a linear scan inside the edge loop makes
+        // this quadratic in the size of the brief.
+        let title_of: HashMap<&NodeId, &str> = reached
+            .iter()
+            .map(|r| (&r.node.id, r.node.title.as_str()))
+            .collect();
 
-        let included: std::collections::HashSet<NodeId> =
-            reached.iter().map(|r| r.node.id.clone()).collect();
+        // Anchors are deduplicated through a set while `anchors` keeps first-
+        // seen order, so the most relevant citations stay at the top when the
+        // list is truncated.
+        let mut seen_anchors: HashSet<String> = HashSet::new();
 
         for item in &reached {
             let node = &item.node;
@@ -105,11 +118,15 @@ impl KnowledgeBrief {
             // edges are emitted, so each stored edge appears once, in the
             // direction it was asserted.
             for neighbor in store.neighbors(&node.id, &options.edges)? {
-                if neighbor.outbound && included.contains(&neighbor.node) {
+                // Only relationships between two nodes already on the page:
+                // a neighbour outside the brief has no title to render and
+                // nothing for the reader to connect it to.
+                if let (true, Some(to)) = (neighbor.outbound, title_of.get(&neighbor.node).copied())
+                {
                     relationships.push(BriefRelation {
                         from: node.title.clone(),
                         edge_type: neighbor.edge_type,
-                        to: title_of(&neighbor.node),
+                        to: to.to_string(),
                     });
                 }
             }
@@ -132,7 +149,7 @@ impl KnowledgeBrief {
 
             for evidence in store.evidence_for(&node.id)? {
                 let citation = evidence.citation();
-                if !citation.is_empty() && !anchors.contains(&citation) {
+                if !citation.is_empty() && seen_anchors.insert(citation.clone()) {
                     anchors.push(citation);
                 }
             }
@@ -266,6 +283,45 @@ mod tests {
         };
         assert!(brief.is_empty());
         assert!(brief.to_markdown().contains("Nothing relevant is known"));
+    }
+
+    #[test]
+    fn a_brief_is_not_marked_truncated_when_it_holds_the_whole_graph() {
+        // "More related knowledge exists" when there is none sends a reader
+        // looking for something that is not there.
+        use crate::model::{KnowledgeEdge, KnowledgeNode, NodeType};
+        use crate::store::KnowledgeStore;
+
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let a = store
+            .create_node(KnowledgeNode::new(NodeType::Concept, "OAuth").with_summary("s"))
+            .unwrap();
+        let b = store
+            .create_node(KnowledgeNode::new(NodeType::Gotcha, "CSRF").with_summary("s"))
+            .unwrap();
+        store
+            .connect(KnowledgeEdge::deterministic(
+                a.id.clone(),
+                EdgeType::HasGotcha,
+                b.id.clone(),
+                "test",
+            ))
+            .unwrap();
+
+        let seeds = std::slice::from_ref(&a.id);
+
+        let exactly_full = NavigationOptions::default().max_nodes(2);
+        let brief = KnowledgeBrief::assemble(&mut store, "oauth", seeds, &exactly_full).unwrap();
+        assert_eq!(brief.nodes.len(), 2);
+        assert!(
+            !brief.truncated,
+            "reported truncation with nothing left out"
+        );
+
+        let too_small = NavigationOptions::default().max_nodes(1);
+        let brief = KnowledgeBrief::assemble(&mut store, "oauth", seeds, &too_small).unwrap();
+        assert_eq!(brief.nodes.len(), 1);
+        assert!(brief.truncated, "budget cut the walk but said otherwise");
     }
 
     #[test]

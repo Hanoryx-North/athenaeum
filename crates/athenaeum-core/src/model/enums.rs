@@ -86,7 +86,7 @@ str_enum! {
     /// These are semantic objects, never text chunks: a node is "AuthService",
     /// not "bytes 4000-4500 of AuthService.ts" (§9).
     pub enum NodeType {
-                Project => "project",
+        Project => "project",
         Repository => "repository",
         Module => "module",
         File => "file",
@@ -103,7 +103,7 @@ str_enum! {
         /// A known failure mode or trap.
         Gotcha => "gotcha",
         /// Discovered but not yet sufficiently established.
-                /// Default: anything a model merely asserted starts here (§13).
+        /// Default: anything a model merely asserted starts here (§13).
         #[default]
         Observation => "observation",
         Preference => "preference",
@@ -123,7 +123,7 @@ str_enum! {
         ImplementedBy => "implemented_by",
         Contains => "contains",
         PartOf => "part_of",
-                /// Default: the weakest useful claim, so the safest fallback.
+        /// Default: the weakest useful claim, so the safest fallback.
         #[default]
         RelatedTo => "related_to",
         Requires => "requires",
@@ -200,7 +200,7 @@ str_enum! {
         UserPreference => "user_preference",
         ImportedKnowledge => "imported_knowledge",
         ExternalKnowledge => "external_knowledge",
-                /// Default: generated text is never automatically authoritative (§13).
+        /// Default: generated text is never automatically authoritative (§13).
         #[default]
         UnverifiedObservation => "unverified_observation",
     }
@@ -237,7 +237,7 @@ str_enum! {
     pub enum NodeStatus {
         /// Proposed by a model, not yet accepted (§20).
         Proposed => "proposed",
-                /// Default: knowledge is usable until something says otherwise.
+        /// Default: knowledge is usable until something says otherwise.
         #[default]
         Valid => "valid",
         /// Its source moved or changed; the claim may still hold.
@@ -303,7 +303,7 @@ str_enum! {
         /// Extracted mechanically (imports, AST, git). No model involved.
         Deterministic => "deterministic",
         /// Proposed by a model.
-                /// Default: assume a model said it unless told otherwise.
+        /// Default: assume a model said it unless told otherwise.
         #[default]
         Model => "model",
         /// Arrived in a knowledge pack.
@@ -325,7 +325,7 @@ impl ProvenanceSource {
 str_enum! {
     /// Kinds of evidence a claim can rest on (buildplan §15).
     pub enum EvidenceKind {
-                /// Default: the commonest kind of justification.
+        /// Default: the commonest kind of justification.
         #[default]
         SourceFile => "source_file",
         Symbol => "symbol",

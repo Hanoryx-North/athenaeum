@@ -17,8 +17,37 @@ pub enum Error {
     #[error("no evidence with id {0}")]
     EvidenceNotFound(EvidenceId),
 
-    #[error("a node titled {title:?} already exists ({existing})")]
+    /// Raised when creating a node whose id is already taken. Distinct from
+    /// a title clash: ids are the primary key, and a caller supplying its own
+    /// readable id (`Decision_042`) needs to be told which id collided, not
+    /// which title.
+    #[error("a node with id {0} already exists")]
+    DuplicateId(NodeId),
+
+    /// Exact-title entity resolution at the Wiki boundary. The store permits
+    /// duplicate titles because humans can legitimately name two concepts the
+    /// same way; model curation must make that ambiguity explicit instead of
+    /// quietly bloating the graph.
+    #[error("a node titled {title:?} already exists as {existing}; update it or choose a distinct title")]
     DuplicateTitle { title: String, existing: NodeId },
+
+    /// A high-precision identifier-style title match. This is separate from
+    /// an exact title clash so a curator can explain why it selected the
+    /// existing entity and attach new evidence to it.
+    #[error(
+        "the title {title:?} is a near-duplicate of existing node(s) [{candidates}]; attach evidence to an existing node or choose a clearly distinct title",
+        candidates = format_node_ids(.existing)
+    )]
+    NearDuplicateTitle {
+        title: String,
+        existing: Vec<NodeId>,
+    },
+
+    /// No `.athenaeum/` directory was found. Reported in its own terms
+    /// because this is the first error most users ever see, and "blob store:
+    /// not found" tells them nothing about what to do next.
+    #[error("no knowledge base found from {path}; run `athenaeum init` first")]
+    NoWorkspace { path: String },
 
     /// Raised when an edge would point at a node that is not in the graph.
     /// Enforced by a foreign key, but reported in these terms because
@@ -45,17 +74,38 @@ pub enum Error {
     #[error("database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
-    #[error("blob store: {0}")]
-    Blob(#[from] std::io::Error),
+    /// Any filesystem failure: creating the workspace, reading or writing a
+    /// blob. Not named for the blob store, because it is not only the blob
+    /// store that reaches the disk.
+    #[error("filesystem: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("serialization: {0}")]
     Serde(#[from] serde_json::Error),
+
+    #[error("repository parser initialization failed for {language}: {message}")]
+    RepositoryParser {
+        language: &'static str,
+        message: String,
+    },
+
+    #[error(
+        "repository scan was incomplete; cannot {operation} safely without raising its scan limits"
+    )]
+    IncompleteRepositoryScan { operation: &'static str },
 
     /// The database on disk was written by a newer build than this one.
     /// Refusing is the correct move: a downgrade that silently drops columns
     /// destroys the user's knowledge (§61).
     #[error("knowledge base is at schema v{found}, but this build supports up to v{supported}; upgrade Athenaeum to open it")]
     SchemaTooNew { found: u32, supported: u32 },
+}
+
+fn format_node_ids(ids: &[NodeId]) -> String {
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl Error {

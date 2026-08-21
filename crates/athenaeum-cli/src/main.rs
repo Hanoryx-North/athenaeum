@@ -7,6 +7,13 @@
 //!
 //! It is also the acceptance harness for buildplan §73 — create, read,
 //! update, delete, version, validate.
+//!
+//! This file defines arguments and dispatches. Rendering lives in
+//! [`render`]; knowledge-base validation lives in [`check`].
+
+mod bridge;
+mod check;
+mod render;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -14,6 +21,8 @@ use std::process::ExitCode;
 use athenaeum_core::graph;
 use athenaeum_core::prelude::*;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+
+use render::emit;
 
 #[derive(Parser)]
 #[command(
@@ -27,7 +36,7 @@ struct Cli {
     #[arg(long, short = 'C', global = true)]
     project: Option<PathBuf>,
 
-    /// Emit JSON instead of text, for scripting.
+    /// Emit JSON instead of text, for scripting. Honoured by every command.
     #[arg(long, global = true)]
     json: bool,
 
@@ -74,6 +83,14 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: u32,
     },
+    /// Handle one versioned Wiki integration request from standard input.
+    ///
+    /// This command always writes one JSON response, independent of --json.
+    Bridge,
+    /// Deterministically index files, symbols, imports and local Git history.
+    Index(IndexArgs),
+    /// Search for moved source anchors and update knowledge staleness.
+    Relocate(RelocateArgs),
     /// Check the knowledge base for structural problems.
     Check,
 }
@@ -181,6 +198,35 @@ struct BriefArgs {
     prompt: bool,
 }
 
+#[derive(Args)]
+struct IndexArgs {
+    /// Maximum number of recent commits to connect to indexed files.
+    #[arg(long, default_value_t = 500)]
+    max_commits: usize,
+    /// Maximum number of repository files to scan.
+    #[arg(long, default_value_t = 20_000)]
+    max_files: usize,
+    /// Maximum UTF-8 bytes read from one file.
+    #[arg(long, default_value_t = 1_000_000)]
+    max_file_bytes: u64,
+    /// Maximum UTF-8 bytes read across the repository.
+    #[arg(long, default_value_t = 67_108_864)]
+    max_total_bytes: u64,
+}
+
+#[derive(Args)]
+struct RelocateArgs {
+    /// Maximum number of source files to inspect while relocating anchors.
+    #[arg(long, default_value_t = 20_000)]
+    max_files: usize,
+    /// Maximum UTF-8 bytes read from one file.
+    #[arg(long, default_value_t = 1_000_000)]
+    max_file_bytes: u64,
+    /// Maximum UTF-8 bytes read across the repository.
+    #[arg(long, default_value_t = 67_108_864)]
+    max_total_bytes: u64,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum StatusArg {
     Valid,
@@ -207,7 +253,7 @@ impl From<StatusArg> for NodeStatus {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(outcome) => outcome.into(),
         Err(err) => {
             eprintln!("athenaeum: {err}");
             ExitCode::FAILURE
@@ -215,11 +261,39 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: &Cli) -> Result<()> {
-    let cwd = cli
-        .project
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+/// What a command concluded, separately from whether it failed.
+///
+/// `check` finding problems is not an error — it is a successful inspection
+/// with a non-zero verdict, and inventing an error to carry that would put a
+/// misleading `athenaeum: invalid …` line under output that is already clear.
+enum Outcome {
+    Ok,
+    ProblemsFound,
+    BridgeError,
+}
+
+impl From<Outcome> for ExitCode {
+    fn from(outcome: Outcome) -> Self {
+        match outcome {
+            Outcome::Ok => ExitCode::SUCCESS,
+            Outcome::ProblemsFound | Outcome::BridgeError => ExitCode::FAILURE,
+        }
+    }
+}
+
+/// Parse one of the library's vocabularies, naming the field that was wrong.
+fn parse_value<T: std::str::FromStr>(raw: &str, field: &'static str) -> Result<T> {
+    raw.parse::<T>().map_err(|_| Error::InvalidValue {
+        field,
+        value: raw.to_string(),
+    })
+}
+
+fn run(cli: &Cli) -> Result<Outcome> {
+    let cwd = match &cli.project {
+        Some(project) => project.clone(),
+        None => std::env::current_dir()?,
+    };
 
     if let Command::Init = cli.command {
         let workspace = Workspace::init(&cwd)?;
@@ -228,58 +302,44 @@ fn run(cli: &Cli) -> Result<()> {
             "Initialized knowledge base at {}",
             workspace.root().display()
         );
-        return Ok(());
+        return Ok(Outcome::Ok);
     }
 
-    let workspace =
-        Workspace::discover(&cwd).unwrap_or_else(|| Workspace::at(cwd.join(".athenaeum")));
-    if !workspace.root().exists() {
-        return Err(Error::Blob(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "no knowledge base found from {}; run `athenaeum init` first",
-                cwd.display()
-            ),
-        )));
+    // The bridge owns its error envelope, including workspace discovery and
+    // schema compatibility failures. Handling it before the ordinary CLI
+    // open path guarantees an external runtime always receives JSON.
+    if let Command::Bridge = cli.command {
+        let workspace = Workspace::discover(&cwd);
+        return Ok(if bridge::run(workspace.as_ref(), &cwd)? {
+            Outcome::Ok
+        } else {
+            Outcome::BridgeError
+        });
     }
+
+    let workspace = Workspace::discover(&cwd).ok_or_else(|| Error::NoWorkspace {
+        path: cwd.display().to_string(),
+    })?;
     let mut store = workspace.open()?;
 
     match &cli.command {
-        Command::Init => unreachable!("handled above"),
+        Command::Init => unreachable!("handled before the workspace is opened"),
 
         Command::Stats => {
             let stats = store.stats()?;
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&stats)?);
-            } else {
-                println!("nodes      {} ({} live)", stats.nodes, stats.live_nodes);
-                println!("edges      {}", stats.edges);
-                println!("evidence   {}", stats.evidence);
-                println!("events     {}", stats.events);
-                println!("schema     v{}", stats.schema_version);
-                println!("location   {}", workspace.root().display());
-            }
+            emit(cli.json, &stats, || {
+                render::stats(&stats, workspace.root());
+                Ok(())
+            })?;
         }
 
         Command::Add(args) => {
-            let node_type: NodeType = args.node_type.parse().map_err(|_| Error::InvalidValue {
-                field: "node type",
-                value: args.node_type.clone(),
-            })?;
-            let authority: Authority = args.authority.parse().map_err(|_| Error::InvalidValue {
-                field: "authority",
-                value: args.authority.clone(),
-            })?;
-            let scope: Scope = args.scope.parse().map_err(|_| Error::InvalidValue {
-                field: "scope",
-                value: args.scope.clone(),
-            })?;
-
-            let mut node = KnowledgeNode::new(node_type, &args.title)
-                .with_summary(&args.summary)
-                .with_content(&args.content)
-                .with_authority(authority)
-                .with_scope(scope);
+            let mut node =
+                KnowledgeNode::new(parse_value(&args.node_type, "node type")?, &args.title)
+                    .with_summary(&args.summary)
+                    .with_content(&args.content)
+                    .with_authority(parse_value(&args.authority, "authority")?)
+                    .with_scope(parse_value(&args.scope, "scope")?);
             if let Some(id) = &args.id {
                 node = node.with_id(id.as_str());
             }
@@ -288,20 +348,15 @@ fn run(cli: &Cli) -> Result<()> {
             }
 
             let created = store.create_node(node)?;
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&created)?);
-            } else {
+            emit(cli.json, &created, || {
                 println!("{}  {}", created.id, created.title);
-            }
+                Ok(())
+            })?;
         }
 
         Command::Show { id } => {
             let node = resolve(&store, id)?;
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&node)?);
-            } else {
-                print_node(&store, &node)?;
-            }
+            emit(cli.json, &node, || render::node_detail(&store, &node))?;
         }
 
         Command::List(args) => {
@@ -311,27 +366,13 @@ fn run(cli: &Cli) -> Result<()> {
                 NodeFilter::live()
             };
             if let Some(raw) = &args.node_type {
-                filter = filter.of_type(raw.parse().map_err(|_| Error::InvalidValue {
-                    field: "node type",
-                    value: raw.clone(),
-                })?);
+                filter = filter.of_type(parse_value(raw, "node type")?);
             }
             let nodes = store.list_nodes(&filter.limit(args.limit))?;
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&nodes)?);
-            } else if nodes.is_empty() {
-                println!("(nothing yet)");
-            } else {
-                for node in nodes {
-                    println!(
-                        "{:<10} {:<40} {:<12} {}",
-                        node.node_type,
-                        truncate(&node.title, 40),
-                        node.status,
-                        node.id
-                    );
-                }
-            }
+            emit(cli.json, &nodes, || {
+                render::node_list(&nodes);
+                Ok(())
+            })?;
         }
 
         Command::Edit(args) => {
@@ -346,28 +387,34 @@ fn run(cli: &Cli) -> Result<()> {
                 node.content = content.clone();
             }
             let updated = store.update_node(node, args.reason.clone())?;
-            println!("{} is now at version {}", updated.id, updated.version);
+            emit(cli.json, &updated, || {
+                println!("{} is now at version {}", updated.id, updated.version);
+                Ok(())
+            })?;
         }
 
         Command::Status { id, status } => {
             let node = resolve(&store, id)?;
             let updated = store.set_node_status(&node.id, (*status).into())?;
-            println!("{} → {}", updated.id, updated.status);
+            emit(cli.json, &updated, || {
+                println!("{} → {}", updated.id, updated.status);
+                Ok(())
+            })?;
         }
 
         Command::Remove { id } => {
             let node = resolve(&store, id)?;
             store.delete_node(&node.id)?;
-            println!("removed {} ({})", node.id, node.title);
+            emit(cli.json, &node, || {
+                println!("removed {} ({})", node.id, node.title);
+                Ok(())
+            })?;
         }
 
         Command::Link(args) => {
             let from = resolve(&store, &args.from)?;
             let to = resolve(&store, &args.to)?;
-            let edge_type: EdgeType = args.edge_type.parse().map_err(|_| Error::InvalidValue {
-                field: "edge type",
-                value: args.edge_type.clone(),
-            })?;
+            let edge_type: EdgeType = parse_value(&args.edge_type, "edge type")?;
 
             let mut edge = match &args.derived {
                 Some(detail) => {
@@ -380,18 +427,17 @@ fn run(cli: &Cli) -> Result<()> {
             }
 
             let created = store.connect(edge)?;
-            println!(
-                "{} → {} → {}  [{}]",
-                from.title, created.edge_type, to.title, created.status
-            );
+            emit(cli.json, &created, || {
+                println!(
+                    "{} → {} → {}  [{}]",
+                    from.title, created.edge_type, to.title, created.status
+                );
+                Ok(())
+            })?;
         }
 
         Command::Evidence(args) => {
             let node = resolve(&store, &args.node)?;
-            let kind: EvidenceKind = args.kind.parse().map_err(|_| Error::InvalidValue {
-                field: "evidence kind",
-                value: args.kind.clone(),
-            })?;
 
             let mut anchor = SourceAnchor::file(&args.file);
             if let Some(symbol) = &args.symbol {
@@ -401,32 +447,31 @@ fn run(cli: &Cli) -> Result<()> {
                 anchor = anchor.with_commit(commit);
             }
 
-            let mut evidence = Evidence::new(node.id.clone(), kind).with_anchor(anchor);
+            let mut evidence =
+                Evidence::new(node.id.clone(), parse_value(&args.kind, "evidence kind")?)
+                    .with_anchor(anchor);
             if let Some(excerpt) = &args.excerpt {
                 evidence = evidence.with_excerpt(excerpt);
             }
 
             let attached = store.attach_evidence(evidence)?;
-            println!("attached {} to {}", attached.citation(), node.title);
+            emit(cli.json, &attached, || {
+                println!("attached {} to {}", attached.citation(), node.title);
+                Ok(())
+            })?;
         }
 
         Command::Search { query, limit } => {
             let query = query.join(" ");
             let hits = store.search(&query, *limit)?;
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&hits)?);
-            } else if hits.is_empty() {
-                println!("nothing found for {query:?}");
-            } else {
-                for hit in hits {
-                    println!(
-                        "{:>6.2}  {:<40} {}",
-                        hit.score,
-                        truncate(&hit.node.title, 40),
-                        hit.node.id
-                    );
+            emit(cli.json, &hits, || {
+                if hits.is_empty() {
+                    println!("nothing found for {query:?}");
+                } else {
+                    render::search_hits(&hits);
                 }
-            }
+                Ok(())
+            })?;
         }
 
         Command::Navigate(args) => {
@@ -438,26 +483,10 @@ fn run(cli: &Cli) -> Result<()> {
                     .depth(args.depth)
                     .max_nodes(args.max_nodes),
             )?;
-            // Printed breadth-first, so a node's predecessor is named
-            // explicitly rather than implied by indentation — at depth 2 the
-            // node directly above is usually a sibling, not the parent.
-            for item in reached {
-                match &item.via {
-                    None => println!("{} [{}]  (seed)", item.node.title, item.node.node_type),
-                    Some(step) => {
-                        let from = store.get_node(&step.from)?;
-                        println!(
-                            "{:indent$}{} --{}--> {} [{}]",
-                            "",
-                            from.title,
-                            step.edge_type,
-                            item.node.title,
-                            item.node.node_type,
-                            indent = (item.depth as usize) * 2
-                        );
-                    }
-                }
-            }
+            emit(cli.json, &reached, || {
+                render::navigation(&reached);
+                Ok(())
+            })?;
         }
 
         Command::Brief(args) => {
@@ -482,60 +511,117 @@ fn run(cli: &Cli) -> Result<()> {
                 &NavigationOptions::default().depth(args.depth),
             )?;
 
-            if cli.json {
-                println!("{}", serde_json::to_string_pretty(&brief)?);
-            } else if args.prompt {
-                println!("{}", brief.to_prompt());
-            } else {
-                println!("{}", brief.to_markdown());
-            }
+            emit(cli.json, &brief, || {
+                if args.prompt {
+                    println!("{}", brief.to_prompt());
+                } else {
+                    println!("{}", brief.to_markdown());
+                }
+                Ok(())
+            })?;
         }
 
         Command::History { id } => {
             let node = resolve(&store, id)?;
-            let history = store.history(&node.id)?;
-            println!("{} (currently v{})", node.title, node.version);
-            if history.is_empty() {
-                println!("  no earlier revisions");
-            }
-            for version in history {
-                println!(
-                    "  v{} {}  {}",
-                    version.version,
-                    version.recorded_at.format("%Y-%m-%d %H:%M"),
-                    version.reason.as_deref().unwrap_or("(no reason recorded)")
-                );
-            }
+            let versions = store.history(&node.id)?;
+            emit(cli.json, &versions, || {
+                render::history(&node, &versions);
+                Ok(())
+            })?;
         }
 
         Command::Journal { limit } => {
-            for event in store.events(&EventFilter::default().limit(*limit))? {
+            let events = store.events(&EventFilter::default().limit(*limit))?;
+            emit(cli.json, &events, || {
+                render::journal(&events);
+                Ok(())
+            })?;
+        }
+
+        Command::Bridge => unreachable!("handled before the workspace is opened"),
+
+        Command::Index(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = RepositoryIndexer::scan_and_index(
+                &mut store,
+                project_root,
+                RepositoryScanOptions {
+                    max_commits: args.max_commits,
+                    max_files: args.max_files,
+                    max_file_bytes: args.max_file_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                },
+            )?;
+            emit(cli.json, &report, || {
                 println!(
-                    "{}  {:<22} {}",
-                    event.at.format("%Y-%m-%d %H:%M:%S"),
-                    event.kind,
-                    event.subject.unwrap_or_default()
+                    "indexed {} files, {} symbols, {} imports and {} commits",
+                    report.files, report.symbols, report.resolved_imports, report.commits
                 );
-            }
+                println!(
+                    "{} nodes created, {} updated, {} stale; {} edges created, {} removed",
+                    report.nodes_created,
+                    report.nodes_updated,
+                    report.nodes_marked_stale,
+                    report.edges_created,
+                    report.edges_removed
+                );
+                for warning in &report.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                Ok(())
+            })?;
+        }
+
+        Command::Relocate(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = AnchorRelocator::scan(
+                project_root,
+                RepositoryScanOptions {
+                    max_files: args.max_files,
+                    max_file_bytes: args.max_file_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                    max_commits: 0,
+                },
+            )?
+            .relocate_store(&mut store)?;
+            emit(cli.json, &report, || {
+                println!(
+                    "{} exact, {} by symbol, {} by fingerprint, {} stale",
+                    report.exact,
+                    report.relocated_by_symbol,
+                    report.relocated_by_fingerprint,
+                    report.stale
+                );
+                for warning in &report.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                Ok(())
+            })?;
         }
 
         Command::Check => {
-            let problems = check(&store)?;
-            if problems.is_empty() {
-                println!("no problems found");
-            } else {
-                for problem in &problems {
-                    println!("{problem}");
-                }
-                return Err(Error::InvalidValue {
-                    field: "knowledge base",
-                    value: format!("{} problem(s)", problems.len()),
-                });
+            let problems = check::run(&store)?;
+            emit(cli.json, &problems, || {
+                render::problems(&problems);
+                Ok(())
+            })?;
+            if !problems.is_empty() {
+                return Ok(Outcome::ProblemsFound);
             }
         }
     }
 
-    Ok(())
+    Ok(Outcome::Ok)
 }
 
 /// Accept either a node id or a title, because typing `Decision_042` is
@@ -548,96 +634,4 @@ fn resolve(store: &KnowledgeStore, reference: &str) -> Result<KnowledgeNode> {
     store
         .find_node_by_title(reference)?
         .ok_or(Error::NodeNotFound(id))
-}
-
-/// Structural problems worth reporting: knowledge that has drifted into a
-/// state a user would want to know about (§79).
-fn check(store: &KnowledgeStore) -> Result<Vec<String>> {
-    let mut problems = Vec::new();
-
-    for node in store.list_nodes(&NodeFilter::all())? {
-        if node.title.trim().is_empty() {
-            problems.push(format!("{}: has no title", node.id));
-        }
-        if node.summary.trim().is_empty() && node.content.trim().is_empty() {
-            problems.push(format!(
-                "{} ({}): has no content at all",
-                node.id, node.title
-            ));
-        }
-        if node.needs_review() {
-            problems.push(format!("{}: {} needs review", node.id, node.title));
-        }
-        // A rule or decision nobody can justify is the kind of knowledge that
-        // quietly becomes wrong (§15).
-        if matches!(node.node_type, NodeType::Rule | NodeType::Decision)
-            && store.evidence_for(&node.id)?.is_empty()
-        {
-            problems.push(format!(
-                "{} ({}): a {} with no evidence",
-                node.id, node.title, node.node_type
-            ));
-        }
-    }
-
-    Ok(problems)
-}
-
-fn print_node(store: &KnowledgeStore, node: &KnowledgeNode) -> Result<()> {
-    println!("{}", node.title);
-    println!("{}", "-".repeat(node.title.len().max(3)));
-    println!("id         {}", node.id);
-    println!("type       {}", node.node_type);
-    println!("status     {}", node.status);
-    println!("authority  {}", node.authority);
-    println!("scope      {}", node.scope);
-    println!("version    {}", node.version);
-    println!("source     {}", node.provenance.source);
-
-    if !node.summary.is_empty() {
-        println!("\n{}", node.summary);
-    }
-    if !node.content.is_empty() {
-        println!("\n{}", node.content);
-    }
-
-    let neighbors = store.neighbors(&node.id, &EdgeFilter::all())?;
-    if !neighbors.is_empty() {
-        println!("\nrelationships");
-        for neighbor in neighbors {
-            let other = store.get_node(&neighbor.node)?;
-            let marker = if neighbor.edge.is_traversable() {
-                " "
-            } else {
-                "?"
-            };
-            println!("  {marker} {} → {}", neighbor.edge_type, other.title);
-        }
-    }
-
-    let evidence = store.evidence_for(&node.id)?;
-    if !evidence.is_empty() {
-        println!("\nevidence");
-        for item in evidence {
-            println!("  {} ({})", item.citation(), item.kind);
-        }
-    }
-
-    let utility = store.utility(&node.id)?;
-    if utility.retrievals > 0 {
-        println!(
-            "\nretrieved {} time(s), used {} time(s)",
-            utility.retrievals, utility.uses
-        );
-    }
-
-    Ok(())
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let kept: String = text.chars().take(max.saturating_sub(1)).collect();
-    format!("{kept}…")
 }

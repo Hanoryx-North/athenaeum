@@ -27,14 +27,41 @@ pub enum EventKind {
     NodeVerified,
     NodeRejected,
     EdgeCreated,
+    /// A proposed edge was accepted and became traversable.
+    EdgePromoted,
     EdgeRemoved,
     EvidenceAttached,
+    /// A source anchor was moved to a newly identified location.
+    EvidenceRelocated,
     KnowledgeSuperseded,
     KnowledgeContradicted,
     KnowledgeStale,
 }
 
 impl EventKind {
+    /// Every kind, in declaration order. Also what [`EventKind::from_str`]
+    /// searches, so each on-disk spelling exists in exactly one place — the
+    /// same guarantee `str_enum!` gives the model vocabularies. A rename that
+    /// reached only one of two tables would make written events unreadable.
+    pub const ALL: &'static [EventKind] = &[
+        EventKind::NodeCreated,
+        EventKind::NodeUpdated,
+        EventKind::NodeDeleted,
+        EventKind::NodeRetrieved,
+        EventKind::NodeUsed,
+        EventKind::NodeCited,
+        EventKind::NodeVerified,
+        EventKind::NodeRejected,
+        EventKind::EdgeCreated,
+        EventKind::EdgePromoted,
+        EventKind::EdgeRemoved,
+        EventKind::EvidenceAttached,
+        EventKind::EvidenceRelocated,
+        EventKind::KnowledgeSuperseded,
+        EventKind::KnowledgeContradicted,
+        EventKind::KnowledgeStale,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         use EventKind::*;
         match self {
@@ -47,33 +74,14 @@ impl EventKind {
             NodeVerified => "node_verified",
             NodeRejected => "node_rejected",
             EdgeCreated => "edge_created",
+            EdgePromoted => "edge_promoted",
             EdgeRemoved => "edge_removed",
             EvidenceAttached => "evidence_attached",
+            EvidenceRelocated => "evidence_relocated",
             KnowledgeSuperseded => "knowledge_superseded",
             KnowledgeContradicted => "knowledge_contradicted",
             KnowledgeStale => "knowledge_stale",
         }
-    }
-
-    fn parse(s: &str) -> Option<EventKind> {
-        use EventKind::*;
-        Some(match s {
-            "node_created" => NodeCreated,
-            "node_updated" => NodeUpdated,
-            "node_deleted" => NodeDeleted,
-            "node_retrieved" => NodeRetrieved,
-            "node_used" => NodeUsed,
-            "node_cited" => NodeCited,
-            "node_verified" => NodeVerified,
-            "node_rejected" => NodeRejected,
-            "edge_created" => EdgeCreated,
-            "edge_removed" => EdgeRemoved,
-            "evidence_attached" => EvidenceAttached,
-            "knowledge_superseded" => KnowledgeSuperseded,
-            "knowledge_contradicted" => KnowledgeContradicted,
-            "knowledge_stale" => KnowledgeStale,
-            _ => return None,
-        })
     }
 
     /// True for events that describe *use* rather than *change*.
@@ -92,10 +100,14 @@ impl std::str::FromStr for EventKind {
     type Err = crate::model::enums::UnknownValue;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        EventKind::parse(s).ok_or_else(|| crate::model::enums::UnknownValue {
-            vocabulary: "EventKind",
-            value: s.to_string(),
-        })
+        EventKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_str() == s)
+            .ok_or_else(|| crate::model::enums::UnknownValue {
+                vocabulary: "EventKind",
+                value: s.to_string(),
+            })
     }
 }
 
@@ -199,15 +211,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_kinds_round_trip() {
-        for kind in [
-            EventKind::NodeCreated,
-            EventKind::EdgeRemoved,
-            EventKind::KnowledgeContradicted,
-            EventKind::NodeCited,
-        ] {
-            assert_eq!(kind.as_str().parse::<EventKind>(), Ok(kind));
+    fn every_event_kind_round_trips() {
+        for kind in EventKind::ALL {
+            assert_eq!(kind.as_str().parse::<EventKind>(), Ok(*kind));
         }
+    }
+
+    #[test]
+    fn event_kind_spellings_are_unique() {
+        // Two variants sharing a spelling would make one of them unreadable
+        // after a write, because parsing returns the first match.
+        let mut spellings: Vec<&str> = EventKind::ALL.iter().map(|k| k.as_str()).collect();
+        let count = spellings.len();
+        spellings.sort_unstable();
+        spellings.dedup();
+        assert_eq!(spellings.len(), count, "two event kinds share a spelling");
+    }
+
+    #[test]
+    fn an_unknown_event_kind_names_the_vocabulary() {
+        let err = "invented_event".parse::<EventKind>().unwrap_err();
+        assert_eq!(err.vocabulary, "EventKind");
     }
 
     #[test]
