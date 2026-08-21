@@ -11,6 +11,7 @@
 //! This file defines arguments and dispatches. Rendering lives in
 //! [`render`]; knowledge-base validation lives in [`check`].
 
+mod bridge;
 mod check;
 mod render;
 
@@ -82,6 +83,10 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: u32,
     },
+    /// Handle one versioned Wiki integration request from standard input.
+    ///
+    /// This command always writes one JSON response, independent of --json.
+    Bridge,
     /// Check the knowledge base for structural problems.
     Check,
 }
@@ -231,13 +236,14 @@ fn main() -> ExitCode {
 enum Outcome {
     Ok,
     ProblemsFound,
+    BridgeError,
 }
 
 impl From<Outcome> for ExitCode {
     fn from(outcome: Outcome) -> Self {
         match outcome {
             Outcome::Ok => ExitCode::SUCCESS,
-            Outcome::ProblemsFound => ExitCode::FAILURE,
+            Outcome::ProblemsFound | Outcome::BridgeError => ExitCode::FAILURE,
         }
     }
 }
@@ -264,6 +270,18 @@ fn run(cli: &Cli) -> Result<Outcome> {
             workspace.root().display()
         );
         return Ok(Outcome::Ok);
+    }
+
+    // The bridge owns its error envelope, including workspace discovery and
+    // schema compatibility failures. Handling it before the ordinary CLI
+    // open path guarantees an external runtime always receives JSON.
+    if let Command::Bridge = cli.command {
+        let workspace = Workspace::discover(&cwd);
+        return Ok(if bridge::run(workspace.as_ref(), &cwd)? {
+            Outcome::Ok
+        } else {
+            Outcome::BridgeError
+        });
     }
 
     let workspace = Workspace::discover(&cwd).ok_or_else(|| Error::NoWorkspace {
@@ -486,6 +504,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 Ok(())
             })?;
         }
+
+        Command::Bridge => unreachable!("handled before the workspace is opened"),
 
         Command::Check => {
             let problems = check::run(&store)?;

@@ -73,10 +73,10 @@ The one decision everything follows from: **the knowledge library is a plain Rus
                                │
               ┌────────────────┼────────────────┐
               ▼                ▼                ▼
-      athenaeum-cli      src-tauri + src/   (next: agent loop)
+      athenaeum-cli      src-tauri + src/   Wiki protocol v1
                                                    │
                                                    ▼
-                                        athenaeum-providers
+                                      external agent repository
 ```
 
 Dependencies point **inward only**:
@@ -92,6 +92,10 @@ Dependencies point **inward only**:
 Rules:
 
 * **Nothing UI-, network-, or model-aware may enter `athenaeum-core`.** If a change wants a `reqwest`, `tauri` or provider import in that crate, the design is wrong, not the rule.
+* **The agent runtime is a separate repository.** Do not add an agent loop,
+  coding tools, shell execution, Git operations, streaming, runtime sessions
+  or runtime permissions here. This repository implements the Wiki side of
+  the contract documented in `docs/agent-integration.md`.
 * A behavior reachable from the desktop app must be reachable from the CLI. That is what keeps the library testable without a window and provable on all three platforms in CI.
 * Knowledge rules live in the library, never in a command handler or a React component. If a rule about what knowledge *means* appears outside `athenaeum-core`, move it in.
 
@@ -105,6 +109,7 @@ crates/athenaeum-core/src/
   store/schema.rs        table definitions and the append-only migration list
   graph.rs               traversal over the store
   brief.rs               assembling what an agent receives
+  wiki.rs                typed, storage-independent agent integration boundary
   authority.rs           conflict resolution between claims
   workspace.rs           locating and creating `.athenaeum/`
   blobs.rs               content-addressed evidence material
@@ -112,6 +117,7 @@ crates/athenaeum-core/src/
 
 crates/athenaeum-cli/src/
   main.rs                argument definitions and dispatch only
+  bridge.rs              versioned Wiki JSON transport
   render.rs              turning library values into text or JSON
   check.rs               knowledge-base validation
 

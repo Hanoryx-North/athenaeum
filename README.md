@@ -28,11 +28,14 @@ What works:
 - A CLI (`athenaeum`) covering every operation.
 - A desktop shell (Tauri 2 + React) for browsing and editing.
 - A provider-agnostic model client with per-role routing.
+- A versioned Wiki integration service and cross-language CLI bridge.
 
-What is **not** built yet: the agent loop itself. The provider client and the
-role definitions are in place, but nothing yet drives a model through the
-discover → curate → retrieve cycle. That is the next phase, and it is
-deliberately last — see [docs/architecture.md](docs/architecture.md).
+The coding-agent runtime is intentionally **not built in this repository**.
+It is a separate foundation repository that owns providers, streaming, tools,
+permissions and sessions. Athenaeum exposes a versioned, storage-independent
+Wiki contract for it: typed in-process Rust through `WikiService`, or JSON
+over the `athenaeum bridge` command. See
+[docs/agent-integration.md](docs/agent-integration.md).
 
 ---
 
@@ -115,6 +118,11 @@ and makes no network calls, which is what keeps the three platform builds
 identical and lets the whole knowledge model be tested without an API key.
 The CLI and the desktop app are both just consumers of it.
 
+The provider crate is bootstrap compatibility code from before the runtime was
+split into Repository 2. New agent/runtime work does not belong here. The
+future runtime connects through the Wiki contract and never through SQLite or
+store internals.
+
 Full reasoning: [docs/architecture.md](docs/architecture.md).
 Where copied code came from: [docs/provenance.md](docs/provenance.md).
 
@@ -156,7 +164,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```
 
 ```bash
-cargo test --workspace     # 148 tests, no network required
+cargo test --workspace     # 159 tests, no network required
 npm run build              # typecheck + bundle the frontend
 ```
 

@@ -231,6 +231,31 @@ impl KnowledgeStore {
         node: KnowledgeNode,
         reason: Option<String>,
     ) -> Result<KnowledgeNode> {
+        let actor = node.provenance.clone();
+        self.update_node_with_actor(node, reason, actor)
+    }
+
+    /// Replace a node while attributing the edit independently from the
+    /// claim's original provenance.
+    ///
+    /// A model editing a user-stated decision must not turn that decision
+    /// into a model-originated claim. The actor belongs in the journal; the
+    /// node keeps describing where the knowledge itself came from.
+    pub fn update_node_attributed(
+        &mut self,
+        node: KnowledgeNode,
+        reason: Option<String>,
+        actor: Provenance,
+    ) -> Result<KnowledgeNode> {
+        self.update_node_with_actor(node, reason, actor)
+    }
+
+    fn update_node_with_actor(
+        &mut self,
+        node: KnowledgeNode,
+        reason: Option<String>,
+        actor: Provenance,
+    ) -> Result<KnowledgeNode> {
         let previous = self.get_node(&node.id)?;
 
         let mut updated = node;
@@ -239,7 +264,7 @@ impl KnowledgeStore {
         updated.created_at = previous.created_at;
 
         let snapshot = NodeVersion::snapshot(&previous, reason);
-        let session = updated.provenance.session.clone();
+        let session = actor.session.clone();
 
         let tx = self.conn.transaction()?;
 
@@ -286,8 +311,12 @@ impl KnowledgeStore {
 
         super::search::reindex_node(&tx, &updated)?;
 
-        let mut event = NewEvent::about(EventKind::NodeUpdated, &updated.id)
-            .with_detail(serde_json::json!({ "version": updated.version }));
+        let mut event =
+            NewEvent::about(EventKind::NodeUpdated, &updated.id).with_detail(serde_json::json!({
+                "version": updated.version,
+                "actorSource": actor.source.as_str(),
+                "actorDetail": actor.detail,
+            }));
         if let Some(session) = session {
             event = event.with_session(session);
         }

@@ -6,7 +6,7 @@ use super::{parse_enum, parse_time, to_sql_time, KnowledgeStore};
 use crate::error::{Error, Result};
 use crate::id::{EvidenceId, NodeId};
 use crate::journal::{EventKind, NewEvent};
-use crate::model::{Evidence, SourceAnchor};
+use crate::model::{Evidence, Provenance, SourceAnchor};
 
 const EVIDENCE_COLUMNS: &str = "id, node, kind, anchor_json, blob_hash, excerpt, note, created_at";
 
@@ -16,7 +16,25 @@ impl KnowledgeStore {
     /// Excerpts past [`crate::model::INLINE_EXCERPT_LIMIT`] are moved into the
     /// content-addressed blob store and referenced by hash, so a hundred
     /// nodes citing the same long file cost one copy of it (§59).
-    pub fn attach_evidence(&mut self, mut evidence: Evidence) -> Result<Evidence> {
+    pub fn attach_evidence(&mut self, evidence: Evidence) -> Result<Evidence> {
+        self.attach_evidence_with_actor(evidence, None)
+    }
+
+    /// Attach evidence and attribute the action in the journal without
+    /// confusing the actor with the evidence's source anchor.
+    pub fn attach_evidence_attributed(
+        &mut self,
+        evidence: Evidence,
+        actor: Provenance,
+    ) -> Result<Evidence> {
+        self.attach_evidence_with_actor(evidence, Some(actor))
+    }
+
+    fn attach_evidence_with_actor(
+        &mut self,
+        mut evidence: Evidence,
+        actor: Option<Provenance>,
+    ) -> Result<Evidence> {
         if self.find_node(&evidence.node)?.is_none() {
             return Err(Error::NodeNotFound(evidence.node.clone()));
         }
@@ -52,15 +70,18 @@ impl KnowledgeStore {
                 to_sql_time(&evidence.created_at),
             ],
         )?;
-        super::events::record_in(
-            &tx,
-            &NewEvent::about(EventKind::EvidenceAttached, &evidence.id).with_detail(
-                serde_json::json!({
-                    "node": evidence.node.as_str(),
-                    "kind": evidence.kind.as_str(),
-                }),
-            ),
-        )?;
+        let mut event = NewEvent::about(EventKind::EvidenceAttached, &evidence.id).with_detail(
+            serde_json::json!({
+                "node": evidence.node.as_str(),
+                "kind": evidence.kind.as_str(),
+                "actorSource": actor.as_ref().map(|value| value.source.as_str()),
+                "actorDetail": actor.as_ref().and_then(|value| value.detail.as_deref()),
+            }),
+        );
+        if let Some(session) = actor.and_then(|value| value.session) {
+            event = event.with_session(session);
+        }
+        super::events::record_in(&tx, &event)?;
         tx.commit()?;
 
         Ok(evidence)

@@ -7,10 +7,9 @@
 
 use std::sync::Mutex;
 
-use athenaeum_core::graph;
 use athenaeum_core::journal::Event;
-use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
+use athenaeum_core::wiki::{WikiNodeDetail, WikiService};
 use serde::{Deserialize, Serialize};
 
 use crate::panic_guard::run_guarded;
@@ -40,34 +39,6 @@ impl AppState {
         let store = guard.as_mut().ok_or("no project is open")?;
         f(store).map_err(|e| e.to_string())
     }
-}
-
-/// A node together with everything the detail pane shows about it.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeDetail {
-    pub node: KnowledgeNode,
-    pub relationships: Vec<RelatedNode>,
-    pub evidence: Vec<Evidence>,
-    pub history: Vec<NodeVersion>,
-    pub utility: NodeUtility,
-}
-
-/// A neighbour with its title resolved, so the UI does not have to make one
-/// request per edge to render a list of links.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RelatedNode {
-    pub id: NodeId,
-    pub title: String,
-    #[serde(rename = "type")]
-    pub node_type: NodeType,
-    pub edge_type: EdgeType,
-    pub edge_id: EdgeId,
-    pub outbound: bool,
-    /// False for edges that are still only proposed, so the UI can show them
-    /// differently rather than implying they are established (§20).
-    pub established: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,35 +133,9 @@ pub fn list_nodes(
 pub fn node_detail(
     state: tauri::State<'_, AppState>,
     id: NodeId,
-) -> std::result::Result<NodeDetail, String> {
+) -> std::result::Result<WikiNodeDetail, String> {
     run_guarded("node_detail", || {
-        state.with(|store| {
-            let node = store.get_node(&id)?;
-
-            // Proposed edges are included so the user can review and accept
-            // them; the `established` flag tells the UI to mark them.
-            let mut relationships = Vec::new();
-            for neighbor in store.neighbors(&id, &EdgeFilter::all())? {
-                let other = store.get_node(&neighbor.node)?;
-                relationships.push(RelatedNode {
-                    id: other.id,
-                    title: other.title,
-                    node_type: other.node_type,
-                    edge_type: neighbor.edge_type,
-                    edge_id: neighbor.edge.id.clone(),
-                    outbound: neighbor.outbound,
-                    established: neighbor.edge.is_traversable(),
-                });
-            }
-
-            Ok(NodeDetail {
-                relationships,
-                evidence: store.evidence_for(&id)?,
-                history: store.history(&id)?,
-                utility: store.utility(&id)?,
-                node,
-            })
-        })
+        state.with(|store| WikiService::new(store).open(id.as_str()))
     })
 }
 
@@ -335,7 +280,7 @@ pub fn search(
     limit: Option<u32>,
 ) -> std::result::Result<Vec<SearchHit>, String> {
     run_guarded("search", || {
-        state.with(|store| store.search(&query, limit.unwrap_or(20)))
+        state.with(|store| WikiService::new(store).search(&query, limit))
     })
 }
 
@@ -347,10 +292,7 @@ pub fn navigate_from(
     max_nodes: Option<usize>,
 ) -> std::result::Result<Vec<Reached>, String> {
     run_guarded("navigate_from", || {
-        let options = NavigationOptions::default()
-            .depth(depth.unwrap_or(2))
-            .max_nodes(max_nodes.unwrap_or(25));
-        state.with(|store| graph::navigate(store, std::slice::from_ref(&id), &options))
+        state.with(|store| WikiService::new(store).navigate(id.as_str(), depth, max_nodes))
     })
 }
 
@@ -362,19 +304,15 @@ pub fn assemble_brief(
     depth: Option<u8>,
 ) -> std::result::Result<KnowledgeBrief, String> {
     run_guarded("assemble_brief", || {
-        let options = NavigationOptions::default().depth(depth.unwrap_or(2));
         state.with(|store| {
-            // With no seeds supplied, find them the way the wiki agent would:
-            // search the knowledge base for the task text.
-            let seeds = match &seeds {
-                Some(seeds) if !seeds.is_empty() => seeds.clone(),
-                _ => store
-                    .search(&task, 5)?
-                    .into_iter()
-                    .map(|hit| hit.node.id)
-                    .collect(),
-            };
-            KnowledgeBrief::assemble(store, &task, &seeds, &options)
+            let seeds = seeds
+                .unwrap_or_default()
+                .into_iter()
+                .map(NodeId::into_string)
+                .collect::<Vec<_>>();
+            Ok(WikiService::new(store)
+                .context(&task, &seeds, depth, None)?
+                .brief)
         })
     })
 }

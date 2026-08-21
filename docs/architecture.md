@@ -3,8 +3,8 @@
 ## The one decision everything else follows from
 
 The knowledge library is a plain Rust library with no UI, no Tauri, no HTTP
-client and no model dependency. Everything else — the CLI, the desktop shell,
-eventually the agent — is a consumer of it.
+client and no model dependency. The CLI and desktop shell consume it locally;
+the separately built agent runtime consumes its versioned Wiki contract.
 
 ```text
                     ┌──────────────────────┐
@@ -16,19 +16,21 @@ eventually the agent — is a consumer of it.
                     │  authority + trust   │
                     └──────────┬───────────┘
                                │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                ▼
-      athenaeum-cli      src-tauri +        (next: the
-      the `athenaeum`    src/ — desktop      agent loop)
-      command            shell
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ athenaeum-providers  │
-                    │ Anthropic / OpenAI / │
-                    │ Google / Ollama / …  │
-                    └──────────────────────┘
+              ┌────────────────┼─────────────────┐
+              ▼                ▼                 ▼
+      athenaeum-cli      src-tauri +       Wiki protocol v1
+      the `athenaeum`    src/ — desktop    typed + JSON bridge
+      command            shell                   │
+                                                  ▼
+                                      ┌──────────────────────┐
+                                      │ external Repository 2│
+                                      │ agent · providers ·  │
+                                      │ tools · permissions  │
+                                      └──────────────────────┘
 ```
+
+The boundary is specified in [agent-integration.md](agent-integration.md).
+Repository 2 never reaches through it into `KnowledgeStore` or SQLite.
 
 Three things fall out of it, and they are the reasons for the arrangement:
 
@@ -43,7 +45,7 @@ slashes. What differs between platforms is confined to four small
 `athenaeum-core`. Losing access to a provider entirely does not make an
 existing knowledge base less readable.
 
-**It is testable without an API key.** All 148 tests run offline, in under two
+**It is testable without an API key.** All 159 tests run offline, in under two
 seconds, including the end-to-end acceptance test for the product thesis.
 
 ## Why the graph view is not here yet
@@ -137,7 +139,8 @@ repository data.
 
 ## Model roles
 
-`athenaeum-providers` addresses models by role rather than by name (§5, §6):
+The existing bootstrap provider crate addresses models by role rather than by
+name (§5, §6):
 
 | Role | Does | Typically |
 | --- | --- | --- |
@@ -150,7 +153,9 @@ Only `Primary` is required; the rest fall back to it, so a user with one model
 configured gets a working system — just one paying primary prices for graph
 navigation, which `is_explicitly_assigned` lets the UI point out. Roles can
 span providers: GPT primary with a Claude wiki agent is a configuration, not a
-fork.
+fork. The provider crate predates the two-repository split. Runtime provider
+ownership and further development now belong to Repository 2; it connects to
+this library through the Wiki protocol, not through this compatibility code.
 
 ## Storage
 
@@ -177,29 +182,30 @@ the knowledge belongs to the user.
 
 | Phase | State |
 | --- | --- |
-| 0 — Foundation: config, SQLite, schema, journal, CLI, provider abstraction | **Done** |
-| 1 — External model agent: agent loop, tools, permissions, sessions | Not started |
+| 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
+| 1 — External model agent: agent loop, tools, permissions, sessions | **Repository 2 responsibility; intentionally not built here** |
 | 2 — Repository understanding: file/symbol/AST indexes, git history | Not started |
-| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**, minus the curator |
-| 4 — Wiki agent: navigation, briefs, role configuration | Navigation, briefs and roles done; the agent that drives them is not |
-| 5 — Agent + wiki integration | Not started — this is the milestone that matters |
+| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations exposed, entity resolution remains |
+| 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; Wiki agent belongs to Repository 2 |
+| 5 — Agent + wiki integration | **Library side done:** protocol v1, typed service and CLI bridge; Repository 2 adapter pending |
 | 6 — Verification: anchor relocation, staleness, contradictions | Model and detection in place; relocation is not |
 | 7 — Obsidian-style app | Deliberately minimal |
 
-Phase 5 is the real product milestone, and the honest summary of this base app
-is that it builds the floor Phase 5 stands on. The knowledge side is done well
-enough to hold a session's discoveries; what is missing is the loop that puts
-them there automatically.
+Phase 5 remains the real product milestone. This repository now provides its
+side without absorbing runtime responsibilities: Repository 2 can negotiate
+capabilities, request trust-wrapped context, submit model-attributed curation
+proposals and report which knowledge was useful, all without knowing the
+storage implementation.
 
 ## Next
 
-1. **The agent loop** (Phase 1) — tool calling, permissions, session state,
-   driven through `athenaeum-providers`.
-2. **The curator** (Phase 3) — entity resolution and duplicate detection so
-   sessions attach evidence to existing nodes instead of spawning
-   near-duplicates. `find_node_by_title` is the hook it plugs into.
-3. **Repository understanding** (Phase 2) — deterministic extraction of
+1. **The curator** (Phase 3) — exact-title duplicates are refused at the Wiki
+   boundary; add conservative near-duplicate resolution so sessions attach
+   evidence to existing nodes instead of spawning lookalikes.
+2. **Repository understanding** (Phase 2) — deterministic extraction of
    imports, symbols and git history. These produce `Valid` edges directly and
    are the cheapest real knowledge available.
-4. **Anchor relocation** (Phase 6) — `AnchorResolution` describes the outcomes;
+3. **Anchor relocation** (Phase 6) — `AnchorResolution` describes the outcomes;
    nothing implements the search yet.
+4. **Protocol fixtures** — publish language-neutral request/response fixtures
+   alongside Repository 2's adapter as that implementation takes shape.

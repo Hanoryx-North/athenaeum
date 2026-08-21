@@ -39,8 +39,10 @@ It was used as a **reference** for two things:
   rendered result — which is what Phase 1's tool system should look like.
 - The separation between a tool's implementation and its prompt text.
 
-When the agent loop is built, `src/Tool.ts`, `src/tools/*/prompt.ts` and
-`src/services/tools/toolOrchestration.ts` are the files to read first.
+The agent loop belongs to Repository 2. Its reuse audit should begin with
+`src/Tool.ts`, `src/tools/*/prompt.ts` and
+`src/services/tools/toolOrchestration.ts`; no adaptation of those systems
+belongs in this Wiki Library repository.
 
 ## Generated, not copied
 

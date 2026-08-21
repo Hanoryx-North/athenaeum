@@ -74,6 +74,7 @@ pub mod id;
 pub mod journal;
 pub mod model;
 pub mod store;
+pub mod wiki;
 pub mod workspace;
 
 pub use error::{Error, Result};
@@ -91,6 +92,7 @@ pub mod prelude {
         NodeStatus, NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
     };
     pub use crate::store::{EdgeFilter, EventFilter, KnowledgeStore, NodeFilter, SearchHit, Stats};
+    pub use crate::wiki::{WikiRequest, WikiResponse, WikiService, WIKI_PROTOCOL_VERSION};
     pub use crate::workspace::Workspace;
 }
 

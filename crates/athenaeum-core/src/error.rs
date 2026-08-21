@@ -24,6 +24,13 @@ pub enum Error {
     #[error("a node with id {0} already exists")]
     DuplicateId(NodeId),
 
+    /// Exact-title entity resolution at the Wiki boundary. The store permits
+    /// duplicate titles because humans can legitimately name two concepts the
+    /// same way; model curation must make that ambiguity explicit instead of
+    /// quietly bloating the graph.
+    #[error("a node titled {title:?} already exists as {existing}; update it or choose a distinct title")]
+    DuplicateTitle { title: String, existing: NodeId },
+
     /// No `.athenaeum/` directory was found. Reported in its own terms
     /// because this is the first error most users ever see, and "blob store:
     /// not found" tells them nothing about what to do next.
