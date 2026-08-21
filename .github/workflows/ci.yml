@@ -78,19 +78,24 @@ jobs:
         run: cargo test --workspace --doc
 
       # Proves the shipped binary actually links and runs on this platform,
-      # not merely that it compiled.
+      # not merely that it compiled. Stays in the workspace and uses the
+      # CLI's own -C flag rather than cd-ing into $RUNNER_TEMP, because a
+      # Windows path under Git Bash is not worth the argument.
       - name: Smoke-test the CLI
         shell: bash
         run: |
+          mkdir -p ci-smoke
           cargo run -q -p athenaeum-cli -- --version
-          mkdir -p "$RUNNER_TEMP/smoke"
-          cd "$RUNNER_TEMP/smoke"
-          CLI="cargo run -q --manifest-path $GITHUB_WORKSPACE/Cargo.toml -p athenaeum-cli --"
-          $CLI init
-          $CLI add --type decision "Use SQLite" -s "Local-first; no server to run."
-          $CLI add --type gotcha "WAL on network shares" -s "Use a local path."
-          $CLI link "Use SQLite" has_gotcha "WAL on network shares" --derived "ci smoke"
-          $CLI brief "why sqlite" | tee brief.txt
+          cargo run -q -p athenaeum-cli -- -C ci-smoke init
+          cargo run -q -p athenaeum-cli -- -C ci-smoke \
+            add --type decision "Use SQLite" -s "Local-first; no server to run."
+          cargo run -q -p athenaeum-cli -- -C ci-smoke \
+            add --type gotcha "WAL on network shares" -s "Use a local path."
+          cargo run -q -p athenaeum-cli -- -C ci-smoke \
+            link "Use SQLite" has_gotcha "WAL on network shares" --derived "ci smoke"
+          # The gotcha is reached by traversal, not by matching the query,
+          # so this asserts navigation works end to end on this platform.
+          cargo run -q -p athenaeum-cli -- -C ci-smoke brief "why sqlite" | tee brief.txt
           grep -q "WAL on network shares" brief.txt
 
   frontend:
