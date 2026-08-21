@@ -9,7 +9,7 @@ be carried across in either direction and nobody has to guess later.
 | Here | Upstream | Change |
 | --- | --- | --- |
 | `crates/athenaeum-providers/src/client.rs` | `src-tauri/src/agent/provider.rs` | Two import lines. Nothing else. |
-| `crates/athenaeum-providers/src/proxy.rs` | `src-tauri/src/proxy.rs` | Module doc only. |
+| `crates/athenaeum-providers/src/proxy.rs` | `src-tauri/src/proxy.rs` | Module doc only, including a note that only `configure_http_client` has a caller here yet. |
 | `src-tauri/src/panic_guard.rs` | `src-tauri/src/panic_guard.rs` | Kept the synchronous half; dropped the async half and its `futures` dependency, since every command here is synchronous. |
 | `src-tauri/windows-app-manifest.xml` | same path | Verbatim. |
 | `src-tauri/build.rs` | same path | Verbatim, plus a comment on why the manifest matters. |

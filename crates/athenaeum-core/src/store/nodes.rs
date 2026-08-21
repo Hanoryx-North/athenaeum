@@ -10,9 +10,24 @@ use crate::model::{
     Authority, KnowledgeNode, NodeStatus, NodeType, NodeVersion, Provenance, Scope,
 };
 
-const NODE_COLUMNS: &str = "id, type, title, summary, content, scope, authority, status, \
+/// The node columns, in the order [`map_node`] reads them by position.
+///
+/// Declared once and shared with [`super::search`], because a second
+/// hand-written copy that drifts out of order would not fail to compile — it
+/// would quietly map one column's value into another column's field.
+pub(crate) const NODE_COLUMNS: &str =
+    "id, type, title, summary, content, scope, authority, status, \
      provenance_source, provenance_detail, provenance_session, last_verified_at, \
      created_at, updated_at, version";
+
+/// [`NODE_COLUMNS`] qualified with a table alias, for queries that join.
+pub(crate) fn node_columns_for(alias: &str) -> String {
+    NODE_COLUMNS
+        .split(',')
+        .map(|column| format!("{alias}.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 /// Which nodes to list.
 ///
@@ -79,18 +94,17 @@ impl KnowledgeStore {
         let session = node.provenance.session.clone();
         let tx = self.conn.transaction()?;
 
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT id FROM nodes WHERE id = ?1",
-                params![node.id],
-                |r| r.get(0),
-            )
-            .ok();
-        if existing.is_some() {
-            return Err(Error::DuplicateTitle {
-                title: node.title.clone(),
-                existing: node.id.clone(),
-            });
+        // `.ok()` here would discard a genuine SQLite failure as though it
+        // meant "no such row", and the caller would then see a confusing
+        // constraint error instead of the real fault.
+        match tx.query_row(
+            "SELECT 1 FROM nodes WHERE id = ?1",
+            params![node.id],
+            |_| Ok(()),
+        ) {
+            Ok(()) => return Err(Error::DuplicateId(node.id.clone())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(e.into()),
         }
 
         tx.execute(
@@ -195,7 +209,8 @@ impl KnowledgeStore {
         }
         sql.push_str(" ORDER BY updated_at DESC");
         if let Some(limit) = filter.limit {
-            sql.push_str(&format!(" LIMIT {limit}"));
+            args.push(Box::new(limit));
+            sql.push_str(&format!(" LIMIT ?{}", args.len()));
         }
 
         let mut stmt = self.conn.prepare(&sql)?;
@@ -423,4 +438,64 @@ pub(crate) fn map_node(row: &Row<'_>) -> rusqlite::Result<KnowledgeNode> {
         updated_at: parse_time(&row.get::<_, String>(13)?)?,
         version: row.get(14)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::NodeType;
+
+    #[test]
+    fn a_clashing_id_is_reported_as_an_id_clash_not_a_title_clash() {
+        // A caller supplying its own readable id needs to be told which id
+        // collided. Naming the incoming title instead points at a node that
+        // does not exist.
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Validate state first")
+                    .with_id("Decision_042"),
+            )
+            .unwrap();
+
+        let err = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Something else").with_id("Decision_042"),
+            )
+            .unwrap_err();
+
+        let message = err.to_string();
+        assert!(matches!(err, Error::DuplicateId(_)), "got {err:?}");
+        assert!(message.contains("Decision_042"), "got {message}");
+        assert!(!message.contains("Something else"), "got {message}");
+    }
+
+    #[test]
+    fn a_rejected_duplicate_leaves_nothing_behind() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(KnowledgeNode::new(NodeType::Fact, "One").with_id("dup"))
+            .unwrap();
+        let _ = store.create_node(KnowledgeNode::new(NodeType::Fact, "Two").with_id("dup"));
+
+        assert_eq!(store.stats().unwrap().nodes, 1);
+        assert_eq!(
+            store.get_node(&NodeId::from_existing("dup")).unwrap().title,
+            "One"
+        );
+    }
+
+    #[test]
+    fn the_column_list_and_its_aliased_form_stay_in_step() {
+        // `map_node` reads by position, so these must describe the same
+        // columns in the same order or rows silently map into wrong fields.
+        let plain: Vec<&str> = NODE_COLUMNS.split(',').map(str::trim).collect();
+        let aliased = node_columns_for("n");
+        let qualified: Vec<String> = aliased.split(',').map(|c| c.trim().to_string()).collect();
+
+        assert_eq!(plain.len(), qualified.len());
+        for (plain, qualified) in plain.iter().zip(&qualified) {
+            assert_eq!(qualified, &format!("n.{plain}"));
+        }
+    }
 }

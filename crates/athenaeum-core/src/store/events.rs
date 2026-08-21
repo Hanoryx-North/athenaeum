@@ -82,7 +82,8 @@ impl KnowledgeStore {
         }
         sql.push_str(" ORDER BY seq DESC");
         if let Some(limit) = filter.limit {
-            sql.push_str(&format!(" LIMIT {limit}"));
+            args.push(Box::new(limit));
+            sql.push_str(&format!(" LIMIT ?{}", args.len()));
         }
 
         let mut stmt = self.conn.prepare(&sql)?;

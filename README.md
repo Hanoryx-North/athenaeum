@@ -156,7 +156,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```
 
 ```bash
-cargo test --workspace     # 128 tests, no network required
+cargo test --workspace     # 148 tests, no network required
 npm run build              # typecheck + bundle the frontend
 ```
 

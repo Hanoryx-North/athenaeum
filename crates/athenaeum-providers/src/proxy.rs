@@ -5,6 +5,13 @@
 //! model providers, and this module already handles the awkward parts —
 //! credential redaction in logs, clearing stale env vars when the proxy is
 //! switched off, and refusing schemes reqwest will not honour.
+//!
+//! **Not yet wired up.** Only [`configure_http_client`] has a caller today.
+//! Nothing invokes [`apply_proxy_env`] or [`read_proxy_config_from_store`],
+//! so `ACCEPT_INVALID_CERTS` is always false and the app sets no proxy
+//! variables of its own — reqwest still honours whatever is already in the
+//! environment. Connecting this needs the settings surface that arrives with
+//! the agent loop (Phase 1); until then, treat it as staged, not active.
 
 use std::{
     path::Path,

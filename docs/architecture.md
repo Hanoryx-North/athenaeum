@@ -43,7 +43,7 @@ slashes. What differs between platforms is confined to four small
 `athenaeum-core`. Losing access to a provider entirely does not make an
 existing knowledge base less readable.
 
-**It is testable without an API key.** All 128 tests run offline, in under two
+**It is testable without an API key.** All 148 tests run offline, in under two
 seconds, including the end-to-end acceptance test for the product thesis.
 
 ## Why the graph view is not here yet

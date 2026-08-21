@@ -45,9 +45,18 @@ impl BlobStore {
         // Write to a temporary name and rename into place, so a process that
         // dies mid-write cannot leave a truncated file sitting at a hash that
         // claims to describe complete content.
-        let temp = path.with_extension("tmp");
+        //
+        // The temporary name must be unique per writer, not per digest: the
+        // desktop app and the CLI can hold the same workspace open at once,
+        // and two of them storing identical content would otherwise write the
+        // same temporary path — interleaving their bytes, and leaving the
+        // loser's rename to fail on a file the winner already moved.
+        let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
         fs::write(&temp, content)?;
-        fs::rename(&temp, &path)?;
+        if let Err(e) = fs::rename(&temp, &path) {
+            let _ = fs::remove_file(&temp);
+            return Err(e.into());
+        }
 
         Ok(digest)
     }
@@ -125,6 +134,29 @@ mod tests {
             .to_str()
             .unwrap();
         assert_eq!(parent, &digest[..2]);
+    }
+
+    #[test]
+    fn concurrent_writers_do_not_collide_on_the_temporary_name() {
+        // Two processes storing identical content is the ordinary case: the
+        // CLI and the desktop app share one workspace.
+        let (_dir, store) = store();
+        let content = "x".repeat(4096);
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                let content = content.clone();
+                std::thread::spawn(move || store.put(&content))
+            })
+            .collect();
+
+        let digests: Vec<String> = handles
+            .into_iter()
+            .map(|h| h.join().expect("writer panicked").expect("write failed"))
+            .collect();
+
+        assert!(digests.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(store.get(&digests[0]).unwrap().as_deref(), Some(&*content));
     }
 
     #[test]

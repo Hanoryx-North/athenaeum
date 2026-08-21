@@ -391,21 +391,42 @@ pub fn journal(
 
 /// The vocabularies the UI needs to populate its dropdowns.
 ///
+/// A typed struct rather than a hand-built `serde_json::Value`: the key
+/// names are half of a contract with `src/api.ts`, and a hand-written key is
+/// a contract the compiler cannot check.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vocabularies {
+    pub node_types: Vec<&'static str>,
+    pub edge_types: Vec<&'static str>,
+    pub authorities: Vec<&'static str>,
+    pub scopes: Vec<&'static str>,
+    pub evidence_kinds: Vec<&'static str>,
+    pub model_roles: Vec<&'static str>,
+}
+
 /// Served from the library rather than duplicated in TypeScript, so adding a
 /// node type in Rust cannot leave the UI silently unable to offer it.
 #[tauri::command]
-pub fn vocabularies() -> serde_json::Value {
-    serde_json::json!({
-        "nodeTypes": NodeType::ALL.iter().map(|t| t.as_str()).collect::<Vec<_>>(),
-        "edgeTypes": EdgeType::ALL.iter().map(|t| t.as_str()).collect::<Vec<_>>(),
-        "authorities": Authority::ALL.iter().map(|a| a.as_str()).collect::<Vec<_>>(),
-        "scopes": Scope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        "evidenceKinds": EvidenceKind::ALL.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
-        "modelRoles": athenaeum_providers::ModelRole::ALL
-            .iter()
-            .map(|r| r.as_str())
-            .collect::<Vec<_>>(),
-    })
+pub fn vocabularies() -> Vocabularies {
+    fn spellings<T: 'static>(
+        all: &'static [T],
+        as_str: fn(&T) -> &'static str,
+    ) -> Vec<&'static str> {
+        all.iter().map(as_str).collect()
+    }
+
+    Vocabularies {
+        node_types: spellings(NodeType::ALL, NodeType::as_str),
+        edge_types: spellings(EdgeType::ALL, EdgeType::as_str),
+        authorities: spellings(Authority::ALL, Authority::as_str),
+        scopes: spellings(Scope::ALL, Scope::as_str),
+        evidence_kinds: spellings(EvidenceKind::ALL, EvidenceKind::as_str),
+        model_roles: spellings(
+            athenaeum_providers::ModelRole::ALL,
+            athenaeum_providers::ModelRole::as_str,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -423,14 +444,34 @@ mod tests {
     fn vocabularies_cover_every_variant_the_library_defines() {
         // If these drift, the UI offers a subset of what the model can store.
         let vocab = vocabularies();
+        assert_eq!(vocab.node_types.len(), NodeType::ALL.len());
+        assert_eq!(vocab.edge_types.len(), EdgeType::ALL.len());
+        assert_eq!(vocab.authorities.len(), Authority::ALL.len());
+        assert_eq!(vocab.scopes.len(), Scope::ALL.len());
+        assert_eq!(vocab.evidence_kinds.len(), EvidenceKind::ALL.len());
+        // Against `ALL`, not a literal: a fifth role should fail this test
+        // for the right reason, or not at all.
         assert_eq!(
-            vocab["nodeTypes"].as_array().unwrap().len(),
-            NodeType::ALL.len()
+            vocab.model_roles.len(),
+            athenaeum_providers::ModelRole::ALL.len()
         );
-        assert_eq!(
-            vocab["edgeTypes"].as_array().unwrap().len(),
-            EdgeType::ALL.len()
-        );
-        assert_eq!(vocab["modelRoles"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn vocabularies_serialize_with_the_keys_the_frontend_reads() {
+        // `src/api.ts` declares these names by hand; this is the assertion
+        // that keeps the two halves of that contract together.
+        let json = serde_json::to_value(vocabularies()).unwrap();
+        for key in [
+            "nodeTypes",
+            "edgeTypes",
+            "authorities",
+            "scopes",
+            "evidenceKinds",
+            "modelRoles",
+        ] {
+            assert!(json.get(key).is_some(), "missing key {key}");
+        }
+        assert_eq!(json["nodeTypes"][0], "project");
     }
 }

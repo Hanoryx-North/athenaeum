@@ -17,8 +17,18 @@ pub enum Error {
     #[error("no evidence with id {0}")]
     EvidenceNotFound(EvidenceId),
 
-    #[error("a node titled {title:?} already exists ({existing})")]
-    DuplicateTitle { title: String, existing: NodeId },
+    /// Raised when creating a node whose id is already taken. Distinct from
+    /// a title clash: ids are the primary key, and a caller supplying its own
+    /// readable id (`Decision_042`) needs to be told which id collided, not
+    /// which title.
+    #[error("a node with id {0} already exists")]
+    DuplicateId(NodeId),
+
+    /// No `.athenaeum/` directory was found. Reported in its own terms
+    /// because this is the first error most users ever see, and "blob store:
+    /// not found" tells them nothing about what to do next.
+    #[error("no knowledge base found from {path}; run `athenaeum init` first")]
+    NoWorkspace { path: String },
 
     /// Raised when an edge would point at a node that is not in the graph.
     /// Enforced by a foreign key, but reported in these terms because
@@ -45,8 +55,11 @@ pub enum Error {
     #[error("database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
-    #[error("blob store: {0}")]
-    Blob(#[from] std::io::Error),
+    /// Any filesystem failure: creating the workspace, reading or writing a
+    /// blob. Not named for the blob store, because it is not only the blob
+    /// store that reaches the disk.
+    #[error("filesystem: {0}")]
+    Io(#[from] std::io::Error),
 
     #[error("serialization: {0}")]
     Serde(#[from] serde_json::Error),
