@@ -1,0 +1,31 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+/dist/
+/dist-portable/
+
+# Tauri generated
+/src-tauri/gen/
+
+# A knowledge base created while testing in the repo itself
+.athenaeum/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Local secrets. API keys belong in the app's settings, never in the repo.
+.env
+.env.local
+*.local
+
+# Left behind by the CI smoke test if run locally
+/ci-smoke/
+/brief.txt

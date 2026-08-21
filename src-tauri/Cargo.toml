@@ -1,0 +1,30 @@
+[package]
+name = "athenaeum-app"
+description = "Athenaeum desktop shell."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Tauri needs the app as a library on mobile targets and as a binary on
+# desktop; this mirrors the layout llm_wiki uses.
+[lib]
+name = "athenaeum_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "athenaeum-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+athenaeum-core = { path = "../crates/athenaeum-core" }
+athenaeum-providers = { path = "../crates/athenaeum-providers" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-store = "2"

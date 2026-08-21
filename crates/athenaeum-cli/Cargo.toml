@@ -1,0 +1,16 @@
+[package]
+name = "athenaeum-cli"
+description = "Command-line access to an Athenaeum knowledge base."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "athenaeum"
+path = "src/main.rs"
+
+[dependencies]
+athenaeum-core = { path = "../athenaeum-core" }
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
