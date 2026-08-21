@@ -29,6 +29,10 @@ What works:
 - A desktop shell (Tauri 2 + React) for browsing and editing.
 - A provider-agnostic model client with per-role routing.
 - A versioned Wiki integration service and cross-language CLI bridge.
+- Conservative curator entity resolution for identifier-style lookalikes.
+- Deterministic repository indexing for files, symbols, local imports and Git
+  history, with no model involved.
+- Source-anchor relocation by symbol and region fingerprint.
 
 The coding-agent runtime is intentionally **not built in this repository**.
 It is a separate foundation repository that owns providers, streaming, tools,
@@ -54,6 +58,7 @@ Teach it something, then ask for it back:
 ```bash
 cd ~/code/my-project
 athenaeum init
+athenaeum index
 
 athenaeum add --type decision --id D_042 "Validate OAuth state first" \
   --summary "State is validated before any session is created." \
@@ -68,6 +73,9 @@ athenaeum evidence D_042 --file src/auth/oauth.ts --symbol OAuthCallback.handle
 
 # Later, in a different session, from a task description:
 athenaeum brief "fix the oauth callback bug"
+
+# After refactoring source, relocate evidence anchors and update staleness:
+athenaeum relocate
 ```
 
 ```text
@@ -164,7 +172,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
 ```
 
 ```bash
-cargo test --workspace     # 159 tests, no network required
+cargo test --workspace     # offline; no API key required
 npm run build              # typecheck + bundle the frontend
 ```
 

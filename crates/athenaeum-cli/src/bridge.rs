@@ -92,10 +92,36 @@ fn execute(
 
     match result {
         Ok(value) => (WikiResponseEnvelope::success(request_id, value), true),
-        Err(error) => (
-            WikiResponseEnvelope::error(request_id, wiki_error_code(&error), error.to_string()),
-            false,
-        ),
+        Err(error) => {
+            let response = match wiki_error_details(&error) {
+                Some(details) => WikiResponseEnvelope::error_with_details(
+                    request_id,
+                    wiki_error_code(&error),
+                    error.to_string(),
+                    details,
+                ),
+                None => WikiResponseEnvelope::error(
+                    request_id,
+                    wiki_error_code(&error),
+                    error.to_string(),
+                ),
+            };
+            (response, false)
+        }
+    }
+}
+
+fn wiki_error_details(error: &Error) -> Option<serde_json::Value> {
+    match error {
+        Error::DuplicateTitle { title, existing } => Some(serde_json::json!({
+            "title": title,
+            "existingNodes": [existing],
+        })),
+        Error::NearDuplicateTitle { title, existing } => Some(serde_json::json!({
+            "title": title,
+            "existingNodes": existing,
+        })),
+        _ => None,
     }
 }
 
@@ -104,14 +130,18 @@ fn wiki_error_code(error: &Error) -> &'static str {
         Error::NodeNotFound(_) | Error::EdgeNotFound(_) | Error::EvidenceNotFound(_) => "not_found",
         Error::DuplicateId(_)
         | Error::DuplicateTitle { .. }
+        | Error::NearDuplicateTitle { .. }
         | Error::DanglingEdge(_)
         | Error::SelfEdge(_)
         | Error::InvalidValue { .. }
         | Error::Invalid { .. } => "invalid_request",
         Error::SchemaTooNew { .. } => "incompatible_store",
-        Error::Storage { .. } | Error::Sqlite(_) | Error::Io(_) | Error::Serde(_) => {
-            "knowledge_error"
-        }
+        Error::Storage { .. }
+        | Error::Sqlite(_)
+        | Error::Io(_)
+        | Error::Serde(_)
+        | Error::RepositoryParser { .. }
+        | Error::IncompleteRepositoryScan { .. } => "knowledge_error",
         Error::NoWorkspace { .. } => "workspace_not_found",
     }
 }

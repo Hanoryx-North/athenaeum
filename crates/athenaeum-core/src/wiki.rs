@@ -225,6 +225,9 @@ pub enum WikiOutcome {
 pub struct WikiProtocolError {
     pub code: String,
     pub message: String,
+    /// Additive, machine-readable context for errors that need recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl WikiResponseEnvelope {
@@ -250,9 +253,23 @@ impl WikiResponseEnvelope {
                 error: WikiProtocolError {
                     code: code.into(),
                     message: message.into(),
+                    details: None,
                 },
             },
         }
+    }
+
+    pub fn error_with_details(
+        request_id: Option<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        let mut response = Self::error(request_id, code, message);
+        if let WikiOutcome::Error { error } = &mut response.outcome {
+            error.details = Some(details);
+        }
+        response
     }
 }
 
@@ -494,12 +511,7 @@ impl<'a> WikiService<'a> {
 
     pub fn create(&mut self, input: WikiNodeCreate, caller: WikiCaller) -> Result<KnowledgeNode> {
         validate_nonempty(&input.title, "title")?;
-        if let Some(existing) = self.store.find_node_by_title(&input.title)? {
-            return Err(Error::DuplicateTitle {
-                title: input.title,
-                existing: existing.id,
-            });
-        }
+        self.ensure_distinct_title(&input.title, None)?;
         let provenance = model_provenance(caller)?;
         self.store.create_node(
             KnowledgeNode::new(input.node_type, input.title)
@@ -521,6 +533,9 @@ impl<'a> WikiService<'a> {
             validate_nonempty(title, "title")?;
         }
         let mut node = self.resolve(&input.node)?;
+        if let Some(title) = &input.title {
+            self.ensure_distinct_title(title, Some(&node.id))?;
+        }
         if let Some(title) = input.title {
             node.title = title;
         }
@@ -589,6 +604,32 @@ impl<'a> WikiService<'a> {
         self.store
             .find_node_by_title(reference)?
             .ok_or(Error::NodeNotFound(id))
+    }
+
+    fn ensure_distinct_title(&self, title: &str, except: Option<&NodeId>) -> Result<()> {
+        if let Some(existing) = self.store.find_node_by_title(title)? {
+            if except != Some(&existing.id) {
+                return Err(Error::DuplicateTitle {
+                    title: title.to_string(),
+                    existing: existing.id,
+                });
+            }
+        }
+
+        let existing = self
+            .store
+            .find_nodes_by_title_key(title)?
+            .into_iter()
+            .filter(|node| except != Some(&node.id))
+            .map(|node| node.id)
+            .collect::<Vec<_>>();
+        if !existing.is_empty() {
+            return Err(Error::NearDuplicateTitle {
+                title: title.to_string(),
+                existing,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -775,6 +816,58 @@ mod tests {
     }
 
     #[test]
+    fn curator_create_resolves_conservative_near_duplicates() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let existing = store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+
+        let error = WikiService::new(&mut store)
+            .create(
+                WikiNodeCreate {
+                    node_type: NodeType::Symbol,
+                    title: "auth_service".into(),
+                    summary: "New evidence from this session".into(),
+                    content: String::new(),
+                    scope: Scope::Project,
+                },
+                caller(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::NearDuplicateTitle { existing: ids, .. } if ids == vec![existing.id]
+        ));
+        assert_eq!(store.stats().unwrap().nodes, 1);
+    }
+
+    #[test]
+    fn curator_update_cannot_rename_a_node_into_a_lookalike() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+        let other = store
+            .create_node(KnowledgeNode::new(NodeType::Concept, "Sessions"))
+            .unwrap();
+
+        let error = WikiService::new(&mut store)
+            .update(
+                WikiNodeUpdate {
+                    node: other.id.to_string(),
+                    title: Some("auth-service".into()),
+                    summary: None,
+                    content: None,
+                    reason: None,
+                },
+                caller(),
+            )
+            .unwrap_err();
+        assert!(matches!(error, Error::NearDuplicateTitle { .. }));
+    }
+
+    #[test]
     fn open_and_record_use_accept_ids_or_titles() {
         let mut store = KnowledgeStore::open_in_memory().unwrap();
         let node = store
@@ -840,6 +933,7 @@ mod tests {
         let json = serde_json::to_value(error).unwrap();
         assert_eq!(json["status"], "error");
         assert_eq!(json["error"]["code"], "invalid_request");
+        assert!(json["error"].get("details").is_none());
     }
 
     #[test]

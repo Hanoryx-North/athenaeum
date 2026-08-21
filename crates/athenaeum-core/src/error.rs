@@ -31,6 +31,18 @@ pub enum Error {
     #[error("a node titled {title:?} already exists as {existing}; update it or choose a distinct title")]
     DuplicateTitle { title: String, existing: NodeId },
 
+    /// A high-precision identifier-style title match. This is separate from
+    /// an exact title clash so a curator can explain why it selected the
+    /// existing entity and attach new evidence to it.
+    #[error(
+        "the title {title:?} is a near-duplicate of existing node(s) [{candidates}]; attach evidence to an existing node or choose a clearly distinct title",
+        candidates = format_node_ids(.existing)
+    )]
+    NearDuplicateTitle {
+        title: String,
+        existing: Vec<NodeId>,
+    },
+
     /// No `.athenaeum/` directory was found. Reported in its own terms
     /// because this is the first error most users ever see, and "blob store:
     /// not found" tells them nothing about what to do next.
@@ -71,11 +83,29 @@ pub enum Error {
     #[error("serialization: {0}")]
     Serde(#[from] serde_json::Error),
 
+    #[error("repository parser initialization failed for {language}: {message}")]
+    RepositoryParser {
+        language: &'static str,
+        message: String,
+    },
+
+    #[error(
+        "repository scan was incomplete; cannot {operation} safely without raising its scan limits"
+    )]
+    IncompleteRepositoryScan { operation: &'static str },
+
     /// The database on disk was written by a newer build than this one.
     /// Refusing is the correct move: a downgrade that silently drops columns
     /// destroys the user's knowledge (§61).
     #[error("knowledge base is at schema v{found}, but this build supports up to v{supported}; upgrade Athenaeum to open it")]
     SchemaTooNew { found: u32, supported: u32 },
+}
+
+fn format_node_ids(ids: &[NodeId]) -> String {
+    ids.iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl Error {

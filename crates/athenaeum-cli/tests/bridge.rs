@@ -221,3 +221,43 @@ fn bridge_curates_proposed_knowledge_without_exposing_storage() {
         false
     );
 }
+
+#[test]
+fn bridge_rejects_identifier_style_near_duplicates_with_existing_id() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(cli(dir.path(), &["init"]).status.success());
+    let caller = json!({ "model": "curator-test", "session": "sess_bridge_test" });
+    let created = bridge_ok(
+        dir.path(),
+        json!({
+            "protocolVersion": 1,
+            "request": {
+                "method": "create",
+                "input": { "type": "symbol", "title": "AuthService" },
+                "caller": caller
+            }
+        }),
+    );
+    let existing = created["response"]["node"]["id"].as_str().unwrap();
+
+    let output = bridge(
+        dir.path(),
+        json!({
+            "protocolVersion": 1,
+            "requestId": "near-duplicate",
+            "request": {
+                "method": "create",
+                "input": { "type": "symbol", "title": "auth_service" },
+                "caller": caller
+            }
+        }),
+    );
+    assert!(!output.status.success());
+    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["error"]["code"], "invalid_request");
+    assert_eq!(response["error"]["details"]["existingNodes"][0], existing);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains(existing));
+}

@@ -108,14 +108,15 @@ impl KnowledgeStore {
         }
 
         tx.execute(
-            "INSERT INTO nodes (id, type, title, summary, content, scope, authority, status,
+            "INSERT INTO nodes (id, type, title, title_key, summary, content, scope, authority, status,
                                 provenance_source, provenance_detail, provenance_session,
                                 last_verified_at, created_at, updated_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 node.id,
                 node.node_type.as_str(),
                 node.title,
+                title_key(&node.title),
                 node.summary,
                 node.content,
                 node.scope.as_str(),
@@ -181,6 +182,29 @@ impl KnowledgeStore {
             Some(node) => Ok(Some(node?)),
             None => Ok(None),
         }
+    }
+
+    /// Find conservative title lookalikes without scanning the node table.
+    ///
+    /// The key intentionally recognizes only case, whitespace, `_` and `-`
+    /// variations. Plurals, abbreviations and spelling similarity still need
+    /// human or curator judgement; silently merging those would be worse than
+    /// retaining a duplicate.
+    pub fn find_nodes_by_title_key(&self, title: &str) -> Result<Vec<KnowledgeNode>> {
+        let key = title_key(title);
+        if key.chars().count() < 5 {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {NODE_COLUMNS} FROM nodes
+             WHERE title_key = ?1 AND title != ?2 COLLATE NOCASE
+             ORDER BY CASE status WHEN 'valid' THEN 0 ELSE 1 END, updated_at DESC, id ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let nodes = stmt
+            .query_map(params![key, title], map_node)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(nodes)
     }
 
     /// List nodes matching `filter`, most recently updated first.
@@ -286,15 +310,17 @@ impl KnowledgeStore {
         )?;
 
         tx.execute(
-            "UPDATE nodes SET type = ?2, title = ?3, summary = ?4, content = ?5, scope = ?6,
-                              authority = ?7, status = ?8, provenance_source = ?9,
-                              provenance_detail = ?10, provenance_session = ?11,
-                              last_verified_at = ?12, updated_at = ?13, version = ?14
+            "UPDATE nodes SET type = ?2, title = ?3, title_key = ?4, summary = ?5,
+                              content = ?6, scope = ?7, authority = ?8, status = ?9,
+                              provenance_source = ?10, provenance_detail = ?11,
+                              provenance_session = ?12, last_verified_at = ?13,
+                              updated_at = ?14, version = ?15
              WHERE id = ?1",
             params![
                 updated.id,
                 updated.node_type.as_str(),
                 updated.title,
+                title_key(&updated.title),
                 updated.summary,
                 updated.content,
                 updated.scope.as_str(),
@@ -469,6 +495,16 @@ pub(crate) fn map_node(row: &Row<'_>) -> rusqlite::Result<KnowledgeNode> {
     })
 }
 
+/// Stable, deliberately conservative key shared by migration-compatible
+/// writes and Wiki-boundary entity resolution.
+pub(crate) fn title_key(title: &str) -> String {
+    title
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace() && *ch != '-' && *ch != '_')
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,5 +562,21 @@ mod tests {
         for (plain, qualified) in plain.iter().zip(&qualified) {
             assert_eq!(qualified, &format!("n.{plain}"));
         }
+    }
+
+    #[test]
+    fn near_title_lookup_is_separator_aware_but_not_fuzzy() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let existing = store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+
+        let matches = store.find_nodes_by_title_key("auth_service").unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, existing.id);
+        assert!(store
+            .find_nodes_by_title_key("AuthServices")
+            .unwrap()
+            .is_empty());
     }
 }

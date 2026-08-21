@@ -9,12 +9,12 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// The schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Migrations, applied in order. Index `n` migrates from version `n` to
 /// `n + 1`, so appending to this array is the only way to change the schema.
 /// Never edit an entry that has shipped.
-const MIGRATIONS: &[&str] = &[V1];
+const MIGRATIONS: &[&str] = &[V1, V2];
 
 /// Connection-level settings applied every time the database is opened.
 ///
@@ -177,6 +177,19 @@ CREATE TABLE meta (
 );
 "#;
 
+const V2: &str = r#"
+-- A deliberately narrow entity-resolution key. It folds ASCII case and the
+-- separators people commonly vary in identifiers (`AuthService`,
+-- `auth_service`, `auth-service`) while retaining all other punctuation so
+-- unrelated titles are not merged speculatively.
+ALTER TABLE nodes ADD COLUMN title_key TEXT NOT NULL DEFAULT '';
+UPDATE nodes
+SET title_key = lower(replace(replace(replace(replace(replace(replace(
+    replace(replace(title, ' ', ''), char(9), ''), char(10), ''),
+    char(11), ''), char(12), ''), char(13), ''), '-', ''), '_', ''));
+CREATE INDEX idx_nodes_title_key ON nodes(title_key);
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +220,33 @@ mod tests {
     fn migrating_twice_is_a_no_op() {
         let mut conn = open_migrated();
         migrate(&mut conn).expect("second migrate must be harmless");
+    }
+
+    #[test]
+    fn title_keys_are_backfilled_when_upgrading_v1() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_pragmas(&conn).unwrap();
+        conn.execute_batch(V1).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute(
+            "INSERT INTO nodes
+                (id, type, title, scope, authority, status, provenance_source,
+                 created_at, updated_at)
+             VALUES ('n1', 'symbol', 'Auth_Service', 'project',
+                     'imported_knowledge', 'valid', 'deterministic',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+
+        let key: String = conn
+            .query_row("SELECT title_key FROM nodes WHERE id = 'n1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(key, "authservice");
     }
 
     #[test]

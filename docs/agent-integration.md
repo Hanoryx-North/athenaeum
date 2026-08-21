@@ -240,3 +240,21 @@ become Wiki knowledge automatically.
   adapter to behave like `NoWikiProvider` for that workspace.
 - The CLI bridge is the cross-language compatibility harness. Its integration
   tests must stay offline and run on Windows, macOS and Linux.
+
+Duplicate and conservative near-duplicate create errors add a
+`details.existingNodes` array. A curator should use one of those IDs for
+`attach_evidence` or `update`; it must not parse the human error message to
+recover an identity.
+
+## Language-neutral fixtures
+
+Protocol v1 request and response fixtures are published at
+`fixtures/wiki-protocol/v1/`. The request catalog covers every operation
+advertised by `capabilities`; representative successful and failed responses
+pin envelope shape, casing, vocabularies, limits and the retrieval trust
+wrapper. The Rust suite round-trips every fixture through the production types
+and compares the capabilities fixture with the actual service response.
+
+Repository 2 should run the same files through its adapter tests. The fixtures
+are examples of the wire contract, not permission grants and not an interface
+definition for the runtime.

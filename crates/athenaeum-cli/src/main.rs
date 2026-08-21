@@ -87,6 +87,10 @@ enum Command {
     ///
     /// This command always writes one JSON response, independent of --json.
     Bridge,
+    /// Deterministically index files, symbols, imports and local Git history.
+    Index(IndexArgs),
+    /// Search for moved source anchors and update knowledge staleness.
+    Relocate(RelocateArgs),
     /// Check the knowledge base for structural problems.
     Check,
 }
@@ -192,6 +196,35 @@ struct BriefArgs {
     /// Wrap the output in the trust boundary a model should receive.
     #[arg(long)]
     prompt: bool,
+}
+
+#[derive(Args)]
+struct IndexArgs {
+    /// Maximum number of recent commits to connect to indexed files.
+    #[arg(long, default_value_t = 500)]
+    max_commits: usize,
+    /// Maximum number of repository files to scan.
+    #[arg(long, default_value_t = 20_000)]
+    max_files: usize,
+    /// Maximum UTF-8 bytes read from one file.
+    #[arg(long, default_value_t = 1_000_000)]
+    max_file_bytes: u64,
+    /// Maximum UTF-8 bytes read across the repository.
+    #[arg(long, default_value_t = 67_108_864)]
+    max_total_bytes: u64,
+}
+
+#[derive(Args)]
+struct RelocateArgs {
+    /// Maximum number of source files to inspect while relocating anchors.
+    #[arg(long, default_value_t = 20_000)]
+    max_files: usize,
+    /// Maximum UTF-8 bytes read from one file.
+    #[arg(long, default_value_t = 1_000_000)]
+    max_file_bytes: u64,
+    /// Maximum UTF-8 bytes read across the repository.
+    #[arg(long, default_value_t = 67_108_864)]
+    max_total_bytes: u64,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -506,6 +539,75 @@ fn run(cli: &Cli) -> Result<Outcome> {
         }
 
         Command::Bridge => unreachable!("handled before the workspace is opened"),
+
+        Command::Index(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = RepositoryIndexer::scan_and_index(
+                &mut store,
+                project_root,
+                RepositoryScanOptions {
+                    max_commits: args.max_commits,
+                    max_files: args.max_files,
+                    max_file_bytes: args.max_file_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                },
+            )?;
+            emit(cli.json, &report, || {
+                println!(
+                    "indexed {} files, {} symbols, {} imports and {} commits",
+                    report.files, report.symbols, report.resolved_imports, report.commits
+                );
+                println!(
+                    "{} nodes created, {} updated, {} stale; {} edges created, {} removed",
+                    report.nodes_created,
+                    report.nodes_updated,
+                    report.nodes_marked_stale,
+                    report.edges_created,
+                    report.edges_removed
+                );
+                for warning in &report.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                Ok(())
+            })?;
+        }
+
+        Command::Relocate(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = AnchorRelocator::scan(
+                project_root,
+                RepositoryScanOptions {
+                    max_files: args.max_files,
+                    max_file_bytes: args.max_file_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                    max_commits: 0,
+                },
+            )?
+            .relocate_store(&mut store)?;
+            emit(cli.json, &report, || {
+                println!(
+                    "{} exact, {} by symbol, {} by fingerprint, {} stale",
+                    report.exact,
+                    report.relocated_by_symbol,
+                    report.relocated_by_fingerprint,
+                    report.stale
+                );
+                for warning in &report.warnings {
+                    eprintln!("warning: {warning}");
+                }
+                Ok(())
+            })?;
+        }
 
         Command::Check => {
             let problems = check::run(&store)?;

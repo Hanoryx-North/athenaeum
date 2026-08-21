@@ -126,6 +126,7 @@ name = "athenaeum-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
@@ -133,6 +134,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

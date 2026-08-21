@@ -65,6 +65,7 @@
 #![deny(rust_2018_idioms)]
 #![warn(missing_debug_implementations)]
 
+pub mod anchors;
 pub mod authority;
 pub mod blobs;
 pub mod brief;
@@ -73,6 +74,7 @@ pub mod graph;
 pub mod id;
 pub mod journal;
 pub mod model;
+pub mod repository;
 pub mod store;
 pub mod wiki;
 pub mod workspace;
@@ -81,6 +83,9 @@ pub use error::{Error, Result};
 
 /// Everything needed for ordinary use, in one import.
 pub mod prelude {
+    pub use crate::anchors::{
+        AnchorRelocation, AnchorRelocationReport, AnchorRelocator, EvidenceRelocation,
+    };
     pub use crate::blobs::BlobStore;
     pub use crate::brief::KnowledgeBrief;
     pub use crate::error::{Error, Result};
@@ -90,6 +95,9 @@ pub mod prelude {
     pub use crate::model::{
         Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, Neighbor,
         NodeStatus, NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
+    };
+    pub use crate::repository::{
+        RepositoryIndexReport, RepositoryIndexer, RepositoryScanOptions, RepositorySnapshot,
     };
     pub use crate::store::{EdgeFilter, EventFilter, KnowledgeStore, NodeFilter, SearchHit, Stats};
     pub use crate::wiki::{WikiRequest, WikiResponse, WikiService, WIKI_PROTOCOL_VERSION};

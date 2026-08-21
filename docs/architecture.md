@@ -45,8 +45,9 @@ slashes. What differs between platforms is confined to four small
 `athenaeum-core`. Losing access to a provider entirely does not make an
 existing knowledge base less readable.
 
-**It is testable without an API key.** All 159 tests run offline, in under two
-seconds, including the end-to-end acceptance test for the product thesis.
+**It is testable without an API key.** The full test suite runs offline,
+including the end-to-end acceptance test for the product thesis, repository
+extraction, anchor relocation and protocol fixture compatibility.
 
 ## Why the graph view is not here yet
 
@@ -184,11 +185,11 @@ the knowledge belongs to the user.
 | --- | --- |
 | 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
 | 1 — External model agent: agent loop, tools, permissions, sessions | **Repository 2 responsibility; intentionally not built here** |
-| 2 — Repository understanding: file/symbol/AST indexes, git history | Not started |
-| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations exposed, entity resolution remains |
+| 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic foundation done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go symbols and imports, local dependency edges and Git modification history. Full AST call graphs and broader language-specific extractors remain. |
+| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; Wiki agent belongs to Repository 2 |
 | 5 — Agent + wiki integration | **Library side done:** protocol v1, typed service and CLI bridge; Repository 2 adapter pending |
-| 6 — Verification: anchor relocation, staleness, contradictions | Model and detection in place; relocation is not |
+| 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation done:** exact, symbol, fingerprint and stale outcomes are searched and persisted; semantic/model revalidation remains external |
 | 7 — Obsidian-style app | Deliberately minimal |
 
 Phase 5 remains the real product milestone. This repository now provides its
@@ -199,13 +200,38 @@ storage implementation.
 
 ## Next
 
-1. **The curator** (Phase 3) — exact-title duplicates are refused at the Wiki
-   boundary; add conservative near-duplicate resolution so sessions attach
-   evidence to existing nodes instead of spawning lookalikes.
-2. **Repository understanding** (Phase 2) — deterministic extraction of
-   imports, symbols and git history. These produce `Valid` edges directly and
-   are the cheapest real knowledge available.
-3. **Anchor relocation** (Phase 6) — `AnchorResolution` describes the outcomes;
-   nothing implements the search yet.
-4. **Protocol fixtures** — publish language-neutral request/response fixtures
-   alongside Repository 2's adapter as that implementation takes shape.
+1. **Repository 2 adapter** (Phase 5 product milestone) — consume the published
+   protocol fixtures and implement `WikiProvider` there, without adding its
+   runtime interface to this repository.
+2. **Deeper structural extraction** (Phase 2 tail) — compiler-grade AST
+   identities, calls, implements/exports, test discovery and additional
+   languages where measured project value justifies them.
+3. **Verification workflows** (Phase 6 tail) — contradiction review and
+   semantic revalidation belong behind the existing protocol and Repository
+   2's verifier policy; the local library continues to own persisted outcomes.
+
+## Deterministic repository knowledge
+
+`athenaeum index` performs a bounded, read-only scan. Generated and private
+workspace directories are skipped, non-text and oversized files are not read,
+and stable identities make repeated indexing idempotent. File containment,
+resolved local imports and Git modification history become `Valid` edges with
+deterministic provenance. Removed imports are reconciled and source objects
+that disappear are retained as `stale_requires_review`.
+
+The first parser set covers the languages used by this repository plus common
+agent projects: Rust, TypeScript/JavaScript, Python and Go. It extracts named
+declarations and import structure conservatively. It is not presented as a
+full compiler AST: call graphs, implements relationships, exports and richer
+language coverage remain Phase 2 work.
+
+`athenaeum relocate` checks every anchored evidence record. An unchanged
+file or region stays exact; a unique named declaration updates by symbol; a
+unique identical line region updates by fingerprint; and an unresolved anchor
+makes its node stale or review-required without deleting knowledge. Paths are
+validated as repository-relative before any read.
+
+Language-neutral v1 fixtures live under
+`fixtures/wiki-protocol/v1/`. Tests require every advertised operation to
+have a request fixture and pin the capabilities response to the production
+vocabulary and budgets.

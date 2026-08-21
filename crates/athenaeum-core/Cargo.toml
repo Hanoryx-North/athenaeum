@@ -18,6 +18,8 @@ thiserror.workspace = true
 # Windows x86_64, macOS arm64 and Linux builds all talk to the *same* SQLite,
 # with FTS5 always present, instead of whatever the host happens to ship.
 rusqlite = { version = "0.37", features = ["bundled"] }
+regex = "1"
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"
