@@ -1,0 +1,252 @@
+//! Walking a vault directory into a snapshot.
+//!
+//! The vault is the source of truth, so this pass never writes: it reads
+//! `wiki/`, the root governance documents and `raw/sources/`, and hands the
+//! result to [`super::index`]. Scanning and indexing are separate so a
+//! caller can inspect what was found — or build a snapshot in a test —
+//! without a database anywhere near it.
+
+use std::path::Path;
+
+use walkdir::{DirEntry, WalkDir};
+
+use crate::error::{Error, Result};
+
+use super::page::VaultPage;
+use super::{VaultScanOptions, VaultSnapshot, VaultSource};
+
+/// The directory holding wiki pages.
+pub(super) const WIKI_DIR: &str = "wiki";
+/// The directory holding ingested source material.
+pub(super) const RAW_SOURCES_DIR: &str = "raw/sources";
+
+/// Root-level documents that are pages even though they sit outside `wiki/`.
+const ROOT_PAGES: &[&str] = &["purpose.md", "schema.md"];
+
+/// Vault scaffolding that is deliberately not a node.
+///
+/// `index.md` is a hand-maintained table of contents whose content the node
+/// table *is*, and `log.md` is an activity journal that the event journal
+/// *is*. Indexing them would add two hub nodes linking to everything, which
+/// buries every real relationship in the graph under them. Both stay in the
+/// vault, readable and editable; they simply are not knowledge the index
+/// has anything to add to.
+const SCAFFOLDING: &[&str] = &["index.md", "log.md"];
+
+pub(super) fn scan(root: &Path, options: VaultScanOptions) -> Result<VaultSnapshot> {
+    if !root.is_dir() {
+        return Err(Error::InvalidValue {
+            field: "vault root",
+            value: root.display().to_string(),
+        });
+    }
+
+    let mut snapshot = VaultSnapshot {
+        pages: Vec::new(),
+        sources: Vec::new(),
+        warnings: Vec::new(),
+        complete: true,
+    };
+
+    scan_pages(root, &options, &mut snapshot)?;
+    scan_sources(root, &options, &mut snapshot)?;
+
+    // Sorted so two scans of the same vault produce the same snapshot
+    // whatever order the filesystem hands entries back in.
+    snapshot.pages.sort_by(|a, b| a.path.cmp(&b.path));
+    snapshot.sources.sort_by(|a, b| a.identity.cmp(&b.identity));
+    Ok(snapshot)
+}
+
+fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnapshot) -> Result<()> {
+    let mut total_bytes = 0_u64;
+
+    for name in ROOT_PAGES {
+        let path = root.join(name);
+        if path.is_file() {
+            read_page(&path, name, options, &mut total_bytes, snapshot)?;
+        }
+    }
+
+    let wiki = root.join(WIKI_DIR);
+    if !wiki.is_dir() {
+        return Ok(());
+    }
+
+    let entries = WalkDir::new(&wiki)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| !hidden(entry));
+
+    for entry in entries {
+        let entry = entry.map_err(walk_error)?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Some(relative) = relative_path(root, entry.path()) else {
+            snapshot.warnings.push(format!(
+                "Skipped a path that is not valid UTF-8: {}",
+                entry.path().display()
+            ));
+            snapshot.complete = false;
+            continue;
+        };
+        if !relative.to_ascii_lowercase().ends_with(".md") {
+            continue;
+        }
+        if is_scaffolding(&relative) {
+            continue;
+        }
+        if snapshot.pages.len() >= options.max_pages {
+            snapshot.warnings.push(format!(
+                "Stopped after the configured {} page limit",
+                options.max_pages
+            ));
+            snapshot.complete = false;
+            break;
+        }
+        if !read_page(entry.path(), &relative, options, &mut total_bytes, snapshot)? {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+/// Read one page. Returns false when a budget was exhausted and scanning
+/// should stop rather than continue with a partial view.
+fn read_page(
+    path: &Path,
+    relative: &str,
+    options: &VaultScanOptions,
+    total_bytes: &mut u64,
+    snapshot: &mut VaultSnapshot,
+) -> Result<bool> {
+    let metadata = std::fs::metadata(path)?;
+    if metadata.len() > options.max_page_bytes {
+        snapshot.warnings.push(format!(
+            "Skipped {relative}: {} bytes exceeds the per-page limit",
+            metadata.len()
+        ));
+        snapshot.complete = false;
+        return Ok(true);
+    }
+    if total_bytes.saturating_add(metadata.len()) > options.max_total_bytes {
+        snapshot.warnings.push(format!(
+            "Stopped before {relative}: the configured total byte limit was reached"
+        ));
+        snapshot.complete = false;
+        return Ok(false);
+    }
+
+    let bytes = std::fs::read(path)?;
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(_) => {
+            snapshot
+                .warnings
+                .push(format!("Skipped {relative}: not valid UTF-8"));
+            snapshot.complete = false;
+            return Ok(true);
+        }
+    };
+    *total_bytes += metadata.len();
+    snapshot.pages.push(VaultPage::parse(relative, &content));
+    Ok(true)
+}
+
+fn scan_sources(
+    root: &Path,
+    options: &VaultScanOptions,
+    snapshot: &mut VaultSnapshot,
+) -> Result<()> {
+    let sources_root = root.join("raw").join("sources");
+    if !sources_root.is_dir() {
+        return Ok(());
+    }
+
+    let entries = WalkDir::new(&sources_root)
+        .follow_links(false)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|entry| !hidden(entry));
+
+    for entry in entries {
+        let entry = entry.map_err(walk_error)?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Some(identity) = relative_path(&sources_root, entry.path()) else {
+            snapshot.warnings.push(format!(
+                "Skipped a source path that is not valid UTF-8: {}",
+                entry.path().display()
+            ));
+            snapshot.complete = false;
+            continue;
+        };
+        if snapshot.sources.len() >= options.max_sources {
+            snapshot.warnings.push(format!(
+                "Stopped after the configured {} source limit",
+                options.max_sources
+            ));
+            snapshot.complete = false;
+            break;
+        }
+
+        // Only the metadata is read. A source is a 200MB PDF as often as a
+        // text file, and re-hashing every one on every index would make
+        // reconciling cost as much as rebuilding — which is the thing this
+        // whole design exists to avoid.
+        let bytes = entry.metadata().map_err(walk_error)?.len();
+        snapshot.sources.push(VaultSource {
+            path: format!("{RAW_SOURCES_DIR}/{identity}"),
+            identity,
+            bytes,
+        });
+    }
+
+    Ok(())
+}
+
+fn is_scaffolding(relative: &str) -> bool {
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    SCAFFOLDING
+        .iter()
+        .any(|scaffold| name.eq_ignore_ascii_case(scaffold))
+}
+
+/// Vault-relative path with forward slashes, so a knowledge base built on
+/// Windows resolves unchanged on macOS and Linux.
+fn relative_path(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut out = String::new();
+    for component in relative.components() {
+        let part = component.as_os_str().to_str()?;
+        if !out.is_empty() {
+            out.push('/');
+        }
+        out.push_str(part);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Skip dot-directories: `.obsidian`, `.athenaeum` and `.git` are
+/// configuration and derived data, not knowledge.
+fn hidden(entry: &DirEntry) -> bool {
+    entry.depth() > 0
+        && entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with('.'))
+}
+
+fn walk_error(error: walkdir::Error) -> Error {
+    match error.into_io_error() {
+        Some(io) => Error::Io(io),
+        None => Error::InvalidValue {
+            field: "vault scan",
+            value: "directory traversal failed".to_string(),
+        },
+    }
+}

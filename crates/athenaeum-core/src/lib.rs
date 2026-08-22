@@ -76,6 +76,7 @@ pub mod journal;
 pub mod model;
 pub mod repository;
 pub mod store;
+pub mod vault;
 pub mod wiki;
 pub mod workspace;
 
@@ -100,6 +101,9 @@ pub mod prelude {
         RepositoryIndexReport, RepositoryIndexer, RepositoryScanOptions, RepositorySnapshot,
     };
     pub use crate::store::{EdgeFilter, EventFilter, KnowledgeStore, NodeFilter, SearchHit, Stats};
+    pub use crate::vault::{
+        VaultIndexReport, VaultIndexer, VaultPage, VaultScanOptions, VaultSnapshot, VaultSource,
+    };
     pub use crate::wiki::{WikiRequest, WikiResponse, WikiService, WIKI_PROTOCOL_VERSION};
     pub use crate::workspace::Workspace;
 }
