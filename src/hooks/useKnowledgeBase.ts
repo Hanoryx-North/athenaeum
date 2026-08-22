@@ -9,7 +9,7 @@ import {
   type NodeDetail,
   type Stats,
   type Vocabularies,
-} from "../api";
+} from "../lib/knowledge-api";
 
 /** Where the last-opened project path is remembered between launches. */
 const WORKSPACE_KEY = "athenaeum.workspace";

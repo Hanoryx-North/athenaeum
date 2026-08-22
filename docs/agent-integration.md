@@ -37,10 +37,9 @@ Repository 2 must never query `knowledge.db` or depend on Athenaeum's store
 modules. Repository 1 must never execute coding tools or infer that a Wiki
 request grants filesystem, shell, Git, or network permission.
 
-`crates/athenaeum-providers` predates this repository split. It remains as
-bootstrap compatibility code for the current shell, but it is **not** the
-future runtime boundary and no agent loop should be built around it here.
-Provider ownership and further provider development belong to Repository 2.
+`crates/athenaeum-providers` has been removed. It was bootstrap compatibility code from
+before this repository split, and it was never the runtime boundary. Provider ownership
+belongs to the runtime.
 
 ## Integration contract
 

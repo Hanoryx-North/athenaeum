@@ -37,26 +37,21 @@ For meaningful work:
 
 Do not narrate the passes.
 
-### Vendored Code
+### Ported Code
 
-Files listed in [`docs/provenance.md`](provenance.md) were copied from another
-codebase and are kept diff-clean against it on purpose.
+Most of this repository is ported from [llm_wiki](https://github.com/nashsu/llm_wiki)
+(GPL-3.0, © Yong Su): all of `src/`, and most of `src-tauri/src/`. See
+[`docs/provenance.md`](provenance.md) and [`docs/porting-llm-wiki.md`](porting-llm-wiki.md).
 
-```text
-crates/athenaeum-providers/src/client.rs
-crates/athenaeum-providers/src/proxy.rs
-src-tauri/src/panic_guard.rs
-src-tauri/windows-app-manifest.xml
-src-tauri/build.rs
-```
+This is Athenaeum's code now — edit it as freely as anything else. But where a file is
+still close to upstream, staying close is worth something:
 
-For these, **the upstream is the source of truth**:
-
-* Fix bugs upstream and re-copy, rather than diverging here.
-* Do not refactor them for style, duplication, or file size. The ability to
-  diff them against upstream is worth more than the cleanup.
-* Any deliberate divergence gets a row in `provenance.md` saying what and why.
-* New code does **not** go in these files.
+* Prefer fixing a bug upstream and re-copying over diverging, while the diff is small
+  enough for that to be realistic.
+* Do not refactor a near-verbatim file for style, duplication or size alone.
+* Do not re-add anything on the *do not port* list in `porting-llm-wiki.md`. The agent
+  runtime in particular is refused permanently, not merely absent.
+* Keep the attribution headers on files that carry them.
 
 ---
 
@@ -84,9 +79,8 @@ Dependencies point **inward only**:
 | Crate / surface | may depend on |
 | --- | --- |
 | `athenaeum-core` | nothing in this workspace |
-| `athenaeum-providers` | nothing in this workspace |
 | `athenaeum-cli` | `athenaeum-core` |
-| `src-tauri` | `athenaeum-core`, `athenaeum-providers` |
+| `src-tauri` | `athenaeum-core` |
 | `src/` (frontend) | the Tauri command surface, via `src/api.ts` |
 
 Rules:

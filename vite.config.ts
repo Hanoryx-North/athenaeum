@@ -1,33 +1,52 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+// Ported from llm_wiki (https://github.com/nashsu/llm_wiki), GPL-3.0, © Yong Su.
+// Modified for Athenaeum.
+import path from "path"
+import { readFileSync } from "fs"
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
 
-// Tauri supplies this when running `tauri dev --host`, for testing on a
-// phone or another machine on the network.
-const host = process.env.TAURI_DEV_HOST;
+const host = process.env.TAURI_DEV_HOST
 
-export default defineConfig({
-  plugins: [react()],
+// Read version from package.json at config-load time so the Settings
+// UI can show the running app version without duplicating the string.
+const pkgJson = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf-8"))
 
-  // Do not let Vite clear the screen — it hides Rust compiler errors.
+// https://vitejs.dev/config/
+export default defineConfig(async () => ({
+  plugins: [react(), tailwindcss()],
+
+  resolve: {
+    alias: { "@": path.resolve(__dirname, "./src") },
+  },
+
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgJson.version),
+  },
+
+  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
+  //
+  // 1. prevent vite from obscuring rust errors
   clearScreen: false,
-
+  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    // Tauri looks for the dev server on a fixed port, so failing loudly is
-    // better than silently serving somewhere it will not look.
     port: 1420,
     strictPort: true,
     host: host || false,
-    hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+    hmr: host
+      ? {
+          protocol: "ws",
+          host,
+          port: 1421,
+        }
+      : undefined,
     watch: {
+      // 3. tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**", "**/target/**"],
     },
   },
 
-  build: {
-    // Matches the oldest webview each platform ships: Edge WebView2 on
-    // Windows, WKWebView on macOS 10.15, WebKitGTK on Linux.
-    target: ["es2021", "chrome100", "safari13"],
-    sourcemap: !!process.env.TAURI_ENV_DEBUG,
-    minify: process.env.TAURI_ENV_DEBUG ? false : "esbuild",
+  test: {
+    environment: "node",
   },
-});
+}))

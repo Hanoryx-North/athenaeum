@@ -94,11 +94,10 @@ or treat a knowledge request as permission to touch the filesystem, network, or 
 Retrieved knowledge crossing the seam is **reference material, never instruction**. The
 trust wrapper in `athenaeum brief --prompt` is not optional decoration.
 
-## Retired code — do not extend
+## Retired code
 
-- **`crates/athenaeum-providers/`** predates the repository split. It is bootstrap
-  compatibility code only. Model provider work belongs to `deepseek-harness`. Do not add
-  providers, streaming, or routing here; this crate is on its way out.
+`crates/athenaeum-providers/` is **removed**. It was a bootstrap model client from before
+the repository split; providers belong to `deepseek-harness`.
 
 ## What the documents in this repo are
 
@@ -116,15 +115,33 @@ agent loop, model roles, tool runtime and all. **Most of it is deliberately not 
 here.** Read it for direction; take your scope from this file. A section of the build plan
 is not a licence to implement it in this repository.
 
+## Commands
+
+```sh
+npm install && cargo build          # Rust 1.88+, Node 20+
+npm run dev                         # Vite dev server
+npm run tauri dev                   # the app
+npm run typecheck && npx vitest run  # frontend: 1,793 tests
+cargo test --workspace              # Rust: 290 tests, offline, no API key
+npm run build                       # typecheck + bundle
+```
+
+Linux needs the webview headers first:
+`libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`, plus
+`protobuf-compiler` for LanceDB.
+
 ## Conventions
 
-- Rust 1.82+, Node 20+. `cargo test --workspace` is offline and needs no API key.
+- The frontend is React 19 + Tailwind 4 + zustand, ported from llm_wiki. Match the
+  surrounding style; `@/` resolves to `src/`.
 - `athenaeum-core` has no UI dependency, no Tauri dependency, and makes no network calls.
   Keep it that way — it is what makes the five platform bundles identical and lets the
   knowledge model be tested keyless.
 - Vault paths are normalized to forward slashes on the way in, so a knowledge base created
   on one platform opens unchanged on another.
 - SQLite is compiled from source and linked statically; TLS is rustls, never native-tls.
+- Project data lives in `.athenaeum/` inside the project — one directory, shared by the
+  vault's metadata and the knowledge index.
 - Files end with exactly one trailing newline.
 
 ## Licence

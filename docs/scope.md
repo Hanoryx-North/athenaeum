@@ -94,18 +94,13 @@ calls, permissions and session belong to the harness.
 
 ## Retired code
 
-Two subsystems still build and still pass tests, and neither is the direction. They are
-documented here so a session does not mistake them for foundations worth extending.
-
-**`crates/athenaeum-providers/`** (this repository) is a model client with per-role
-routing, written before the runtime was split out. Provider work belongs to
-`deepseek-harness`. Nothing new goes here.
+**`crates/athenaeum-providers/`** was a model client with per-role routing, written before
+the runtime was split out. It has been **removed**: providers belong to `deepseek-harness`.
 
 **`athenaeum_agent/crates/`** is a complete coding-agent runtime in Rust — 335 passing
 tests — written when no readable agent implementation was available to reuse. DeepSeek
-Harness now fills that role. See that repository's `docs/runtime-pivot.md`.
-
-Retired does not mean deleted. It means: no new behaviour, no extensions, no new callers.
+Harness now fills that role. It still builds, and it is retired: no new behaviour, no
+extensions, no new callers. See that repository's `docs/runtime-pivot.md`.
 
 ## The vision document
 

@@ -101,6 +101,7 @@ Sizes are llm_wiki's, to show where the work actually is.
 | Model provider config, routing, streaming | 1,460 (`agent/provider.rs`) | Providers are the harness's. Ingest calls a model through a thin client, not a provider framework. | `deepseek-harness` |
 | MCP server (`mcp-server/`) | | Out of scope for now. The harness exposes tools its own way. | — |
 | Chrome extension (`extension/`) | | Later, if wanted. | — |
+| `api_server.rs`, `clip_server.rs` | 3,988 | **Deferred, not refused.** The local HTTP API and clipper receiver; their only consumers are the MCP server and the extension, both out of scope, and the chat endpoints are agent surface that would have to be cut anyway. Porting them means re-taking `cors.rs`, `server_bind.rs` and `commands/page_embedding.rs`, removed here as orphans. | — |
 
 If a task asks you to port anything in that table, stop and say which repository owns it.
 
@@ -144,11 +145,39 @@ Steps 1–7 need no agent. Step 8 is where the three repositories first run toge
 
 ## Attribution
 
-Every ported file keeps its origin recorded. Per-file header on substantially copied files:
+`LICENSE` (GPL-3.0), [`provenance.md`](provenance.md) and the About panel in Settings carry
+the repository-level record: upstream, author, licence.
+
+`src/README.md` states that the whole frontend tree is ported, which is more honest than a
+header on 300 largely verbatim files. Individual headers go on files that were
+**substantially rewritten or synthesized** rather than copied — `src-tauri/src/lib.rs`,
+`search_backends.rs`, `panic_guard.rs`, `vite.config.ts`, `lib/changelog.ts`:
 
 ```
 // Ported from llm_wiki (https://github.com/nashsu/llm_wiki), GPL-3.0, © Yong Su.
 // Modified for Athenaeum.
 ```
 
-`provenance.md` carries the repository-level record: upstream, version, commit, licence.
+**Branding is not code.** llm_wiki's `logo.jpg` was not kept; the sidebar uses Athenaeum's
+own generated icon. Upstream's name, logo and release history do not ship here.
+
+## Status
+
+Steps 1–3 of the order above are done, and steps 4–7 landed with the code they depend on:
+
+- Licence, provenance, manifests — done.
+- Frontend foundation, layout, UI primitives, vault layer, editor, graph, sources, search,
+  lint, review, ingest pipeline — ported; 1,793 frontend tests pass.
+- Rust backend — document parsing, file sync, history, project management, vector search,
+  search backends; 290 workspace tests pass.
+- `crates/athenaeum-providers` — retired and removed.
+
+Still open, in order:
+
+1. **Index the vault** (step 5). `athenaeum-core` does not yet build nodes and edges from
+   wiki pages and `[[wikilinks]]`. Until it does, the ported graph view and Athenaeum's
+   knowledge library are two separate models rather than one. This is the next real work.
+2. **Chat rewired to `athenaeum_agent`** (step 8). The chat UI is ported and its
+   agent-CLI transports are removed; it now needs the harness behind it.
+3. **Restyle toward SiYuan's density** (step 10).
+4. Optionally, the local HTTP API, once something in scope needs it.

@@ -135,11 +135,10 @@ npm run tauri build    # produce an installer for the current platform
 ## How it is put together
 
 ```text
-crates/athenaeum-core/       the library — knowledge, storage, navigation
-crates/athenaeum-providers/  model access (Anthropic, OpenAI, Google, …)
-crates/athenaeum-cli/        the `athenaeum` command
-src-tauri/                   desktop shell (thin)
-src/                         React frontend (thin)
+crates/athenaeum-core/  the library — knowledge, storage, navigation
+crates/athenaeum-cli/   the `athenaeum` command
+src-tauri/              desktop backend — vault I/O, ingest, parsing, search
+src/                    React frontend — the Obsidian-style interface
 ```
 
 `athenaeum-core` is the product. It has no UI dependency, no Tauri dependency
@@ -147,10 +146,8 @@ and makes no network calls, which is what keeps the three platform builds
 identical and lets the whole knowledge model be tested without an API key.
 The CLI and the desktop app are both just consumers of it.
 
-The provider crate is bootstrap compatibility code from before the runtime was
-split into Repository 2. New agent/runtime work does not belong here. The
-future runtime connects through the Wiki contract and never through SQLite or
-store internals.
+New agent/runtime work does not belong here. The runtime connects through the Wiki
+contract and never through SQLite or store internals.
 
 Full reasoning: [docs/architecture.md](docs/architecture.md).
 Where copied code came from: [docs/provenance.md](docs/provenance.md).

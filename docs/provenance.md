@@ -28,6 +28,32 @@ Substantially copied files carry a header naming their origin:
 // Modified for Athenaeum.
 ```
 
+## From `llm_wiki` — the port
+
+The frontend (`src/`) is llm_wiki's, modified for Athenaeum: layout, editor, graph view,
+sources, search, lint, review, settings, stores, i18n, and the ingest pipeline that is the
+auto wiki builder. `src/README.md` records that origin for the whole tree.
+
+Most of the Tauri backend (`src-tauri/src/commands/`, `types/`, `proxy.rs`, `tray.rs`) is
+llm_wiki's too. Three files were rewritten rather than copied and carry their own headers:
+
+| Here | Upstream | Change |
+| --- | --- | --- |
+| `src-tauri/src/lib.rs` | `src-tauri/src/lib.rs` | Rebuilt from upstream's `run()` with the agent commands, agent state, `api_server` and `clip_server` wiring removed, and Athenaeum's knowledge commands added. |
+| `src-tauri/src/search_backends.rs` | `src-tauri/src/agent/tools.rs` | The web and AnyTxt search backends extracted out of the agent's tool file. `AgentReference` became `SearchReference` with the agent-only fields dropped. |
+| `src-tauri/src/panic_guard.rs` | same path | The async half restored, having been dropped at bootstrap when every command here was synchronous. |
+
+**Not taken, permanently:** `src-tauri/src/agent/` (13,512 lines), `commands/claude_cli.rs`,
+`commands/codex_cli.rs`, `commands/cli_resolver.rs`, and the frontend's CLI transports.
+DeepSeek Harness owns the agent runtime.
+
+**Not taken, for now:** `api_server.rs` and `clip_server.rs`, and the `cors.rs`,
+`server_bind.rs` and `commands/page_embedding.rs` that existed only to serve them.
+
+**Branding is not code.** llm_wiki's `logo.jpg`, name and release history are not here; the
+sidebar uses Athenaeum's own generated icon and the changelog starts at Athenaeum's first
+version.
+
 ## From `llm_wiki` — bootstrap
 
 | Here | Upstream | Change |

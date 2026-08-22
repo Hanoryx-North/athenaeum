@@ -10,7 +10,6 @@
 resolver = "2"
 members = [
     "crates/athenaeum-core",
-    "crates/athenaeum-providers",
     "crates/athenaeum-cli",
     "src-tauri",
 ]
@@ -18,8 +17,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# Matches the floor used by the Tauri 2 toolchain we build the shell with.
-rust-version = "1.82"
+# AnyDoc and its archive/spreadsheet dependencies require 1.88; that is above the
+# Tauri 2 floor of 1.82, so it sets the workspace minimum.
+rust-version = "1.88"
 license = "GPL-3.0-only"
 
 [workspace.dependencies]

@@ -1,3 +1,8 @@
+# Athenaeum desktop shell.
+#
+# Dependencies are llm_wiki's (GPL-3.0, © Yong Su) minus everything the agent
+# runtime needed: no `which` for locating agent CLIs on PATH, no tokio process
+# features for spawning them. DeepSeek Harness owns the agent runtime.
 [package]
 name = "athenaeum-app"
 description = "Athenaeum desktop shell."
@@ -21,8 +26,53 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 athenaeum-core = { path = "../crates/athenaeum-core" }
-athenaeum-providers = { path = "../crates/athenaeum-providers" }
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
+tauri-plugin-opener = "2"
+tauri-plugin-store = "2.4.2"
+
+# Rust-side HTTP so providers that reject browser-origin headers via CORS
+# preflight still work: requests leave from Rust, never the webview.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tiny_http = "0.12"
+
+# Document parsing for ingest.
+anydoc = "0.1.6"
+calamine = "0.34.0"
+docx-rs = "0.4.20"
+epub = "2.1.5"
+mobi = "0.8"
+office_oxide = "=0.1.2"
+pdfium-render = "0.9"
+zip = "2"
+html2text = { version = "0.17.1", default-features = false, features = ["xml"] }
+
+# Optional vector search over page embeddings.
+arrow-array = "57"
+arrow-schema = "57"
+lancedb = "0.27.2"
+
+# Image extraction: `image` re-encodes pdfium's raw bitmap to PNG so the IPC
+# payload is self-contained; `base64` serializes binary data for Tauri's
+# JSON-only IPC; `md-5` backs the source dedup cache.
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
+md-5 = "0.10"
+
+futures = "0.3"
+notify = "8"
+walkdir = "2"
+# tokio's runtime comes from tauri; these features are for async commands and
+# the search backends' request timeouts.
+tokio = { version = "1", features = ["io-util", "sync", "macros", "rt", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

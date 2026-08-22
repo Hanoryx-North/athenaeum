@@ -6,6 +6,8 @@
 node_modules/
 /dist/
 /dist-portable/
+# tsc --build incremental state
+*.tsbuildinfo
 
 # Tauri generated
 /src-tauri/gen/
