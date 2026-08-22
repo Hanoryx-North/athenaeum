@@ -1,3 +1,21 @@
+> [!IMPORTANT]
+> **This is cross-repository product vision, not this repository's backlog.**
+>
+> This document describes the whole product across all three repositories — the agent
+> loop, model roles, tool runtime, providers, permissions and sessions included. **Most
+> of what follows is deliberately not built in Athenaeum.** The agent runtime is
+> [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness); the knowledge seam
+> is [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent).
+>
+> Read this for direction. Take your scope from [`AGENTS.md`](../../AGENTS.md) and
+> [`docs/scope.md`](../scope.md). **A section existing here is not a licence to implement
+> it in this repository.**
+>
+> Code comments cite this document as `§N`. Those citations are historical references to
+> the specification, not open work items.
+
+---
+
 # LLMWiki
 
 ## Master Technical Specification — v3.0

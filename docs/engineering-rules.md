@@ -6,7 +6,7 @@ These rules govern a **Rust workspace with three consumers**: a knowledge librar
 
 ## 1. Before Coding
 
-1. Understand the request and existing architecture. [`docs/architecture.md`](architecture.md) explains *why* the layering is what it is; read it before changing a layer. The `§N` references throughout the code point into [`docs/build-plan.md`](build-plan.md), the original specification.
+1. Understand the request and existing architecture. [`docs/architecture.md`](architecture.md) explains *why* the layering is what it is; read it before changing a layer. The `§N` references throughout the code point into [`docs/vision/build-plan.md`](vision/build-plan.md), the original specification.
 2. Inspect relevant files, patterns, dependencies, and project rules.
 3. Search before creating anything new.
 4. Identify the **smallest correct change**.
@@ -406,7 +406,7 @@ For meaningful work, update the phase table under *Where this sits against the
 build plan* in [`docs/architecture.md`](architecture.md), so the next session
 starts from what is actually true.
 
-`docs/build-plan.md` is the specification the code cites as `§N`. It is a
+`docs/vision/build-plan.md` is the cross-repo vision document the code cites as `§N`. It is a
 record of what was decided, not a progress log — read it, do not edit it.
 
 ### Completion Report

@@ -3,6 +3,13 @@
 A local, persistent knowledge graph for a codebase — and the coding agent that
 navigates it.
 
+> **Building on Athenaeum?** Read [`AGENTS.md`](AGENTS.md) first. It defines what this
+> repository owns and — just as importantly — what belongs to
+> [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) and
+> [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) instead.
+> [`docs/vision/build-plan.md`](docs/vision/build-plan.md) is cross-repository product
+> vision, not this repository's backlog.
+
 The idea, in one sentence: **a coding agent gets much better when it stops
 rediscovering the same things about your project every session.** Athenaeum
 gives it somewhere to put what it learns — typed knowledge nodes, typed
@@ -33,6 +40,18 @@ What works:
 - Deterministic repository indexing for files, symbols, local imports and Git
   history, with no model involved.
 - Source-anchor relocation by symbol and region fingerprint.
+
+### Where this is going
+
+The desktop shell is currently thin. It is being replaced by a full Obsidian-style
+interface ported from [llm_wiki](https://github.com/nashsu/llm_wiki) — three-column
+layout, graph view, markdown editor, and the auto wiki builder that turns dropped sources
+into linked wiki pages. [`docs/porting-llm-wiki.md`](docs/porting-llm-wiki.md) records
+what is copied, what is rewired, and what is deliberately refused.
+
+After that port, knowledge lives as **markdown files on disk** — Obsidian-compatible,
+`[[wikilink]]`-connected — and the SQLite knowledge base becomes a derived index over
+them, rebuildable at any time.
 
 The coding-agent runtime is intentionally **not built in this repository**.
 It is [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), which
@@ -206,3 +225,15 @@ python3 scripts/generate_icons.py
 
 They are placeholders — a graph motif — until real branding exists. CI checks
 that the committed files still match the generator.
+
+---
+
+## Licence
+
+**GPL-3.0-only.** Athenaeum's UI and wiki engine derive from
+[llm_wiki](https://github.com/nashsu/llm_wiki) (GPL-3.0, © Yong Su).
+[`docs/provenance.md`](docs/provenance.md) records what came from where.
+
+[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) and
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) remain MIT — separate
+repositories in separate processes, connected only by the `athenaeum bridge` protocol.
