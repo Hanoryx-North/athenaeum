@@ -54,7 +54,9 @@ through one narrow, versioned seam.
   research — the pipeline that turns a dropped source into wiki pages.
 - The **knowledge library** (`crates/athenaeum-core`): nodes, typed edges, evidence,
   provenance, authority, history, full-text search, graph navigation, knowledge briefs.
-  This is a **derived index over the vault**, rebuildable at any time.
+  This is a **derived index over the vault**, rebuildable at any time —
+  `crates/athenaeum-core/src/vault/` is what builds it, and
+  `athenaeum index-vault` is what runs it.
 - The `athenaeum` CLI and the `athenaeum bridge` protocol — the seam's Athenaeum half.
 - Repository indexing: files, symbols, local imports, Git history. Deterministic, no model.
 
@@ -121,8 +123,8 @@ is not a licence to implement it in this repository.
 npm install && cargo build          # Rust 1.88+, Node 20+
 npm run dev                         # Vite dev server
 npm run tauri dev                   # the app
-npm run typecheck && npx vitest run  # frontend: 1,793 tests
-cargo test --workspace              # Rust: 290 tests, offline, no API key
+npm run typecheck && npx vitest run  # frontend: 1,818 tests
+cargo test --workspace              # Rust: 357 tests, offline, no API key
 npm run build                       # typecheck + bundle
 ```
 
