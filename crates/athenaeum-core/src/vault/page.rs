@@ -33,6 +33,9 @@ pub struct VaultPage {
     pub type_declared: bool,
     /// An `authority:` the page declared, when it declared a valid one.
     pub authority: Option<Authority>,
+    /// An `origin:` the page declared — `deep-research`, `web-clip` — for
+    /// the parts of the UI that mark where a page came from.
+    pub origin: Option<String>,
     pub tags: Vec<String>,
     pub summary: String,
     /// The body, frontmatter removed.
@@ -65,6 +68,10 @@ impl VaultPage {
             title: title_of(&fm, body, &slug),
             summary: summary_of(&fm, body),
             authority: fm.text("authority").and_then(|raw| raw.trim().parse().ok()),
+            origin: fm
+                .text("origin")
+                .map(normalize_marker)
+                .filter(|o| !o.is_empty()),
             tags: dedup(fm.list("tags").into_iter().map(str::to_string)),
             links: wikilink::targets(body),
             related: dedup(
@@ -145,7 +152,28 @@ fn singular(dir: &str) -> String {
 }
 
 fn normalize_type(raw: &str) -> String {
-    raw.trim().trim_matches(['"', '\'']).to_ascii_lowercase()
+    normalize_marker(raw)
+}
+
+/// Fold a short frontmatter marker to the lowercase, punctuation-free form
+/// the rest of the pipeline matches on. Anything that is not a letter,
+/// digit or hyphen is dropped, so a marker can be stored inside a
+/// colon-separated provenance detail without ambiguity.
+fn normalize_marker(raw: &str) -> String {
+    raw.trim()
+        .trim_matches(['"', '\''])
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
 }
 
 fn title_of(fm: &Frontmatter, body: &str, slug: &str) -> String {

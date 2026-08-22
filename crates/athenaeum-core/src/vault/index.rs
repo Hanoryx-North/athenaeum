@@ -25,11 +25,12 @@ use super::{VaultScanOptions, VaultSnapshot, VaultSource};
 /// the user's, the agent's — and is never touched.
 ///
 /// The page's own declared type is appended after a colon
-/// (`vault_index:page:concept`). The vault's vocabulary is finer than the
-/// knowledge model's — `query`, `synthesis` and `thesis` all reduce to a
-/// handful of [`NodeType`]s — and provenance is exactly where a claim's
-/// specific origin belongs, so recording it there keeps the distinction
-/// available to a reader without inventing a column for it.
+/// (`vault_index:page:concept`), and a declared `origin:` after that
+/// (`vault_index:page:concept:deep-research`). The vault's vocabulary is
+/// finer than the knowledge model's — `query`, `synthesis` and `thesis` all
+/// reduce to a handful of [`NodeType`]s — and where a page came from is
+/// precisely what provenance is for, so recording both there keeps them
+/// available to a reader without inventing columns.
 pub const PAGE_PROVENANCE: &str = "vault_index:page";
 /// Provenance detail marking a node backed by a file in `raw/sources/`.
 pub const SOURCE_PROVENANCE: &str = "vault_index:source";
@@ -247,15 +248,21 @@ fn page_node(page: &VaultPage) -> KnowledgeNode {
         .with_scope(Scope::Project)
         .with_authority(authority_for(page))
         .with_status(NodeStatus::Valid)
-        .with_provenance(Provenance::deterministic(page_provenance(&page.page_type)))
+        .with_provenance(Provenance::deterministic(page_provenance(page)))
 }
 
-/// `vault_index:page:concept` — the marker plus the vault's own page type.
-fn page_provenance(page_type: &str) -> String {
-    if page_type.is_empty() {
-        return PAGE_PROVENANCE.to_string();
+/// `vault_index:page:concept:deep-research` — the marker, the vault's own
+/// page type, and where the page says it came from. Trailing segments are
+/// omitted when the page declares nothing.
+fn page_provenance(page: &VaultPage) -> String {
+    match (page.page_type.as_str(), page.origin.as_deref()) {
+        ("", None) => PAGE_PROVENANCE.to_string(),
+        (page_type, None) => format!("{PAGE_PROVENANCE}:{page_type}"),
+        // A page with an origin but no type still needs the type slot
+        // filled, or the two would be indistinguishable when parsed back.
+        ("", Some(origin)) => format!("{PAGE_PROVENANCE}::{origin}"),
+        (page_type, Some(origin)) => format!("{PAGE_PROVENANCE}:{page_type}:{origin}"),
     }
-    format!("{PAGE_PROVENANCE}:{page_type}")
 }
 
 fn source_node(source: &VaultSource) -> KnowledgeNode {

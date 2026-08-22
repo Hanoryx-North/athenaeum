@@ -61,6 +61,10 @@ pub struct GraphNode {
     pub authority: Authority,
     pub status: NodeStatus,
     pub origin: GraphOrigin,
+    /// What a page declared about where it came from — `deep-research`,
+    /// `web-clip` — for the panels that badge such pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub declared_origin: Option<String>,
     /// Edges touching this node in either direction.
     pub link_count: usize,
 }
@@ -111,16 +115,18 @@ pub fn project(store: &KnowledgeStore) -> Result<KnowledgeGraph> {
             let node_type: NodeType = crate::store::parse_enum(&row.get::<_, String>(1)?, "type")?;
             let detail: Option<String> = row.get(6)?;
             let origin = origin_of(detail.as_deref());
+            let (page_type, declared_origin) = marks_of(detail.as_deref());
             Ok(GraphNode {
                 id: row.get(0)?,
                 title: row.get(2)?,
-                kind: kind_of(detail.as_deref(), node_type),
+                kind: page_type.unwrap_or_else(|| node_type.as_str().to_string()),
                 node_type,
                 path: row.get(7)?,
                 summary: row.get(3)?,
                 authority: crate::store::parse_enum(&row.get::<_, String>(4)?, "authority")?,
                 status: crate::store::parse_enum(&row.get::<_, String>(5)?, "status")?,
                 origin,
+                declared_origin,
                 link_count: 0,
             })
         })?
@@ -177,19 +183,29 @@ fn origin_of(detail: Option<&str>) -> GraphOrigin {
     }
 }
 
-fn kind_of(detail: Option<&str>, node_type: NodeType) -> String {
-    match detail {
-        Some(detail) if detail.starts_with(SOURCE_PROVENANCE) => "source".to_string(),
-        Some(detail) => match detail.strip_prefix(PAGE_PROVENANCE) {
-            Some(rest) => match rest.strip_prefix(':') {
-                Some(page_type) if !page_type.is_empty() => page_type.to_string(),
-                // A page whose location and frontmatter both said nothing.
-                _ => node_type.as_str().to_string(),
-            },
-            None => node_type.as_str().to_string(),
-        },
-        None => node_type.as_str().to_string(),
+/// Unpack `vault_index:page:<type>:<origin>` into the page type and the
+/// origin the page declared, either of which may be absent.
+///
+/// The page type comes back as `None` for a detail this module did not
+/// write, so the caller falls back to the knowledge model's own
+/// vocabulary rather than to a guess.
+fn marks_of(detail: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(detail) = detail else {
+        return (None, None);
+    };
+    if detail.starts_with(SOURCE_PROVENANCE) {
+        return (Some("source".to_string()), None);
     }
+    let Some(rest) = detail.strip_prefix(PAGE_PROVENANCE) else {
+        return (None, None);
+    };
+    let mut segments = rest.strip_prefix(':').unwrap_or("").splitn(2, ':');
+    let page_type = segments.next().unwrap_or("").trim();
+    let declared = segments.next().unwrap_or("").trim();
+    (
+        (!page_type.is_empty()).then(|| page_type.to_string()),
+        (!declared.is_empty()).then(|| declared.to_string()),
+    )
 }
 
 #[cfg(test)]
@@ -263,6 +279,36 @@ mod tests {
             .unwrap();
         assert_eq!(source.origin, GraphOrigin::Source);
         assert_eq!(source.path.as_deref(), Some("raw/sources/wei.pdf"));
+    }
+
+    #[test]
+    fn a_page_says_where_it_came_from() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "wiki/queries/what-scales.md",
+            "---\ntype: query\ntitle: What scales\norigin: deep-research\n---\n\n# What scales\n",
+        );
+        write(
+            dir.path(),
+            "wiki/concepts/plain.md",
+            "---\ntype: concept\ntitle: Plain\n---\n\n# Plain\n",
+        );
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        VaultIndexer::scan_and_index(&mut store, dir.path(), VaultScanOptions::default()).unwrap();
+
+        let graph = project(&store).unwrap();
+        let researched = graph
+            .nodes
+            .iter()
+            .find(|n| n.title == "What scales")
+            .unwrap();
+        assert_eq!(researched.kind, "query");
+        assert_eq!(researched.declared_origin.as_deref(), Some("deep-research"));
+
+        let plain = graph.nodes.iter().find(|n| n.title == "Plain").unwrap();
+        assert_eq!(plain.kind, "concept");
+        assert_eq!(plain.declared_origin, None);
     }
 
     #[test]

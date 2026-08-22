@@ -762,6 +762,10 @@ export function GraphView() {
     async (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId)
       if (!node) return
+      // Knowledge that is not a file — a decision typed into the knowledge
+      // panel, an edge the agent proposed — is drawn on the same canvas,
+      // but there is nothing on disk to open for it.
+      if (!node.path) return
       try {
         const content = await readFile(node.path)
         setGraphPreview({
