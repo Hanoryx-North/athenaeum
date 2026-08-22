@@ -20,9 +20,16 @@ use crate::store::{KnowledgeStore, NodeFilter};
 use super::page::{slug_of, VaultPage};
 use super::{VaultScanOptions, VaultSnapshot, VaultSource};
 
-/// Provenance detail marking a node this indexer owns because a wiki page
-/// exists. Anything without one of these markers is somebody else's — the
-/// user's, the agent's — and is never touched.
+/// Provenance detail prefix marking a node this indexer owns because a wiki
+/// page exists. Anything without one of these markers is somebody else's —
+/// the user's, the agent's — and is never touched.
+///
+/// The page's own declared type is appended after a colon
+/// (`vault_index:page:concept`). The vault's vocabulary is finer than the
+/// knowledge model's — `query`, `synthesis` and `thesis` all reduce to a
+/// handful of [`NodeType`]s — and provenance is exactly where a claim's
+/// specific origin belongs, so recording it there keeps the distinction
+/// available to a reader without inventing a column for it.
 pub const PAGE_PROVENANCE: &str = "vault_index:page";
 /// Provenance detail marking a node backed by a file in `raw/sources/`.
 pub const SOURCE_PROVENANCE: &str = "vault_index:source";
@@ -194,6 +201,9 @@ fn node_type_for(page_type: &str) -> NodeType {
     }
     match page_type {
         "overview" => NodeType::Project,
+        // The vault's two governance documents.
+        "schema" => NodeType::Rule,
+        "purpose" => NodeType::Decision,
         "comparison" | "theme" | "plot-thread" | "topic" => NodeType::Concept,
         "synthesis" | "finding" | "reflection" => NodeType::Fact,
         "query" | "thesis" | "meeting" | "goal" | "journal" | "note" => NodeType::Observation,
@@ -237,7 +247,15 @@ fn page_node(page: &VaultPage) -> KnowledgeNode {
         .with_scope(Scope::Project)
         .with_authority(authority_for(page))
         .with_status(NodeStatus::Valid)
-        .with_provenance(Provenance::deterministic(PAGE_PROVENANCE))
+        .with_provenance(Provenance::deterministic(page_provenance(&page.page_type)))
+}
+
+/// `vault_index:page:concept` — the marker plus the vault's own page type.
+fn page_provenance(page_type: &str) -> String {
+    if page_type.is_empty() {
+        return PAGE_PROVENANCE.to_string();
+    }
+    format!("{PAGE_PROVENANCE}:{page_type}")
 }
 
 fn source_node(source: &VaultSource) -> KnowledgeNode {
@@ -614,10 +632,9 @@ fn remove_departed(
 
 fn is_vault_owned(node: &KnowledgeNode) -> bool {
     node.provenance.source == ProvenanceSource::Deterministic
-        && matches!(
-            node.provenance.detail.as_deref(),
-            Some(PAGE_PROVENANCE | SOURCE_PROVENANCE)
-        )
+        && node.provenance.detail.as_deref().is_some_and(|detail| {
+            detail.starts_with(PAGE_PROVENANCE) || detail.starts_with(SOURCE_PROVENANCE)
+        })
 }
 
 fn reconcile_edges(

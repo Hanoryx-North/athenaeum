@@ -110,12 +110,18 @@ fn type_from_path(path: &str) -> String {
     if slug_of(&lower) == "overview" {
         return "overview".to_string();
     }
-    let after_wiki = lower.strip_prefix("wiki/").unwrap_or(&lower);
-    match after_wiki.split_once('/') {
-        // `wiki/entities/openai.md` → `entity`. Directories are plural by
-        // convention and types are singular.
-        Some((dir, _)) if !dir.is_empty() => singular(dir),
-        _ => String::new(),
+    match lower.strip_prefix("wiki/") {
+        Some(rest) => match rest.split_once('/') {
+            // `wiki/entities/openai.md` → `entity`. Directories are plural
+            // by convention and types are singular.
+            Some((dir, _)) if !dir.is_empty() => singular(dir),
+            // Directly inside `wiki/` with no subdirectory: the location
+            // says nothing, so nothing is claimed.
+            _ => String::new(),
+        },
+        // A governance document at the vault root — `purpose.md`,
+        // `schema.md` — where the filename is the type.
+        None => slug_of(&lower),
     }
 }
 

@@ -55,12 +55,14 @@
 //! [`ProvenanceSource::Deterministic`]: crate::model::ProvenanceSource::Deterministic
 
 pub mod frontmatter;
+pub mod graph;
 mod index;
 mod page;
 mod scan;
 mod wikilink;
 
 pub use frontmatter::{Frontmatter, FrontmatterValue};
+pub use graph::{GraphEdge, GraphNode, GraphOrigin, KnowledgeGraph};
 pub use index::{
     UnresolvedLink, VaultIndexReport, VaultIndexer, PAGE_PROVENANCE, SOURCE_PROVENANCE,
 };
