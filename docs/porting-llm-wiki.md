@@ -64,7 +64,7 @@ Sizes are llm_wiki's, to show where the work actually is.
 | Three-column layout, icon sidebar, resizable panels | `src/components/layout/` (16 files) | The shell. Restyle toward SiYuan's density; keep the structure. |
 | Knowledge tree, file tree, activity panel | `src/components/layout/` | |
 | Wiki editor and reader (Milkdown), frontmatter and page-links panels | `src/components/editor/` (7 files) | |
-| Graph view (sigma + graphology + Louvain) | `src/components/graph/`, `src/lib/wiki-graph*.ts` | Reads the derived index once wired; keep the worker. |
+| Graph view (sigma + graphology + Louvain) | `src/components/graph/`, `src/lib/wiki-graph*.ts` | Now reads the derived index; the worker, the layout and the filters are unchanged. |
 | Sources, search, lint, review panels | `src/components/{sources,search,lint,review}/` | |
 | Project management, welcome screen, create/open | `src/components/project/` | |
 | UI primitives (shadcn/base-ui) | `src/components/ui/` (8 files) | |
@@ -84,7 +84,7 @@ Sizes are llm_wiki's, to show where the work actually is.
 | Chat panel (`src/components/chat/`) | Keep the UI. **Replace its backend.** It talks to llm_wiki's in-process Rust agent today; it must talk to `athenaeum_agent` over the harness instead. This is the single most important rewire in the port. |
 | Chat store, `chat-agent-types.ts`, `agent-file-activity.ts` | Retarget at the harness event stream. The rendering survives; the transport does not. |
 | Settings (`src/components/settings/`, 23 files) | Drop provider/model/routing panes — `deepseek-harness` owns providers now. Keep vault, ingest, appearance, language, API, embedding settings. |
-| Knowledge model glue | llm_wiki has no typed knowledge graph. Athenaeum's `athenaeum-core` indexes the vault: pages become nodes, `[[wikilinks]]` become deterministic edges, frontmatter carries type and authority. |
+| Knowledge model glue | llm_wiki has no typed knowledge graph. Athenaeum's `athenaeum-core` indexes the vault: pages become nodes, `[[wikilinks]]` become deterministic edges, frontmatter carries type and authority. **Done** — see Status below. |
 | Branding | `llm_wiki` / `LLM Wiki` → `athenaeum` / `Athenaeum` throughout. Bundle identifiers, window titles, config paths, store keys. |
 
 ### DO NOT PORT — owned elsewhere
@@ -163,21 +163,50 @@ own generated icon. Upstream's name, logo and release history do not ship here.
 
 ## Status
 
-Steps 1–3 of the order above are done, and steps 4–7 landed with the code they depend on:
+Steps 1–6 of the order above are done, and step 7 landed with the code it depends on:
 
 - Licence, provenance, manifests — done.
 - Frontend foundation, layout, UI primitives, vault layer, editor, graph, sources, search,
-  lint, review, ingest pipeline — ported; 1,793 frontend tests pass.
+  lint, review, ingest pipeline — ported; 1,818 frontend tests pass.
 - Rust backend — document parsing, file sync, history, project management, vector search,
-  search backends; 290 workspace tests pass.
+  search backends; 357 workspace tests pass.
+- **Vault indexing** (step 5) — `crates/athenaeum-core/src/vault/` turns pages into typed
+  nodes, `[[wikilinks]]` into deterministic edges, `raw/sources/` entries into source
+  nodes and `sources:` frontmatter into evidence. Reconciles rather than rebuilds; the
+  test that deleting `knowledge.db` costs only time is
+  `vault::tests::a_deleted_database_costs_only_time`.
+- **Graph, search and knowledge panels over the index** (step 6) — one knowledge model
+  rather than one per panel. `src/lib/knowledge-index.ts` is the frontend's only door to
+  it.
 - `crates/athenaeum-providers` — retired and removed.
 
 Still open, in order:
 
-1. **Index the vault** (step 5). `athenaeum-core` does not yet build nodes and edges from
-   wiki pages and `[[wikilinks]]`. Until it does, the ported graph view and Athenaeum's
-   knowledge library are two separate models rather than one. This is the next real work.
-2. **Chat rewired to `athenaeum_agent`** (step 8). The chat UI is ported and its
-   agent-CLI transports are removed; it now needs the harness behind it.
+1. **Chat rewired to `athenaeum_agent`** (step 8). The chat UI is ported and its
+   agent-CLI transports are removed; it now needs the harness behind it, driven through
+   the SDK in `deepseek-harness/packages/sdk/` over stdio JSON-RPC, against a profile
+   that mounts the `athenaeum_agent` bundle. Not ACP: that is automation-only, not a
+   presentation layer.
+2. **Lint, review, deep research over the index** (step 9). All three are ported and
+   working against files; they have not been pointed at the derived index the way the
+   graph, search and knowledge panels now are.
 3. **Restyle toward SiYuan's density** (step 10).
 4. Optionally, the local HTTP API, once something in scope needs it.
+
+### What the vault index does and does not claim
+
+Worth stating, because both halves are decisions rather than omissions:
+
+- **A page's identity is its path**, not its title. Renaming a page's `title:` keeps its
+  node and its history; moving the file is a different page. Guessing that a moved file
+  is "the same page" merges two histories irreversibly when the guess is wrong.
+- **`index.md` and `log.md` are not nodes.** One is a table of contents that the node
+  table *is*, the other an activity journal that the event journal *is*. Indexing them
+  would hang two link-to-everything hubs off the graph and bury every real relationship
+  under them. Both stay in the vault, readable and editable.
+- **A deleted page's node is deleted, not marked stale.** The index is a function of the
+  vault; a page that is gone has no node. This is what makes a reconciled index and a
+  rebuilt one identical, which is the property the whole design rests on.
+- **Arbitrary frontmatter is not modelled.** `tags:`, `authors:`, `year:` stay in the
+  markdown. The index keeps what markdown cannot answer quickly — typed edges, evidence,
+  authority, traversal, search — and a page's own YAML is not that.

@@ -49,15 +49,50 @@ existing knowledge base less readable.
 including the end-to-end acceptance test for the product thesis, repository
 extraction, anchor relocation and protocol fixture compatibility.
 
-## Why the graph view is not here yet
+## The vault and its index
 
-The build plan is explicit that visualization is not the product (§33), and
-that the order of work is knowledge model → persistence → relationships →
-navigation → retrieval quality → UI. A beautiful graph over an empty database
-demonstrates nothing.
+The vault — `wiki/*.md`, `raw/sources/`, `purpose.md`, `schema.md` — is the
+source of truth. It is plain markdown on disk, it opens in Obsidian, and the
+agent edits it with ordinary file tools. Everything `athenaeum-core` stores
+about it is a **derived index**, and the test of that claim is blunt:
 
-So the shell shows lists, detail panes and briefs. It is deliberately plain.
-The graph gets drawn once there is something in it worth looking at.
+> Delete `.athenaeum/knowledge.db` and you lose nothing but time.
+
+`crates/athenaeum-core/src/vault/` builds it. A page becomes a typed node,
+a `[[wikilink]]` becomes a deterministic edge, a file under `raw/sources/`
+becomes a source node, and a page's `sources:` frontmatter becomes evidence
+anchored at the raw file. Frontmatter carries the page's type and authority;
+where a page predates the convention, its directory and its filename supply
+them rather than the page being refused.
+
+No model runs in that pass. Every node and edge it writes is marked
+deterministic, which is why they are traversable on arrival instead of
+queued as proposals the way a model's suggestions are.
+
+Indexing is a **reconcile, not a rebuild**. Edits arrive from the app's
+editor, from Obsidian and from the agent, and all three are legitimate, so
+each pass computes what the vault implies, compares it with what the store
+holds, and writes only the difference. A pass over an unchanged vault writes
+nothing at all. The indexer touches only what it created: a node the user
+typed into the knowledge panel and an edge the agent proposed over the
+bridge both survive every re-index untouched.
+
+Two properties are load-bearing and tested as such:
+
+* **The index is a function of the vault.** A store that watched the vault
+  being written and edited, and a store that saw the finished vault exactly
+  once, hold identical knowledge. If they ever disagree, something reached
+  SQLite without reaching the markdown, and the fix is to move it to the
+  vault rather than to weaken the test.
+* **A truncated scan never deletes.** Hitting a scan budget is not evidence
+  that the user deleted half their wiki.
+
+The desktop shell reads the result through two commands — `index_vault` and
+`knowledge_graph` — and `athenaeum index-vault` does the same from a
+terminal. The graph view, the knowledge tree and search all draw from that
+one projection, so the app holds one description of what is known rather
+than one per panel. Layout, filtering and community detection stay in the
+view, where the visual design can change without touching the library.
 
 ## The knowledge model
 
@@ -163,14 +198,19 @@ this library through the Wiki protocol, not through this compatibility code.
 ```text
 .athenaeum/
 ├── knowledge.db     nodes, edges, evidence, node_versions, journal, nodes_fts
+│                    — derived from the vault; safe to delete
 ├── blobs/sha256/    content-addressed evidence, fanned out by hash prefix
 ├── exports/
 └── cache/
 ```
 
-Canonical data is nodes, edges, evidence and history. The full-text index is
-derived and can be dropped and rebuilt from the nodes table at any time —
-there is a test that deletes it and rebuilds it. Schema changes go through an
+Canonical data is whatever was not derived from the vault: nodes the user
+typed, edges the agent proposed, evidence attached by hand. Everything the
+vault implies is rebuilt by `index-vault`, and the full-text index is
+derived from the nodes table in turn — there is a test that deletes it and
+rebuilds it, and another that rebuilds the whole vault-derived graph from
+an empty database and compares it against one that was reconciled edit by
+edit. Schema changes go through an
 append-only migration list; a database written by a newer build is refused
 rather than silently downgraded, because a downgrade that drops columns
 destroys the user's knowledge.
@@ -190,7 +230,7 @@ the knowledge belongs to the user.
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
 | 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation done:** exact, symbol, fingerprint and stale outcomes are searched and persisted; semantic/model revalidation remains external |
-| 7 — Obsidian-style app | Deliberately minimal here; the product shell starts from the `llm_wiki` desktop application rather than a new one |
+| 7 — Obsidian-style app | **Shell ported and wired:** the `llm_wiki` desktop application supplies the UI and the wiki engine, and its graph, knowledge and search panels read the derived index rather than re-deriving one from files. Chat still needs the harness behind it |
 
 Phase 5 was the real product milestone, and it is met without this repository
 absorbing runtime responsibilities. The runtime negotiates capabilities,
@@ -206,11 +246,16 @@ implementation — over the published protocol, from a different language.
 2. **Verification workflows** (Phase 6 tail) — contradiction review and
    semantic revalidation belong behind the existing protocol and the runtime's
    verifier policy; the local library continues to own persisted outcomes.
-3. **The product shell** (Phase 7) — the visible layer starts from the working
-   `llm_wiki` desktop application, whose own agent runtime is replaced by the
-   harness this library now serves.
+3. **Chat on the harness** (Phase 7 tail) — the chat UI is ported and its
+   agent-CLI transports are gone; it now needs `athenaeum_agent` behind it,
+   driven through the harness SDK. That is the last place where the visible
+   layer still has a hole rather than a seam.
 
 ## Deterministic repository knowledge
+
+This is the sibling of the vault indexer above, over code rather than
+markdown, and it follows the same rules: bounded, read-only, no model, and
+reconciled rather than rebuilt.
 
 `athenaeum index` performs a bounded, read-only scan. Generated and private
 workspace directories are skipped, non-text and oversized files are not read,

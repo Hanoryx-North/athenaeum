@@ -5,21 +5,23 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
-import { readFile, listDirectory } from "@/commands/fs"
+import { listDirectory } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { cascadeDeleteWikiPagesWithRefs } from "@/lib/wiki-page-delete"
-import { inferWikiTypeFromPath, wikiTypeLabel } from "@/lib/wiki-page-types"
+import { wikiTypeLabel } from "@/lib/wiki-page-types"
+import { loadKnowledgeGraph, nodeFilePath } from "@/lib/knowledge-index"
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
 
 interface WikiPageInfo {
+  /** Absolute path of the page's markdown file. */
   path: string
   title: string
   type: string
-  tags: string[]
+  /** What the page declared about where it came from, e.g. `web-clip`. */
   origin?: string
 }
 
@@ -59,39 +61,33 @@ export function KnowledgeTree() {
     if (!project) return
     const pp = normalizePath(project.path)
     try {
-      const wikiTree = await listDirectory(`${pp}/wiki`)
-      const mdFiles = flattenMdFiles(wikiTree)
-
-      const pageInfos: WikiPageInfo[] = []
-      for (const file of mdFiles) {
-        // Skip index.md and log.md
-        if (file.name === "index.md" || file.name === "log.md") continue
-        try {
-          const content = await readFile(file.path)
-          const info = parsePageInfo(file.path, file.name, content)
-          pageInfos.push(info)
-        } catch {
-          pageInfos.push({
-            path: file.path,
-            title: file.name.replace(".md", "").replace(/-/g, " "),
-            type: "other",
-            tags: [],
-          })
-        }
-      }
-
-      setPages(pageInfos)
+      // One read of the derived index, rather than opening and re-parsing
+      // every page in the vault on every change. The index already knows
+      // each page's title, its type and where it came from, and it is the
+      // same model the graph and search draw from.
+      const graph = await loadKnowledgeGraph(pp, dataVersion)
+      setPages(
+        graph.nodes
+          .filter((node) => node.origin === "page")
+          .map((node) => ({
+            path: nodeFilePath(pp, node) ?? "",
+            title: node.title,
+            type: node.kind,
+            origin: node.declaredOrigin,
+          }))
+          .filter((page) => page.path !== ""),
+      )
     } catch {
       setPages([])
     }
-  }, [project])
+  }, [project, dataVersion])
 
   // Reload when wiki data changes. Do not key this off the visible
   // sidebar file tree: lazy directory expansion mutates that tree and
   // should not force a full wiki metadata re-parse.
   useEffect(() => {
     loadPages()
-  }, [loadPages, dataVersion])
+  }, [loadPages])
 
   const handleDeleteClick = useCallback(
     async (pagePath: string) => {
@@ -308,45 +304,6 @@ function RawSourcesSection() {
   )
 }
 
-function parsePageInfo(path: string, fileName: string, content: string): WikiPageInfo {
-  let type = "other"
-  let title = fileName.replace(".md", "").replace(/-/g, " ")
-  const tags: string[] = []
-  let origin: string | undefined
-
-  // Parse YAML frontmatter
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (fmMatch) {
-    const fm = fmMatch[1]
-    const typeMatch = fm.match(/^type:\s*(.+)$/m)
-    if (typeMatch) type = typeMatch[1].trim().toLowerCase()
-
-    const titleMatch = fm.match(/^title:\s*["']?(.+?)["']?\s*$/m)
-    if (titleMatch) title = titleMatch[1].trim()
-
-    const tagsMatch = fm.match(/^tags:\s*\[(.+?)\]/m)
-    if (tagsMatch) {
-      tags.push(...tagsMatch[1].split(",").map((t) => t.trim().replace(/["']/g, "")))
-    }
-
-    const originMatch = fm.match(/^origin:\s*(.+)$/m)
-    if (originMatch) origin = originMatch[1].trim()
-  }
-
-  // Fallback: try first heading if no frontmatter title
-  if (title === fileName.replace(".md", "").replace(/-/g, " ")) {
-    const headingMatch = content.match(/^#\s+(.+)$/m)
-    if (headingMatch) title = headingMatch[1].trim()
-  }
-
-  // Fallback: infer type from path
-  if (type === "other") {
-    type = inferWikiTypeFromPath(path, fileName) ?? "other"
-  }
-
-  return { path, title, type, tags, origin }
-}
-
 /**
  * Two-stage delete affordance for a single page row. Default state =
  * subtle ghost trash icon. Armed state = solid red Confirm pill so a
@@ -413,18 +370,6 @@ function DeleteButton({
       <Trash2 className="h-3 w-3" />
     </Button>
   )
-}
-
-function flattenMdFiles(nodes: FileNode[]): FileNode[] {
-  const files: FileNode[] = []
-  for (const node of nodes) {
-    if (node.is_dir && node.children) {
-      files.push(...flattenMdFiles(node.children))
-    } else if (!node.is_dir && node.name.endsWith(".md")) {
-      files.push(node)
-    }
-  }
-  return files
 }
 
 function flattenAllFiles(nodes: FileNode[]): FileNode[] {

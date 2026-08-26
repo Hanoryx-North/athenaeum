@@ -1,135 +1,221 @@
 /**
- * wiki-graph.test.ts — regression tests for frontmatter-scoped title/type extraction
+ * wiki-graph.test.ts — the canvas projection over the knowledge index.
  *
- * extractTitle/extractType previously searched for `title:`/`type:` anywhere in the
- * whole file content, not just inside the `---...---` frontmatter block, because the
- * lazy `[\s\S]*?` in their regexes was never required to stop at the closing `---`.
- * A body line that merely starts with `title:` or `type:` (plain prose, not YAML)
- * could be misread as the frontmatter value.
+ * What this file used to test — reading `title:` and `type:` from
+ * frontmatter without mistaking a body line for YAML, resolving `[[links]]`
+ * across case and spacing, preferring an exact filename to a case-folded
+ * alias — now happens in Rust, in `athenaeum-core`'s vault indexer, and is
+ * tested there against a real vault on disk. Keeping a second copy of
+ * those expectations here would mean two descriptions of one behaviour,
+ * which is the exact problem this change set exists to remove.
+ *
+ * What is left is genuinely this module's: turning a knowledge graph into
+ * something a canvas can draw.
  */
-import { describe, it, expect, vi } from "vitest"
-import type { FileNode } from "@/types/wiki"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { IndexGraph, IndexGraphNode } from "@/lib/knowledge-index"
 
-const mockListDirectory = vi.fn()
-const mockReadFile = vi.fn()
+const mockLoadKnowledgeGraph = vi.fn()
 
-vi.mock("@/commands/fs", () => ({
-  listDirectory: (...args: unknown[]) => mockListDirectory(...args),
-  readFile: (...args: unknown[]) => mockReadFile(...args),
-}))
+vi.mock("@/lib/knowledge-index", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/knowledge-index")>()
+  return {
+    ...actual,
+    loadKnowledgeGraph: (...args: unknown[]) => mockLoadKnowledgeGraph(...args),
+  }
+})
 
-async function loadBuildWikiGraph() {
-  const mod = await import("../wiki-graph")
-  return mod.buildWikiGraph
+const { buildWikiGraph } = await import("../wiki-graph")
+
+function node(overrides: Partial<IndexGraphNode> & { id: string }): IndexGraphNode {
+  return {
+    title: overrides.id,
+    kind: "concept",
+    type: "concept",
+    path: `wiki/concepts/${overrides.id}.md`,
+    summary: "",
+    authority: "unverified_observation",
+    status: "valid",
+    origin: "page",
+    linkCount: 0,
+    ...overrides,
+  }
 }
 
-function mdFile(name: string): FileNode {
-  return { name, path: `/project/wiki/${name}`, is_dir: false }
+function graph(partial: Partial<IndexGraph>): IndexGraph {
+  return { nodes: [], edges: [], ...partial }
 }
 
-describe("buildWikiGraph frontmatter extraction", () => {
-  it("does not read a title: line from the document body as the frontmatter title", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([mdFile("page.md")])
-    mockReadFile.mockResolvedValue(
-      "---\ntype: entity\n---\n# Real Heading\n\nSome text.\ntitle: not-frontmatter-at-all\n",
+beforeEach(() => {
+  mockLoadKnowledgeGraph.mockReset()
+})
+
+describe("buildWikiGraph", () => {
+  it("draws the index's nodes with their vault paths made absolute", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [
+          node({ id: "a", title: "Chain of Thought", kind: "concept" }),
+          node({
+            id: "b",
+            title: "wei.pdf",
+            kind: "source",
+            type: "source",
+            path: "raw/sources/wei.pdf",
+            origin: "source",
+          }),
+        ],
+        edges: [{ from: "a", to: "b", type: "derived_from", deterministic: true }],
+      }),
     )
 
-    const graph = await buildWikiGraph("/project")
+    const result = await buildWikiGraph("/project")
 
-    expect(graph.nodes).toHaveLength(1)
-    expect(graph.nodes[0].label).toBe("Real Heading")
+    expect(result.nodes).toHaveLength(2)
+    expect(result.nodes[0]).toMatchObject({
+      id: "a",
+      label: "Chain of Thought",
+      type: "concept",
+      path: "/project/wiki/concepts/a.md",
+      slug: "a",
+      linkCount: 1,
+    })
+    expect(result.nodes[1]).toMatchObject({
+      path: "/project/raw/sources/wei.pdf",
+      origin: "source",
+    })
   })
 
-  it("does not read a type: line from the document body as the frontmatter type", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([mdFile("page.md")])
-    mockReadFile.mockResolvedValue(
-      "---\ntitle: Real Page\n---\n# Real Page\n\nSome text.\ntype: query\nMore text.\n",
+  it("keeps the vault's own vocabulary rather than the knowledge model's", async () => {
+    // A thesis page is an `observation` to the knowledge model, but the
+    // canvas should still colour and label it as the thesis the user wrote.
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({ nodes: [node({ id: "t", kind: "thesis", type: "observation" })] }),
     )
 
-    const graph = await buildWikiGraph("/project")
+    const result = await buildWikiGraph("/project")
 
-    // A misread type of "query" would match HIDDEN_TYPES and silently drop the page.
-    expect(graph.nodes).toHaveLength(1)
-    expect(graph.nodes[0].type).toBe("other")
+    expect(result.nodes[0].type).toBe("thesis")
   })
 
-  it("parses CRLF frontmatter consistently with the rest of the application", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([mdFile("page.md")])
-    mockReadFile.mockResolvedValue(
-      "---\r\ntitle: CRLF Page\r\ntype: entity\r\n---\r\n# Fallback Heading\r\n",
+  it("leaves knowledge that is not a file without a path", async () => {
+    // A decision typed into the knowledge panel is on the same canvas as
+    // the pages — that is the point of there being one model — but there
+    // is no file behind it to open.
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [
+          node({ id: "d", title: "Use SQLite", kind: "decision", origin: "curated", path: undefined }),
+        ],
+      }),
     )
 
-    const graph = await buildWikiGraph("/project")
+    const result = await buildWikiGraph("/project")
 
-    expect(graph.nodes).toHaveLength(1)
-    expect(graph.nodes[0]).toMatchObject({ label: "CRLF Page", type: "entity" })
+    expect(result.nodes[0]).toMatchObject({ path: "", slug: "", origin: "curated" })
   })
 
-  it("uses YAML parsing for quoted values that contain a colon", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([mdFile("page.md")])
-    mockReadFile.mockResolvedValue(
-      '---\ntitle: "Attention: Architecture"\ntype: "Concept"\n---\n# Fallback Heading\n',
+  it("keeps query pages off the canvas without hiding them from the index", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [node({ id: "keep" }), node({ id: "drop", kind: "query" })],
+        edges: [{ from: "keep", to: "drop", type: "references", deterministic: true }],
+      }),
     )
 
-    const graph = await buildWikiGraph("/project")
+    const result = await buildWikiGraph("/project")
 
-    expect(graph.nodes).toHaveLength(1)
-    expect(graph.nodes[0]).toMatchObject({ label: "Attention: Architecture", type: "concept" })
+    expect(result.nodes.map((n) => n.id)).toEqual(["keep"])
+    // And no line is left dangling into the node that is not drawn.
+    expect(result.edges).toEqual([])
+    expect(result.nodes[0].linkCount).toBe(0)
   })
 
-  it("resolves case and space variants without dropping links", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([
-      mdFile("Source.md"),
-      mdFile("target-page.md"),
-    ])
-    mockReadFile.mockImplementation(async (path: string) =>
-      path.endsWith("Source.md")
-        ? "# Source\n\n[[Target Page]]"
-        : "# Target",
+  it("collapses a reciprocal pair of links into one line", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [node({ id: "a" }), node({ id: "b" })],
+        edges: [
+          { from: "a", to: "b", type: "references", deterministic: true },
+          { from: "b", to: "a", type: "references", deterministic: true },
+          { from: "a", to: "b", type: "related_to", deterministic: true },
+        ],
+      }),
     )
 
-    const graph = await buildWikiGraph("/project")
+    const result = await buildWikiGraph("/project")
 
-    expect(graph.edges).toEqual([
-      expect.objectContaining({ source: "Source", target: "target-page" }),
-    ])
+    expect(result.edges).toHaveLength(1)
+    expect(result.nodes.every((n) => n.linkCount === 1)).toBe(true)
   })
 
-  it("prefers an exact page id when case-folded aliases collide", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockResolvedValue([
-      mdFile("source.md"),
-      mdFile("Foo.md"),
-      mdFile("foo.md"),
-    ])
-    mockReadFile.mockImplementation(async (path: string) =>
-      path.endsWith("source.md") ? "# Source\n\n[[foo]]" : "# Target",
+  it("draws a model's proposal, but more weakly than a fact", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [node({ id: "a" }), node({ id: "b" }), node({ id: "c" })],
+        edges: [
+          { from: "a", to: "b", type: "related_to", deterministic: false },
+          { from: "b", to: "c", type: "references", deterministic: true },
+        ],
+      }),
     )
 
-    const graph = await buildWikiGraph("/case-project")
+    const result = await buildWikiGraph("/project")
 
-    expect(graph.edges).toEqual([
-      expect.objectContaining({ source: "source", target: "foo" }),
-    ])
+    const proposed = result.edges.find((e) => e.type === "related_to")
+    const derived = result.edges.find((e) => e.type === "references")
+    expect(proposed?.deterministic).toBe(false)
+    expect(derived!.weight).toBeGreaterThan(proposed!.weight)
   })
 
-  it("reuses an unchanged graph by project data version", async () => {
-    const buildWikiGraph = await loadBuildWikiGraph()
-    mockListDirectory.mockClear()
-    mockReadFile.mockClear()
-    mockListDirectory.mockResolvedValue([mdFile("cached.md")])
-    mockReadFile.mockResolvedValue("# Cached")
+  it("prefers the verified relationship when a pair has both", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [node({ id: "a" }), node({ id: "b" })],
+        edges: [
+          { from: "a", to: "b", type: "related_to", deterministic: false },
+          { from: "a", to: "b", type: "references", deterministic: true },
+        ],
+      }),
+    )
 
-    const first = await buildWikiGraph("/cached-project", 42)
-    const second = await buildWikiGraph("/cached-project", 42)
+    const result = await buildWikiGraph("/project")
 
-    expect(second).toBe(first)
-    expect(mockListDirectory).toHaveBeenCalledTimes(1)
-    expect(mockReadFile).toHaveBeenCalledTimes(1)
+    expect(result.edges).toHaveLength(1)
+    expect(result.edges[0]).toMatchObject({ type: "references", deterministic: true, weight: 1 })
+  })
+
+  it("ignores an edge whose other end is not on the canvas", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(
+      graph({
+        nodes: [node({ id: "a" })],
+        edges: [
+          { from: "a", to: "ghost", type: "references", deterministic: true },
+          { from: "a", to: "a", type: "related_to", deterministic: true },
+        ],
+      }),
+    )
+
+    const result = await buildWikiGraph("/project")
+
+    expect(result.edges).toEqual([])
+  })
+
+  it("returns an empty graph for a project with no indexed knowledge", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(graph({}))
+
+    expect(await buildWikiGraph("/empty")).toEqual({
+      nodes: [],
+      edges: [],
+      communities: [],
+    })
+  })
+
+  it("passes the data version through so the index layer can cache on it", async () => {
+    mockLoadKnowledgeGraph.mockResolvedValue(graph({ nodes: [node({ id: "a" })] }))
+
+    await buildWikiGraph("/project", 42)
+
+    expect(mockLoadKnowledgeGraph).toHaveBeenCalledWith("/project", 42)
   })
 })

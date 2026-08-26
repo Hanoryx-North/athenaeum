@@ -191,6 +191,18 @@ export const api = {
   assembleBrief: (task: string, seeds?: string[], depth?: number) =>
     invoke<KnowledgeBrief>("assemble_brief", { task, seeds, depth }),
   journal: (limit?: number) => invoke<JournalEvent[]>("journal", { limit }),
+
+  /**
+   * Reconcile the derived index against the vault's markdown. Takes no
+   * path: the vault is the project directory holding the open workspace,
+   * and letting the UI name a different one would let the two disagree.
+   *
+   * Typed results live in `knowledge-index.ts`, which is what the panels
+   * use; these two are here so the whole Rust surface is in one file.
+   */
+  indexVault: () => invoke<unknown>("index_vault"),
+  /** The whole live knowledge graph, in one read. */
+  knowledgeGraph: () => invoke<unknown>("knowledge_graph"),
 };
 
 /** Tauri returns command errors as plain strings; surface them as such. */

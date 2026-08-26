@@ -1,5 +1,19 @@
 import type { GraphNode, GraphEdge, CommunityInfo } from "./wiki-graph"
 
+/**
+ * Pages that link to everything by design.
+ *
+ * They would dominate every "surprising connection" and never look
+ * isolated, so both analyses step around them. Matched on the file stem:
+ * nodes carry an opaque knowledge id now, and the id is only a name for
+ * the callers that still identify a node that way.
+ */
+const STRUCTURAL_SLUGS = new Set(["index", "log", "overview"])
+
+function isStructural(node: Pick<GraphNode, "id"> & Partial<Pick<GraphNode, "slug">>): boolean {
+  return STRUCTURAL_SLUGS.has((node.slug || node.id).toLowerCase())
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -38,8 +52,6 @@ export function findSurprisingConnections(
   const degreeMap = new Map(nodes.map((n) => [n.id, n.linkCount]))
   const maxDegree = Math.max(...nodes.map((n) => n.linkCount), 1)
 
-  // Structural pages that link to everything — exclude from analysis
-  const STRUCTURAL_IDS = new Set(["index", "log", "overview"])
 
   const scored: SurprisingConnection[] = []
 
@@ -47,7 +59,7 @@ export function findSurprisingConnections(
     const source = nodeMap.get(edge.source)
     const target = nodeMap.get(edge.target)
     if (!source || !target) continue
-    if (STRUCTURAL_IDS.has(source.id) || STRUCTURAL_IDS.has(target.id)) continue
+    if (isStructural(source) || isStructural(target)) continue
 
     let score = 0
     const reasons: string[] = []
@@ -122,7 +134,7 @@ export function detectKnowledgeGaps(
 
   // 1. Isolated nodes (degree ≤ 1, exclude overview/index)
   const isolatedNodes = nodes.filter(
-    (n) => n.linkCount <= 1 && n.type !== "overview" && n.id !== "index" && n.id !== "log",
+    (n) => n.linkCount <= 1 && n.type !== "overview" && !isStructural(n),
   )
   if (isolatedNodes.length > 0) {
     const topIsolated = isolatedNodes.slice(0, 5)
@@ -163,11 +175,9 @@ export function detectKnowledgeGaps(
     }
   }
 
-  const STRUCTURAL_IDS = new Set(["index", "log", "overview"])
-
   const bridgeNodes = nodes
     .filter((n) => {
-      if (STRUCTURAL_IDS.has(n.id)) return false
+      if (isStructural(n)) return false
       const neighborComms = communityNeighbors.get(n.id)
       return neighborComms && neighborComms.size >= 3
     })

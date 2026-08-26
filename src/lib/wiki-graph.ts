@@ -1,23 +1,51 @@
-import { readFile, listDirectory } from "@/commands/fs"
-import type { FileNode } from "@/types/wiki"
-import { buildRetrievalGraph, calculateRelevance } from "./graph-relevance"
+/**
+ * The graph the view draws, built from the knowledge index.
+ *
+ * This used to walk `wiki/`, read every markdown file and re-extract every
+ * `[[wikilink]]` on the way to the screen — a second knowledge model,
+ * living alongside `athenaeum-core`'s and differing from it in the places
+ * that matter. Now there is one model: the Rust indexer turns the vault's
+ * markdown into typed nodes and edges, and this reads the result.
+ *
+ * What stayed here is presentation: community detection, edge weighting
+ * and the decision about which node types belong on the canvas. Those
+ * change whenever the visual design changes, and none of them belong in a
+ * library that must stay free of the UI.
+ */
 import { normalizePath } from "@/lib/path-utils"
-import { parseFrontmatter } from "@/lib/frontmatter"
+import {
+  loadKnowledgeGraph,
+  nodeFilePath,
+  type IndexGraphEdge,
+  type IndexGraphNode,
+  type IndexOrigin,
+} from "@/lib/knowledge-index"
 import { detectCommunities } from "./wiki-graph-analysis"
 
 export interface GraphNode {
+  /** Stable knowledge-node id. Unique even when two pages share a slug. */
   id: string
   label: string
   type: string
+  /** Absolute path, or `""` for knowledge that is not a file. */
   path: string
   linkCount: number // inbound + outbound
   community: number // community id from Louvain detection
+  /** File stem, for the structural-page heuristics that key off names. */
+  slug?: string
+  summary?: string
+  authority?: string
+  origin?: IndexOrigin
 }
 
 export interface GraphEdge {
   source: string
   target: string
-  weight: number // relevance score between source and target
+  weight: number // how strongly the two are related
+  /** The typed relationship, e.g. `references`, `derived_from`. */
+  type?: string
+  /** False when a model proposed the relationship and nobody accepted it. */
+  deterministic?: boolean
 }
 
 export interface CommunityInfo {
@@ -33,12 +61,27 @@ export interface WikiGraphResult {
   communities: CommunityInfo[]
 }
 
-const GRAPH_FILE_READ_CONCURRENCY = 16
-const MAX_WEIGHTED_GRAPH_NODES = 3_000
 const COMMUNITY_WORKER_THRESHOLD = 3_000
-const MAX_CACHED_PROJECT_GRAPHS = 2
-const graphCache = new Map<string, { dataVersion: number; result: WikiGraphResult }>()
-const graphBuilds = new Map<string, Promise<WikiGraphResult>>()
+
+/**
+ * Page types kept off the canvas.
+ *
+ * Query pages are research results and saved chat answers — intermediate
+ * artifacts, not knowledge structure. The entities and concepts auto-ingest
+ * extracts from them are what belong in the graph. They stay in the index,
+ * so search and the knowledge tree still find them.
+ */
+const HIDDEN_KINDS = new Set(["query"])
+
+/**
+ * Weight for a relationship nobody has verified.
+ *
+ * Deterministic edges were read out of the markdown, so they are as true
+ * as the vault is. A model's proposal is drawn, because reviewing
+ * proposals is something a person does in the graph, but it pulls the
+ * layout together less firmly than a fact does.
+ */
+const PROPOSED_EDGE_WEIGHT = 0.5
 
 async function analyzeCommunities(
   nodes: { id: string; label: string; linkCount: number }[],
@@ -71,270 +114,101 @@ async function analyzeCommunities(
   })
 }
 
-const WIKILINK_REGEX = /\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]/g
-
-function flattenMdFiles(nodes: FileNode[]): FileNode[] {
-  const files: FileNode[] = []
-  for (const node of nodes) {
-    if (node.is_dir && node.children) {
-      files.push(...flattenMdFiles(node.children))
-    } else if (!node.is_dir && node.name.endsWith(".md")) {
-      files.push(node)
-    }
-  }
-  return files
-}
-
-function extractTitle(content: string, fileName: string): string {
-  const title = parseFrontmatter(content).frontmatter?.title
-  if (typeof title === "string" && title.trim()) return title.trim()
-
-  const headingMatch = content.match(/^#\s+(.+)$/m)
-  if (headingMatch) return headingMatch[1].trim()
-
-  return fileName.replace(/\.md$/, "").replace(/-/g, " ")
-}
-
-function extractType(content: string): string {
-  const type = parseFrontmatter(content).frontmatter?.type
-  if (typeof type === "string" && type.trim()) return type.trim().toLowerCase()
-  return "other"
-}
-
-function extractWikilinks(content: string): string[] {
-  const links: string[] = []
-  const regex = new RegExp(WIKILINK_REGEX.source, "g")
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(content)) !== null) {
-    links.push(match[1].trim())
-  }
-  return links
-}
-
-function fileNameToId(fileName: string): string {
-  return fileName.replace(/\.md$/, "")
-}
-
-function targetAliases(value: string): string[] {
-  const lower = value.toLowerCase()
-  return [value, lower, lower.replace(/\s+/g, "-")]
-}
-
-function buildTargetIndex(nodeIds: Iterable<string>): Map<string, string> {
-  const ids = Array.from(nodeIds)
-  const index = new Map<string, string>()
-  // Exact IDs must win over case-folded aliases. On a case-sensitive
-  // filesystem, Foo.md and foo.md are distinct pages and [[foo]] must retain
-  // the reader's exact-match behavior.
-  for (const id of ids) index.set(id, id)
-  for (const id of ids) {
-    for (const alias of targetAliases(id).slice(1)) {
-      if (!index.has(alias)) index.set(alias, id)
-    }
-  }
-  return index
-}
-
-async function mapWithConcurrency<T, R>(
-  values: readonly T[],
-  limit: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length)
-  let cursor = 0
-  const workers = Array.from(
-    { length: Math.min(limit, values.length) },
-    async () => {
-      while (cursor < values.length) {
-        const index = cursor
-        cursor += 1
-        results[index] = await mapper(values[index])
-      }
-    },
-  )
-  await Promise.all(workers)
-  return results
-}
-
 export async function buildWikiGraph(
   projectPath: string,
   dataVersion?: number,
 ): Promise<WikiGraphResult> {
-  const normalizedProjectPath = normalizePath(projectPath)
-  if (dataVersion !== undefined) {
-    const cached = graphCache.get(normalizedProjectPath)
-    if (cached?.dataVersion === dataVersion) return cached.result
-  }
+  const pp = normalizePath(projectPath)
+  const index = await loadKnowledgeGraph(pp, dataVersion)
 
-  const buildKey = `${normalizedProjectPath}\u0000${dataVersion ?? "uncached"}`
-  const pending = graphBuilds.get(buildKey)
-  if (pending) return pending
-  const build = buildWikiGraphUncached(normalizedProjectPath)
-  graphBuilds.set(buildKey, build)
-  let result: WikiGraphResult
-  try {
-    result = await build
-  } finally {
-    graphBuilds.delete(buildKey)
+  const visible = new Map<string, IndexGraphNode>()
+  for (const node of index.nodes) {
+    if (HIDDEN_KINDS.has(node.kind)) continue
+    visible.set(node.id, node)
   }
-  if (dataVersion !== undefined) {
-    const cached = graphCache.get(normalizedProjectPath)
-    // An older build may finish after a newer dataVersion. Never let it
-    // replace the newer cached graph.
-    if (!cached || cached.dataVersion <= dataVersion) {
-      if (!cached && graphCache.size >= MAX_CACHED_PROJECT_GRAPHS) {
-        const oldestProject = graphCache.keys().next().value
-        if (oldestProject) graphCache.delete(oldestProject)
-      }
-      graphCache.set(normalizedProjectPath, { dataVersion, result })
-    }
-  }
-  return result
-}
-
-async function buildWikiGraphUncached(projectPath: string): Promise<WikiGraphResult> {
-  const wikiRoot = `${normalizePath(projectPath)}/wiki`
-
-  let tree: FileNode[]
-  try {
-    tree = await listDirectory(wikiRoot)
-  } catch {
+  if (visible.size === 0) {
     return { nodes: [], edges: [], communities: [] }
   }
 
-  const mdFiles = flattenMdFiles(tree)
-  if (mdFiles.length === 0) {
-    return { nodes: [], edges: [], communities: [] }
-  }
+  const edges = collapseToUndirected(index.edges, visible)
 
-  // Build a map of id -> node data
-  const nodeMap = new Map<
-    string,
-    { id: string; label: string; type: string; path: string; links: string[] }
-  >()
-
-  const parsedFiles = await mapWithConcurrency(
-    mdFiles,
-    GRAPH_FILE_READ_CONCURRENCY,
-    async (file) => {
-      try {
-        const content = await readFile(file.path)
-        const id = fileNameToId(file.name)
-        return {
-          id,
-          label: extractTitle(content, file.name),
-          type: extractType(content),
-          path: file.path,
-          links: extractWikilinks(content),
-        }
-      } catch {
-        return null
-      }
-    },
-  )
-  for (const parsed of parsedFiles) {
-    if (parsed) nodeMap.set(parsed.id, parsed)
-  }
-
-  // Filter out query nodes (research results, saved chat answers) — they are
-  // intermediate artifacts, not knowledge structure. The entities/concepts
-  // extracted from them via auto-ingest are what belong in the graph.
-  const HIDDEN_TYPES = new Set(["query"])
-  for (const [id, node] of nodeMap) {
-    if (HIDDEN_TYPES.has(node.type)) {
-      nodeMap.delete(id)
-    }
-  }
-
-  // Count link references
+  // Recount links against what is actually drawn: the index counts every
+  // relationship, and hiding a node or collapsing a reciprocal pair of
+  // edges changes how connected the remaining nodes look.
   const linkCounts = new Map<string, number>()
-  for (const [id] of nodeMap) {
-    linkCounts.set(id, 0)
+  for (const id of visible.keys()) linkCounts.set(id, 0)
+  for (const edge of edges) {
+    linkCounts.set(edge.source, (linkCounts.get(edge.source) ?? 0) + 1)
+    linkCounts.set(edge.target, (linkCounts.get(edge.target) ?? 0) + 1)
   }
 
-  const rawEdges: GraphEdge[] = []
-  const targetIndex = buildTargetIndex(nodeMap.keys())
-
-  for (const [sourceId, nodeData] of nodeMap) {
-    for (const targetRaw of nodeData.links) {
-      // Normalize target: try matching by id (case-insensitive, hyphen/space)
-      const targetId = resolveTarget(targetRaw, targetIndex)
-      if (targetId === null) continue
-      if (targetId === sourceId) continue
-
-      rawEdges.push({ source: sourceId, target: targetId, weight: 1 })
-
-      linkCounts.set(sourceId, (linkCounts.get(sourceId) ?? 0) + 1)
-      linkCounts.set(targetId, (linkCounts.get(targetId) ?? 0) + 1)
-    }
-  }
-
-  // Deduplicate edges
-  const seenEdges = new Set<string>()
-  const dedupedEdges: { source: string; target: string }[] = []
-  for (const edge of rawEdges) {
-    const key = `${edge.source}:::${edge.target}`
-    const reverseKey = `${edge.target}:::${edge.source}`
-    if (!seenEdges.has(key) && !seenEdges.has(reverseKey)) {
-      seenEdges.add(key)
-      dedupedEdges.push(edge)
-    }
-  }
-
-  // Calculate relevance weights using the retrieval graph
-  let retrievalGraph: Awaited<ReturnType<typeof buildRetrievalGraph>> | null = null
-  if (nodeMap.size <= MAX_WEIGHTED_GRAPH_NODES) {
-    try {
-      const { useWikiStore } = await import("@/stores/wiki-store")
-      const dv = useWikiStore.getState().dataVersion
-      retrievalGraph = await buildRetrievalGraph(normalizePath(projectPath), dv)
-    } catch {
-      // ignore — weights will default to 1
-    }
-  }
-
-  const edges: GraphEdge[] = dedupedEdges.map((e) => {
-    let weight = 1
-    if (retrievalGraph) {
-      const nodeA = retrievalGraph.nodes.get(e.source)
-      const nodeB = retrievalGraph.nodes.get(e.target)
-      if (nodeA && nodeB) {
-        weight = calculateRelevance(nodeA, nodeB, retrievalGraph)
-      }
-    }
-    return { source: e.source, target: e.target, weight }
-  })
-
-  // Build preliminary nodes for community detection
-  const prelimNodes = Array.from(nodeMap.values()).map((n) => ({
-    id: n.id,
-    label: n.label,
-    linkCount: linkCounts.get(n.id) ?? 0,
+  const prelimNodes = Array.from(visible.values()).map((node) => ({
+    id: node.id,
+    label: node.title,
+    linkCount: linkCounts.get(node.id) ?? 0,
   }))
-
   const { assignments, communities } = await analyzeCommunities(prelimNodes, edges).catch(
     () => detectCommunities(prelimNodes, edges),
   )
 
-  const nodes: GraphNode[] = Array.from(nodeMap.values()).map((n) => ({
-    id: n.id,
-    label: n.label,
-    type: n.type,
-    path: n.path,
-    linkCount: linkCounts.get(n.id) ?? 0,
-    community: assignments.get(n.id) ?? 0,
+  const nodes: GraphNode[] = Array.from(visible.values()).map((node) => ({
+    id: node.id,
+    label: node.title,
+    type: node.kind,
+    path: nodeFilePath(pp, node) ?? "",
+    slug: slugOf(node.path),
+    summary: node.summary,
+    authority: node.authority,
+    origin: node.origin,
+    linkCount: linkCounts.get(node.id) ?? 0,
+    community: assignments.get(node.id) ?? 0,
   }))
 
   return { nodes, edges, communities }
 }
 
-function resolveTarget(
-  raw: string,
-  targetIndex: ReadonlyMap<string, string>,
-): string | null {
-  for (const alias of targetAliases(raw)) {
-    const target = targetIndex.get(alias)
-    if (target) return target
+/**
+ * One line per pair of nodes.
+ *
+ * The index stores direction and type, and a page can both reference
+ * another and declare it related — three true statements that are still
+ * one line on a canvas. The strongest weight wins so a verified
+ * relationship is not diluted by a proposal alongside it.
+ */
+function collapseToUndirected(
+  edges: readonly IndexGraphEdge[],
+  visible: ReadonlyMap<string, IndexGraphNode>,
+): GraphEdge[] {
+  const byPair = new Map<string, GraphEdge>()
+  for (const edge of edges) {
+    if (edge.from === edge.to) continue
+    if (!visible.has(edge.from) || !visible.has(edge.to)) continue
+
+    const key = [edge.from, edge.to].sort().join("\u0000")
+    const weight = edge.deterministic ? 1 : PROPOSED_EDGE_WEIGHT
+    const existing = byPair.get(key)
+    if (!existing) {
+      byPair.set(key, {
+        source: edge.from,
+        target: edge.to,
+        weight,
+        type: edge.type,
+        deterministic: edge.deterministic,
+      })
+      continue
+    }
+    if (weight > existing.weight) {
+      existing.weight = weight
+      existing.type = edge.type
+      existing.deterministic = edge.deterministic
+    }
   }
-  return null
+  return Array.from(byPair.values())
+}
+
+/** File stem of a vault-relative path, or `""` when there is no file. */
+function slugOf(path: string | undefined): string {
+  if (!path) return ""
+  const name = path.split("/").pop() ?? path
+  return name.replace(/\.md$/i, "")
 }

@@ -470,6 +470,14 @@ function App() {
       useWikiStore.getState().bumpDataVersion()
       await saveLastProject(proj)
 
+      // Open the knowledge base for this project so the first panel that
+      // asks for knowledge does not pay for the handshake. Failing here
+      // must not stop the project from opening: the vault is the source of
+      // truth and the app is usable without its derived index.
+      import("@/lib/knowledge-index")
+        .then(({ openKnowledgeBase }) => openKnowledgeBase(proj.path))
+        .catch((err) => console.error("Failed to open the knowledge base:", err))
+
       // Apply the project-specific worker limit before restoring its queue so
       // newly enqueued tasks never start with another project's concurrency.
       const { setIngestWorkerLimit } = await import("@/lib/ingest-queue")

@@ -210,6 +210,8 @@ pub fn run() {
             knowledge::navigate_from,
             knowledge::assemble_brief,
             knowledge::journal,
+            knowledge::index_vault,
+            knowledge::knowledge_graph,
             knowledge::vocabularies,
             set_proxy_env,
             set_close_behavior,

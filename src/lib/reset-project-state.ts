@@ -57,13 +57,15 @@ export async function resetProjectState(): Promise<void> {
 
   // Module-level caches — load in parallel and clear each, surfacing any
   // failure instead of swallowing it.
-  const [queueMod, dedupQueueMod, graphMod, fileSyncMod, scheduledImportMod] = await Promise.allSettled([
-    import("@/lib/ingest-queue"),
-    import("@/lib/dedup-queue"),
-    import("@/lib/graph-relevance"),
-    import("@/lib/project-file-sync"),
-    import("@/lib/scheduled-import"),
-  ])
+  const [queueMod, dedupQueueMod, graphMod, indexMod, fileSyncMod, scheduledImportMod] =
+    await Promise.allSettled([
+      import("@/lib/ingest-queue"),
+      import("@/lib/dedup-queue"),
+      import("@/lib/graph-relevance"),
+      import("@/lib/knowledge-index"),
+      import("@/lib/project-file-sync"),
+      import("@/lib/scheduled-import"),
+    ])
 
   if (scheduledImportMod.status === "fulfilled") {
     try {
@@ -107,6 +109,19 @@ export async function resetProjectState(): Promise<void> {
     }
   } else {
     console.warn("[Reset Project State] Failed to load graph-relevance:", graphMod.reason)
+  }
+
+  if (indexMod.status === "fulfilled") {
+    try {
+      // Forget the outgoing project's knowledge graph. Without this the
+      // next project's panels can render the previous one's nodes for a
+      // frame before their own load lands.
+      indexMod.value.clearKnowledgeIndexCache()
+    } catch (err) {
+      console.warn("[Reset Project State] clearKnowledgeIndexCache failed:", err)
+    }
+  } else {
+    console.warn("[Reset Project State] Failed to load knowledge-index:", indexMod.reason)
   }
 
   if (fileSyncMod.status === "fulfilled") {

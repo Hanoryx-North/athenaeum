@@ -5,10 +5,12 @@
 //! knowledge behaves ends up in this file, it belongs in the library instead,
 //! where it can be tested without a window and shared with the CLI.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use athenaeum_core::journal::Event;
 use athenaeum_core::prelude::*;
+use athenaeum_core::vault::{KnowledgeGraph, VaultIndexReport, VaultIndexer, VaultScanOptions};
 use athenaeum_core::wiki::{WikiNodeDetail, WikiService};
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +40,20 @@ impl AppState {
         })?;
         let store = guard.as_mut().ok_or("no project is open")?;
         f(store).map_err(|e| e.to_string())
+    }
+
+    /// The project directory holding the open workspace — the vault root.
+    fn project_root(&self) -> std::result::Result<std::path::PathBuf, String> {
+        let guard = self
+            .store
+            .lock()
+            .map_err(|_| "could not take the store lock".to_string())?;
+        let store = guard.as_ref().ok_or("no project is open")?;
+        store
+            .root()
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "the workspace has no project directory".to_string())
     }
 }
 
@@ -340,6 +356,32 @@ pub struct Vocabularies {
     pub authorities: Vec<&'static str>,
     pub scopes: Vec<&'static str>,
     pub evidence_kinds: Vec<&'static str>,
+}
+
+/// Rebuild the derived index over the vault's markdown.
+///
+/// Cheap enough to call after every save: the indexer writes only what
+/// changed, and a pass over an unchanged vault touches nothing. The vault
+/// is the project directory containing `.athenaeum/`, so no path is passed
+/// — asking the UI which vault to index would let the two disagree.
+#[tauri::command]
+pub fn index_vault(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<VaultIndexReport, String> {
+    run_guarded("index_vault", || {
+        let root = state.project_root()?;
+        state.with(|store| VaultIndexer::scan_and_index(store, &root, VaultScanOptions::default()))
+    })
+}
+
+/// The whole live knowledge graph, in one read, for the graph view.
+#[tauri::command]
+pub fn knowledge_graph(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<KnowledgeGraph, String> {
+    run_guarded("knowledge_graph", || {
+        state.with(|store| athenaeum_core::vault::graph::project(store))
+    })
 }
 
 /// Served from the library rather than duplicated in TypeScript, so adding a

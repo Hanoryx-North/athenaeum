@@ -27,8 +27,13 @@ export const DEFAULT_GRAPH_FILTERS: GraphFilterState = {
 
 const STRUCTURAL_IDS = new Set(["index", "overview", "log", "schema", "purpose"])
 
-export function isStructuralGraphNode(node: Pick<GraphNode, "id" | "path" | "type">): boolean {
-  const id = node.id.toLowerCase()
+export function isStructuralGraphNode(
+  node: Pick<GraphNode, "id" | "path" | "type"> & Partial<Pick<GraphNode, "slug">>,
+): boolean {
+  // Nodes carry an opaque knowledge id now, so the name to match on is the
+  // file stem. It falls back to the id for the callers — mostly tests —
+  // that still identify a node by its slug alone.
+  const id = (node.slug || node.id).toLowerCase()
   if (STRUCTURAL_IDS.has(id)) return true
   if (node.type === "overview") return true
 

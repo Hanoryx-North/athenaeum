@@ -176,6 +176,61 @@ pub fn journal(events: &[Event]) {
     }
 }
 
+/// The outcome of a vault indexing pass.
+///
+/// Written so the common case reads as one line — a pass over an unchanged
+/// vault should say "nothing changed" and stop, not print five zeroes.
+pub fn vault_index(report: &VaultIndexReport, show_unresolved: bool) {
+    println!(
+        "vault: {} page(s), {} source(s), {} link(s) resolved",
+        report.pages, report.sources, report.links_resolved
+    );
+    if report.is_no_op() {
+        println!("index: already up to date");
+    } else {
+        println!(
+            "nodes: {} created, {} updated, {} removed",
+            report.nodes_created, report.nodes_updated, report.nodes_removed
+        );
+        println!(
+            "edges: {} created, {} removed",
+            report.edges_created, report.edges_removed
+        );
+        println!(
+            "evidence: {} attached, {} updated, {} removed",
+            report.evidence_attached, report.evidence_updated, report.evidence_removed
+        );
+    }
+
+    if report.links_unresolved > 0 {
+        println!(
+            "{} link(s) name no page in the vault",
+            report.links_unresolved
+        );
+        let shown = if show_unresolved {
+            report.unresolved.len()
+        } else {
+            report.unresolved.len().min(5)
+        };
+        for link in &report.unresolved[..shown] {
+            println!("  {} → [[{}]]", link.from, link.target);
+        }
+        if shown < report.unresolved.len() {
+            println!(
+                "  … and {} more; pass --show-unresolved for all of them",
+                report.unresolved.len() - shown
+            );
+        }
+    }
+
+    if !report.scan_complete {
+        eprintln!("warning: the scan was truncated, so nothing was removed");
+    }
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+}
+
 pub fn problems(problems: &[Problem]) {
     if problems.is_empty() {
         println!("no problems found");

@@ -89,6 +89,12 @@ enum Command {
     Bridge,
     /// Deterministically index files, symbols, imports and local Git history.
     Index(IndexArgs),
+    /// Rebuild the derived index over the vault's markdown.
+    ///
+    /// Safe to run at any time and cheap to run often: it writes only what
+    /// changed. Deleting `.athenaeum/knowledge.db` and running this costs
+    /// nothing but the time it takes.
+    IndexVault(IndexVaultArgs),
     /// Search for moved source anchors and update knowledge staleness.
     Relocate(RelocateArgs),
     /// Check the knowledge base for structural problems.
@@ -212,6 +218,25 @@ struct IndexArgs {
     /// Maximum UTF-8 bytes read across the repository.
     #[arg(long, default_value_t = 67_108_864)]
     max_total_bytes: u64,
+}
+
+#[derive(Args)]
+struct IndexVaultArgs {
+    /// Maximum number of wiki pages to index.
+    #[arg(long, default_value_t = 50_000)]
+    max_pages: usize,
+    /// Maximum number of files under `raw/sources/` to index.
+    #[arg(long, default_value_t = 50_000)]
+    max_sources: usize,
+    /// Maximum UTF-8 bytes read from one page.
+    #[arg(long, default_value_t = 4_000_000)]
+    max_page_bytes: u64,
+    /// Maximum UTF-8 bytes read across the whole vault.
+    #[arg(long, default_value_t = 268_435_456)]
+    max_total_bytes: u64,
+    /// List every unresolved `[[link]]` rather than the first few.
+    #[arg(long)]
+    show_unresolved: bool,
 }
 
 #[derive(Args)]
@@ -573,6 +598,29 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 for warning in &report.warnings {
                     eprintln!("warning: {warning}");
                 }
+                Ok(())
+            })?;
+        }
+
+        Command::IndexVault(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = VaultIndexer::scan_and_index(
+                &mut store,
+                project_root,
+                VaultScanOptions {
+                    max_pages: args.max_pages,
+                    max_sources: args.max_sources,
+                    max_page_bytes: args.max_page_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                },
+            )?;
+            emit(cli.json, &report, || {
+                render::vault_index(&report, args.show_unresolved);
                 Ok(())
             })?;
         }
