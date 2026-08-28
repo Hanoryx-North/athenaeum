@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { FileNode, WikiProject } from "@/types/wiki"
 import { ensureProjectId, upsertProjectInfo } from "@/lib/project-identity"
-import { isAbsolutePath } from "@/lib/path-utils"
+import { isHostAbsolutePath } from "@/lib/path-utils"
 
 /** Raw shape returned by the Rust commands — id is attached client-side. */
 interface RawProject {
@@ -223,8 +223,14 @@ export async function createMissingWikiPage(
   return invoke<string>("create_missing_wiki_page", { projectPath, title, content })
 }
 
+/**
+ * Refuse a path the backend would refuse, using the same host rules it applies
+ * in `require_absolute_path`. Checking cross-platform here would let a path
+ * clear the frontend and then fail in Rust, which reads as a bug rather than
+ * as the guard doing its job.
+ */
 function assertAbsoluteFsPath(operation: string, path: string): void {
-  if (!isAbsolutePath(path)) {
+  if (!isHostAbsolutePath(path)) {
     throw new Error(`${operation} requires an absolute path: ${path}`)
   }
 }

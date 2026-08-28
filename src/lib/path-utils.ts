@@ -75,3 +75,50 @@ export function isAbsolutePath(p: string): boolean {
   if (p.startsWith("\\\\") || p.startsWith("//")) return true
   return false
 }
+
+/** Which platform's path rules apply to paths the backend will act on. */
+export type HostConvention = "windows" | "unix" | "unknown"
+
+/**
+ * The host the Rust side is running on, read from the webview user agent —
+ * the same source `main.tsx` already uses for platform-specific UI, chosen
+ * over the Tauri OS plugin so this costs no new dependency or capability.
+ */
+export function hostConvention(): HostConvention {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent
+  if (/Windows/i.test(ua)) return "windows"
+  if (/Mac OS X|Macintosh|Linux|X11|CrOS|BSD/i.test(ua)) return "unix"
+  return "unknown"
+}
+
+/**
+ * Absolute *for the host the backend runs on*, mirroring `require_absolute_path`
+ * in `src-tauri/src/commands/fs.rs` so the two layers agree about one path.
+ *
+ * Deliberately separate from `isAbsolutePath`, which stays cross-platform: the
+ * ingest queue classifies stored path strings that may have been written on
+ * another machine, where either convention is legitimate. Only a path about to
+ * be handed to a write command has to satisfy the host it will be written on.
+ *
+ * An unidentified host falls back to the permissive answer. The backend is
+ * authoritative either way, and guessing wrong here would refuse writes that
+ * are perfectly valid — on Windows, POSIX rules would reject every `C:\…` path.
+ */
+export function isHostAbsolutePath(
+  p: string,
+  host: HostConvention = hostConvention(),
+): boolean {
+  if (!p) return false
+  switch (host) {
+    case "windows":
+      // A drive root in either slash style, or a UNC share. A lone leading
+      // slash is drive-relative on Windows, so it is not absolute.
+      return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("//")
+    case "unix":
+      // Only a POSIX root. `C:/wiki` names a directory called `C:` here, and
+      // `\\server\share` is an ordinary relative file name.
+      return p.startsWith("/")
+    case "unknown":
+      return isAbsolutePath(p)
+  }
+}
