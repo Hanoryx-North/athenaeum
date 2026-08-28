@@ -32,8 +32,15 @@ const EBOOK_EXTS: &[&str] = &["epub", "mobi"];
 const LEGACY_DOC_EXTS: &[&str] = &["pages", "numbers", "key"];
 const OFFICE_CACHE_FORMAT: &str = "anydoc-0.1.6-v1";
 
+/// Absolute means absolute *for the host we are running on*, which is what
+/// `Path::is_absolute` answers. A path that is only absolute under the other
+/// platform's convention still resolves against the process CWD here, so
+/// admitting it would defeat the very guard this is: `C:/wiki/page.md` names a
+/// directory called `C:` on Unix, and `/wiki/page.md` is drive-relative on
+/// Windows. Both are rejected. UNC (`\\server\share\…`) needs no special case —
+/// Rust already reports it absolute on Windows and relative on Unix.
 fn require_absolute_path(operation: &str, path: &str) -> Result<(), String> {
-    if is_absolute_path_cross_platform(path) {
+    if Path::new(path).is_absolute() {
         Ok(())
     } else {
         Err(format!(
@@ -41,26 +48,6 @@ fn require_absolute_path(operation: &str, path: &str) -> Result<(), String> {
             path
         ))
     }
-}
-
-fn is_absolute_path_cross_platform(path: &str) -> bool {
-    if path.is_empty() {
-        return false;
-    }
-    if Path::new(path).is_absolute() {
-        return true;
-    }
-
-    let bytes = path.as_bytes();
-    if bytes.len() >= 3
-        && bytes[1] == b':'
-        && bytes[0].is_ascii_alphabetic()
-        && matches!(bytes[2], b'/' | b'\\')
-    {
-        return true;
-    }
-
-    path.starts_with(r"\\") || path.starts_with("//")
 }
 
 #[tauri::command]
@@ -2763,14 +2750,40 @@ mod tests {
 
     #[test]
     fn allow_absolute_write_paths() {
-        assert!(require_absolute_path("write_file", "/tmp/project/wiki/sources/page.md").is_ok());
+        // A doubled leading slash is a root under both conventions: a UNC share
+        // on Windows, an ordinary POSIX root on Unix.
+        assert!(require_absolute_path("write_file", "//server/share/wiki/sources/page.md").is_ok());
+        // Drive-relative: `C:` names the drive but not a root on it, so this
+        // still resolves against that drive's working directory.
+        assert!(require_absolute_path("write_file", "C:wiki/sources/page.md").is_err());
+    }
+
+    /// A path absolute only under the *other* platform's convention resolves
+    /// against the CWD here, so the guard must reject it rather than treat it
+    /// as absolute. These pin that boundary from each side.
+    #[cfg(windows)]
+    #[test]
+    fn windows_accepts_drive_and_unc_roots_but_not_posix_roots() {
         assert!(require_absolute_path("write_file", "C:/project/wiki/sources/page.md").is_ok());
         assert!(require_absolute_path("write_file", r"C:\project\wiki\sources\page.md").is_ok());
         assert!(
             require_absolute_path("write_file", r"\\server\share\wiki\sources\page.md").is_ok()
         );
-        assert!(require_absolute_path("write_file", "//server/share/wiki/sources/page.md").is_ok());
-        assert!(require_absolute_path("write_file", "C:wiki/sources/page.md").is_err());
+        // Rooted but drive-relative: resolves against the process's current drive.
+        assert!(require_absolute_path("write_file", "/tmp/project/wiki/sources/page.md").is_err());
+        assert!(require_absolute_path("write_file", r"\wiki\sources\page.md").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_accepts_posix_roots_but_not_windows_roots() {
+        assert!(require_absolute_path("write_file", "/tmp/project/wiki/sources/page.md").is_ok());
+        // `C:` and `\\server` are ordinary relative file names on Unix.
+        assert!(require_absolute_path("write_file", "C:/project/wiki/sources/page.md").is_err());
+        assert!(require_absolute_path("write_file", r"C:\project\wiki\sources\page.md").is_err());
+        assert!(
+            require_absolute_path("write_file", r"\\server\share\wiki\sources\page.md").is_err()
+        );
     }
 
     /// Pull the inner sync `copy_recursive` body out from
