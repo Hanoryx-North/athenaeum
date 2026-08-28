@@ -96,6 +96,17 @@ fn project_root_for(path: &Path) -> Option<PathBuf> {
 
 fn history_path(root: &Path, path: &Path) -> PathBuf {
     let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
+    // Separators are normalized before hashing, the same way vault paths are:
+    // `\` becomes `/` on every platform, which is what `normalize_path` does in
+    // athenaeum-core's anchor, git and scan modules. The recording side sees the
+    // caller's path verbatim while the reading side has canonicalized it, and on
+    // Windows those differ only by `\` vs `/`. Hashing the raw string gave the
+    // two sides different addresses, so history was recorded and then never
+    // found again. Normalizing unconditionally rather than by MAIN_SEPARATOR
+    // costs a collision between `a\b.md` and `a/b.md` on Unix, where `\` is a
+    // legal filename character; core accepts that same trade so that a vault
+    // keeps one address on every platform it is opened on.
+    let relative = relative.replace('\\', "/");
     // Fixed FNV-1a keeps history addresses stable across Rust/toolchain upgrades.
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in relative.as_bytes() {
@@ -470,6 +481,38 @@ mod tests {
             serde_json::to_string(&settings).unwrap(),
         )
         .unwrap();
+    }
+
+    /// `record_file_version` is handed the caller's path as written, while
+    /// `list`/`restore` go through `checked_file`, which canonicalizes it. On
+    /// Windows that rewrites `/` to `\`, which used to send the two sides to
+    /// different history files. Both must address the same one.
+    #[test]
+    fn history_address_is_independent_of_separator_style() {
+        let root = std::env::temp_dir().join(format!("athenaeum-history-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join(".athenaeum")).unwrap();
+        fs::create_dir_all(root.join("wiki")).unwrap();
+        let file = root.join("wiki/page.md");
+        fs::write(&file, "current").unwrap();
+
+        let recorded = history_path(&root, &file);
+        let listed = history_path(&root.canonicalize().unwrap(), &file.canonicalize().unwrap());
+
+        assert_eq!(recorded.file_name(), listed.file_name());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Mirrors `windows_paths_are_normalized_on_the_way_in` in athenaeum-core: a
+    /// `\`-separated tail addresses the same history file on every platform, so
+    /// a vault carried between machines keeps the history it arrived with.
+    #[test]
+    fn windows_style_tails_address_the_same_file_on_every_platform() {
+        let root = Path::new("/vault");
+
+        assert_eq!(
+            history_path(root, &root.join(r"wiki\page.md")).file_name(),
+            history_path(root, &root.join("wiki/page.md")).file_name(),
+        );
     }
 
     #[test]
