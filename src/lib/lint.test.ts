@@ -1,27 +1,37 @@
+/**
+ * Lint, from the frontend's side of the seam.
+ *
+ * What is asserted here is what this layer still owns: the prompt semantic
+ * lint builds, the findings it parses back, and the mapping of a backend
+ * lint report onto the list the panel renders.
+ *
+ * What is *not* asserted here is which pages are orphans, which links are
+ * broken, or which page a suggestion should name. Those rules live in
+ * `athenaeum-core`'s vault lint, where they are tested against a real vault
+ * on disk — `vault::lint::tests`. A second copy of those expectations in
+ * TypeScript would be the two-models problem this change exists to end.
+ */
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import type { LlmConfig } from "@/stores/wiki-store"
-import type { FileNode } from "@/types/wiki"
+import type { IndexGraph, VaultLintReport } from "@/lib/knowledge-index"
 
-// Mock LLM + Tauri FS — the lint runner also touches the activity store
-// (we leave that real so we can assert status transitions).
 vi.mock("./llm-client", () => ({
   streamChat: vi.fn(),
 }))
-vi.mock("@/commands/fs", () => ({
-  readFile: vi.fn(),
-  writeFile: vi.fn(),
-  listDirectory: vi.fn(),
+vi.mock("@/lib/knowledge-index", () => ({
+  lintVault: vi.fn(),
+  loadKnowledgeGraph: vi.fn(),
 }))
 
 import { runSemanticLint, runStructuralLint } from "./lint"
 import { streamChat } from "./llm-client"
-import { readFile, listDirectory } from "@/commands/fs"
+import { lintVault, loadKnowledgeGraph } from "@/lib/knowledge-index"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useActivityStore } from "@/stores/activity-store"
 
 const mockStreamChat = vi.mocked(streamChat)
-const mockReadFile = vi.mocked(readFile)
-const mockListDirectory = vi.mocked(listDirectory)
+const mockLintVault = vi.mocked(lintVault)
+const mockLoadGraph = vi.mocked(loadKnowledgeGraph)
 
 function fakeLlmConfig(): LlmConfig {
   return {
@@ -34,41 +44,150 @@ function fakeLlmConfig(): LlmConfig {
   }
 }
 
-function makeFileNode(name: string, content: string): { node: FileNode; content: string } {
+/** A page as the index projects it: a path, a title, a summary. */
+function indexedPage(path: string, title: string, summary: string) {
   return {
-    node: {
-      name,
-      path: `/project/wiki/${name}`,
-      is_dir: false,
-      children: [],
-    } as FileNode,
-    content,
+    id: `vault_page_${path}`,
+    title,
+    kind: "concept",
+    type: "concept",
+    path,
+    summary,
+    authority: "unverified_observation",
+    status: "valid",
+    origin: "page" as const,
+    linkCount: 0,
   }
+}
+
+function graphOf(...nodes: ReturnType<typeof indexedPage>[]): IndexGraph {
+  return { nodes, edges: [] }
+}
+
+function lintReport(overrides: Partial<VaultLintReport> = {}): VaultLintReport {
+  return {
+    pages: 0,
+    findings: [],
+    scanComplete: true,
+    brokenLinksTruncated: false,
+    ...overrides,
+  }
+}
+
+function respondWithTokens(text: string) {
+  mockStreamChat.mockImplementation(async (_config, _messages, callbacks) => {
+    if (text) callbacks.onToken(text)
+    callbacks.onDone()
+  })
 }
 
 beforeEach(() => {
   mockStreamChat.mockReset()
-  mockReadFile.mockReset()
-  mockListDirectory.mockReset()
+  mockLintVault.mockReset()
+  mockLoadGraph.mockReset()
+  mockLintVault.mockResolvedValue(lintReport())
+  mockLoadGraph.mockResolvedValue({ nodes: [], edges: [] })
   useWikiStore.getState().setOutputLanguage("auto")
   useActivityStore.setState({ items: [] })
 })
 
+describe("runStructuralLint", () => {
+  it("returns what the index found, unchanged", async () => {
+    mockLintVault.mockResolvedValue(
+      lintReport({
+        pages: 2,
+        findings: [
+          {
+            type: "broken-link",
+            severity: "warning",
+            page: "wiki/attention.md",
+            node: "vault_page_a",
+            detail: "Broken link: [[transfomer]] — target page not found.",
+            brokenTarget: "transfomer",
+            suggestedTarget: "wiki/transformer.md",
+          },
+          {
+            type: "orphan",
+            severity: "info",
+            page: "wiki/transformer.md",
+            node: "vault_page_t",
+            detail: "No other pages link to this page.",
+            suggestedSource: "wiki/attention.md",
+          },
+        ],
+      }),
+    )
+
+    const results = await runStructuralLint("/project")
+
+    expect(results).toEqual([
+      {
+        type: "broken-link",
+        severity: "warning",
+        page: "wiki/attention.md",
+        detail: "Broken link: [[transfomer]] — target page not found.",
+        brokenTarget: "transfomer",
+        suggestedTarget: "wiki/transformer.md",
+        suggestedSource: undefined,
+      },
+      {
+        type: "orphan",
+        severity: "info",
+        page: "wiki/transformer.md",
+        detail: "No other pages link to this page.",
+        brokenTarget: undefined,
+        suggestedTarget: undefined,
+        suggestedSource: "wiki/attention.md",
+      },
+    ])
+  })
+
+  it("passes the user's ignore settings through to the index", async () => {
+    await runStructuralLint("/project", {
+      config: { ignoreOrphan: true, ignoreNoOutlinks: false, ignorePages: ["archive/old"] },
+    })
+
+    expect(mockLintVault).toHaveBeenCalledWith("/project", {
+      ignoreOrphan: true,
+      ignoreNoOutlinks: false,
+      ignorePages: ["archive/old"],
+    })
+  })
+
+  it("does not start a pass that has already been cancelled", async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      runStructuralLint("/project", { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mockLintVault).not.toHaveBeenCalled()
+  })
+
+  it("discards a result that arrives after cancellation", async () => {
+    // The user's click has to win even when the backend was already busy:
+    // otherwise a cancelled lint still repopulates the panel.
+    const controller = new AbortController()
+    mockLintVault.mockImplementation(async () => {
+      controller.abort()
+      return lintReport({ pages: 1 })
+    })
+
+    await expect(
+      runStructuralLint("/project", { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" })
+  })
+})
+
 describe("runSemanticLint — language directive", () => {
   it("uses explicit user setting", async () => {
-    const pages = [
-      makeFileNode("a.md", "Page A content here"),
-      makeFileNode("b.md", "Page B content here"),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onToken("")
-      cb.onDone()
-    })
+    mockLoadGraph.mockResolvedValue(
+      graphOf(
+        indexedPage("wiki/a.md", "A", "Page A content here"),
+        indexedPage("wiki/b.md", "B", "Page B content here"),
+      ),
+    )
+    respondWithTokens("")
 
     useWikiStore.getState().setOutputLanguage("Korean")
     await runSemanticLint("/project", fakeLlmConfig())
@@ -78,20 +197,14 @@ describe("runSemanticLint — language directive", () => {
   })
 
   it("auto mode detects from the concatenated page summaries", async () => {
-    const cjkContent = "这是一篇关于注意力机制和神经网络的长中文页面"
-    const pages = [
-      makeFileNode("attention.md", cjkContent),
-      makeFileNode("transformer.md", cjkContent),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onToken("")
-      cb.onDone()
-    })
+    const cjk = "这是一篇关于注意力机制和神经网络的长中文页面"
+    mockLoadGraph.mockResolvedValue(
+      graphOf(
+        indexedPage("wiki/attention.md", "注意力", cjk),
+        indexedPage("wiki/transformer.md", "变换器", cjk),
+      ),
+    )
+    respondWithTokens("")
 
     useWikiStore.getState().setOutputLanguage("auto")
     await runSemanticLint("/project", fakeLlmConfig())
@@ -101,13 +214,10 @@ describe("runSemanticLint — language directive", () => {
   })
 
   it("explicit setting wins over source language", async () => {
-    const pages = [makeFileNode("x.md", "これは日本語の内容です")]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockResolvedValue(pages[0].content)
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onToken("")
-      cb.onDone()
-    })
+    mockLoadGraph.mockResolvedValue(
+      graphOf(indexedPage("wiki/x.md", "X", "これは日本語の内容です")),
+    )
+    respondWithTokens("")
 
     useWikiStore.getState().setOutputLanguage("English")
     await runSemanticLint("/project", fakeLlmConfig())
@@ -118,211 +228,150 @@ describe("runSemanticLint — language directive", () => {
   })
 })
 
+describe("runSemanticLint — the pages it reasons about", () => {
+  it("sends each page's path and the summary the index derived", async () => {
+    mockLoadGraph.mockResolvedValue(
+      graphOf(
+        indexedPage("wiki/concepts/attention.md", "Attention", "Weighting tokens by relevance."),
+      ),
+    )
+    respondWithTokens("")
+
+    await runSemanticLint("/project", fakeLlmConfig())
+
+    const prompt = mockStreamChat.mock.calls[0][1][0].content
+    expect(prompt).toContain("### wiki/concepts/attention.md")
+    expect(prompt).toContain("Weighting tokens by relevance.")
+  })
+
+  it("ignores knowledge that is not a page", async () => {
+    // A source file and a node the agent proposed are both knowledge, and
+    // neither is a wiki page a quality analyst can comment on.
+    mockLoadGraph.mockResolvedValue({
+      nodes: [
+        indexedPage("wiki/a.md", "A", "A page."),
+        { ...indexedPage("raw/sources/paper.pdf", "paper.pdf", "A source."), origin: "source" as const },
+        { ...indexedPage("", "A decision", "Curated."), origin: "curated" as const, path: undefined },
+      ],
+      edges: [],
+    })
+    respondWithTokens("")
+
+    await runSemanticLint("/project", fakeLlmConfig())
+
+    const prompt = mockStreamChat.mock.calls[0][1][0].content
+    expect(prompt).toContain("### wiki/a.md")
+    expect(prompt).not.toContain("paper.pdf")
+    expect(prompt).not.toContain("A decision")
+  })
+})
+
 describe("runSemanticLint — missing-page false positives (#537)", () => {
   it("drops missing-page findings when the entity page already exists", async () => {
-    const pages = [
-      makeFileNode("概念页.md", "介绍 [[维特根斯坦]]、[[阿德勒]] 和 [[尼采]] 的概念页"),
-      makeFileNode("维特根斯坦.md", "维特根斯坦是一位哲学家。"), // entity page EXISTS
-      makeFileNode("阿德勒.md", "阿德勒是一位心理学家。"), // entity page EXISTS
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-    // The LLM wrongly reports missing-page for entities that already have pages,
-    // using free-form Chinese titles that don't match a known "缺失页面:" prefix.
-    const llm = [
-      "---LINT: missing-page | warning | 维特根斯坦---", // bare name, page exists
-      "维特根斯坦在概念页中被引用但未建立独立实体页。",
-      "PAGES: 概念页.md",
-      "---END LINT---",
-      "---LINT: missing-page | warning | 缺失页面：阿德勒---", // standard prefix, page exists
-      "阿德勒被引用但缺少页面。",
-      "PAGES: 概念页.md",
-      "---END LINT---",
-      "---LINT: missing-page | warning | 尼采---", // genuinely missing (no page)
-      "尼采被引用但没有页面。",
-      "PAGES: 概念页.md",
-      "---END LINT---",
-    ].join("\n")
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onToken(llm)
-      cb.onDone()
-    })
+    mockLoadGraph.mockResolvedValue(
+      graphOf(
+        indexedPage("wiki/概念页.md", "概念页", "介绍维特根斯坦、阿德勒和尼采的概念页"),
+        indexedPage("wiki/维特根斯坦.md", "维特根斯坦", "维特根斯坦是一位哲学家。"),
+        indexedPage("wiki/阿德勒.md", "阿德勒", "阿德勒是一位心理学家。"),
+      ),
+    )
+    // The LLM wrongly reports missing-page for entities that already have
+    // pages, using free-form Chinese titles that match no fixed prefix.
+    respondWithTokens(
+      [
+        "---LINT: missing-page | warning | 维特根斯坦---",
+        "维特根斯坦在概念页中被引用但未建立独立实体页。",
+        "PAGES: 概念页.md",
+        "---END LINT---",
+        "---LINT: missing-page | warning | 缺失页面：阿德勒---",
+        "阿德勒被引用但缺少页面。",
+        "PAGES: 概念页.md",
+        "---END LINT---",
+        "---LINT: missing-page | warning | 尼采---",
+        "尼采被引用但没有页面。",
+        "PAGES: 概念页.md",
+        "---END LINT---",
+      ].join("\n"),
+    )
 
     const results = await runSemanticLint("/project", fakeLlmConfig())
 
     const missingPages = results.filter((r) => r.detail.includes("[missing-page]"))
-    // The two existing-entity false positives are filtered; only 尼采 remains.
     expect(missingPages).toHaveLength(1)
     expect(missingPages[0].page).toBe("尼采")
   })
 
   it("does not suppress an unrelated finding that merely contains an existing short title", async () => {
-    const pages = [
-      makeFileNode("AI.md", "---\ntitle: AI\n---\n# AI"),
-      makeFileNode("overview.md", "References [[FAIR data governance]]."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onToken([
+    mockLoadGraph.mockResolvedValue(
+      graphOf(
+        indexedPage("wiki/AI.md", "AI", "Artificial intelligence."),
+        indexedPage("wiki/overview.md", "Overview", "References FAIR data governance."),
+      ),
+    )
+    respondWithTokens(
+      [
         "---LINT: missing-page | warning | FAIR data governance---",
         "The concept has no dedicated page.",
         "PAGES: overview.md",
         "---END LINT---",
-      ].join("\n"))
-      cb.onDone()
-    })
+      ].join("\n"),
+    )
 
     const results = await runSemanticLint("/project", fakeLlmConfig())
 
     expect(results).toHaveLength(1)
     expect(results[0].page).toBe("FAIR data governance")
   })
+
+  it("recognises a page by its file stem as well as its title", async () => {
+    // A page titled "Attention Mechanism" at `attention-mechanism.md` is
+    // named either way, and the model picks whichever it likes.
+    mockLoadGraph.mockResolvedValue(
+      graphOf(indexedPage("wiki/attention-mechanism.md", "Attention Mechanism", "Weights.")),
+    )
+    respondWithTokens(
+      [
+        "---LINT: missing-page | warning | attention-mechanism---",
+        "No page for this concept.",
+        "PAGES: wiki/attention-mechanism.md",
+        "---END LINT---",
+      ].join("\n"),
+    )
+
+    const results = await runSemanticLint("/project", fakeLlmConfig())
+
+    expect(results).toEqual([])
+  })
 })
 
 describe("runSemanticLint — activity & early returns", () => {
   it("logs a running activity item and marks done", async () => {
-    mockListDirectory.mockResolvedValue([makeFileNode("a.md", "content").node])
-    mockReadFile.mockResolvedValue("content")
-    mockStreamChat.mockImplementation(async (_c, _m, cb) => {
-      cb.onDone()
-    })
+    mockLoadGraph.mockResolvedValue(graphOf(indexedPage("wiki/a.md", "A", "content")))
+    respondWithTokens("")
 
     await runSemanticLint("/project", fakeLlmConfig())
+
     const items = useActivityStore.getState().items
     expect(items).toHaveLength(1)
-    // Final state after run completes
     expect(items[0].type).toBe("lint")
     expect(["done", "error"]).toContain(items[0].status)
   })
 
-  it("returns empty and marks done when wiki has no pages", async () => {
-    mockListDirectory.mockResolvedValue([])
+  it("returns empty and marks done when the wiki has no pages", async () => {
+    mockLoadGraph.mockResolvedValue({ nodes: [], edges: [] })
 
     const result = await runSemanticLint("/project", fakeLlmConfig())
+
     expect(result).toEqual([])
     expect(mockStreamChat).not.toHaveBeenCalled()
-
-    const items = useActivityStore.getState().items
-    expect(items[0].detail).toMatch(/no wiki pages/i)
+    expect(useActivityStore.getState().items[0].detail).toMatch(/no wiki pages/i)
   })
 
-  it("marks error status when wiki directory read fails", async () => {
-    mockListDirectory.mockRejectedValue(new Error("ENOENT"))
+  it("marks error status when the index cannot be read", async () => {
+    mockLoadGraph.mockRejectedValue(new Error("no project is open"))
+
     await runSemanticLint("/project", fakeLlmConfig())
-    const items = useActivityStore.getState().items
-    expect(items[0].status).toBe("error")
-  })
-})
 
-describe("runStructuralLint — link suggestions", () => {
-  it("stops before reading pages when cancellation is already requested", async () => {
-    const pages = [makeFileNode("a.md", "# A")]
-    mockListDirectory.mockResolvedValue(pages.map((entry) => entry.node))
-    const controller = new AbortController()
-    controller.abort()
-
-    await expect(runStructuralLint("/project", { signal: controller.signal })).rejects.toMatchObject({
-      name: "AbortError",
-    })
-    expect(mockReadFile).not.toHaveBeenCalled()
-  })
-
-  it("suggests the closest existing page for a broken wikilink", async () => {
-    const pages = [
-      makeFileNode("transformer.md", "---\ntitle: Transformer\n---\n# Transformer\nAttention model."),
-      makeFileNode("attention.md", "# Attention\nSee [[transfomer]] for the architecture."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-
-    const results = await runStructuralLint("/project")
-    const broken = results.find((result) => result.type === "broken-link")
-
-    expect(broken).toMatchObject({
-      page: "attention.md",
-      brokenTarget: "transfomer",
-      suggestedTarget: "transformer.md",
-    })
-  })
-
-  it("suggests related pages for orphan and no-outlinks findings", async () => {
-    const pages = [
-      makeFileNode("rag.md", "# RAG\nRetrieval augmented generation uses vector search."),
-      makeFileNode("vector-search.md", "# Vector Search\nVector search retrieval finds related chunks."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-
-    const results = await runStructuralLint("/project")
-    const noOutlinks = results.find((result) => result.type === "no-outlinks" && result.page === "rag.md")
-    const orphan = results.find((result) => result.type === "orphan" && result.page === "rag.md")
-
-    expect(noOutlinks?.suggestedTarget).toBe("vector-search.md")
-    expect(orphan?.suggestedSource).toBe("vector-search.md")
-  })
-
-  it("does not attach self-referential suggestions when no related page exists", async () => {
-    const pages = [
-      makeFileNode("alpha.md", "# Alpha\nAardvark apricot."),
-      makeFileNode("beta.md", "# Beta\nZeppelin zircon."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-
-    const results = await runStructuralLint("/project")
-    const orphan = results.find((result) => result.type === "orphan" && result.page === "alpha.md")
-
-    expect(orphan?.suggestedSource).toBeUndefined()
-    expect(orphan?.suggestedTarget).toBeUndefined()
-  })
-
-  it("does not suggest same-folder pages without shared terms", async () => {
-    const pages = [
-      makeFileNode("concepts/alpha.md", "# Alpha\nAardvark apricot."),
-      makeFileNode("concepts/beta.md", "# Beta\nZeppelin zircon."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-
-    const results = await runStructuralLint("/project")
-    const orphan = results.find((result) => result.type === "orphan" && result.page === "concepts/alpha.md")
-
-    expect(orphan?.suggestedSource).toBeUndefined()
-  })
-
-  it("does not suggest short unrelated typo targets", async () => {
-    const pages = [
-      makeFileNode("bat.md", "# Bat\nFlying mammal."),
-      makeFileNode("note.md", "# Note\nSee [[cat]]."),
-    ]
-    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
-    mockReadFile.mockImplementation(async (path) => {
-      const match = pages.find((p) => p.node.path === path)
-      return match?.content ?? ""
-    })
-
-    const results = await runStructuralLint("/project")
-    const broken = results.find((result) => result.type === "broken-link" && result.brokenTarget === "cat")
-
-    expect(broken?.suggestedTarget).toBeUndefined()
+    expect(useActivityStore.getState().items[0].status).toBe("error")
   })
 })

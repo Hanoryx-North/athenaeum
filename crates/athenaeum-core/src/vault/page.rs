@@ -373,6 +373,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prose_that_looks_like_frontmatter_is_not_frontmatter() {
+        // A page with no `title:` in its frontmatter, whose body happens to
+        // contain a line beginning `title:`. Reading that as the page's
+        // title made the index believe a page existed under a name nobody
+        // gave it, and review items for genuinely missing pages resolved
+        // themselves against it.
+        let page = VaultPage::parse(
+            "wiki/entities/other.md",
+            "---
+type: entity
+---
+
+# Real Heading
+
+Some text.
+title: Attention Mechanism
+",
+        );
+
+        assert_eq!(page.title, "Real Heading");
+    }
+
+    #[test]
     fn reads_a_conventional_page() {
         let page = VaultPage::parse(
             "wiki/concepts/chain-of-thought.md",

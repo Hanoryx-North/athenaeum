@@ -212,6 +212,7 @@ pub fn run() {
             knowledge::journal,
             knowledge::index_vault,
             knowledge::knowledge_graph,
+            knowledge::lint_vault,
             knowledge::vocabularies,
             set_proxy_env,
             set_close_behavior,

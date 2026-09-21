@@ -45,24 +45,17 @@ export interface SweepScenarioExpected {
 export interface LintScenario {
   name: string
   description: string
-  /** Virtual project tree. Must include a wiki/ subfolder. */
-  initialWiki: Record<string, string>
   /**
-   * Optional raw LLM response for semantic lint. When absent, the semantic
-   * stage is skipped — only structural assertions apply.
+   * The wiki the scenario describes. Semantic lint reads the knowledge
+   * index rather than the files, so this is what the index is made to
+   * hold, not a tree that gets written to disk.
    */
-  llmResponse?: string
+  initialWiki: Record<string, string>
+  /** Raw LLM response for semantic lint. */
+  llmResponse: string
   expected: {
-    /** Expected structural lint findings. Order-independent. */
-    structural: Array<{
-      type: "orphan" | "broken-link" | "no-outlinks"
-      /** Page path relative to wiki/ (e.g. "attention.md") */
-      page: string
-      /** For broken-link, the substring that should appear in the detail */
-      linkName?: string
-    }>
-    /** Expected semantic lint findings (when llmResponse provided) */
-    semantic?: Array<{
+    /** Expected semantic lint findings. Order-independent. */
+    semantic: Array<{
       type: string
       severity: string
       titleContains?: string

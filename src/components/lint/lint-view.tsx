@@ -191,7 +191,13 @@ export function LintView() {
   async function handleOpenPage(page: string) {
     if (!project) return
     const pp = normalizePath(project.path)
+    // A structural finding names a page by its vault-relative path, so it
+    // already carries the `wiki/` prefix and the `.md`. A semantic finding
+    // names it however the model wrote it, which is why the other spellings
+    // are still tried.
     const candidates = [
+      `${pp}/${page}`,
+      `${pp}/${page}.md`,
       `${pp}/wiki/${page}`,
       `${pp}/wiki/${page}.md`,
     ]
@@ -218,7 +224,7 @@ export function LintView() {
           affectedPages: [item.page],
           options: [
             { label: t("lint.openEdit"), action: `open:${item.page}` },
-            ...(pp ? [{ label: t("lint.deletePage"), action: `delete:${pp}/wiki/${item.page}` }] : []),
+            ...(pp ? [{ label: t("lint.deletePage"), action: `delete:${pp}/${item.page}` }] : []),
             { label: t("lint.skip"), action: "Skip" },
           ],
         })
@@ -263,7 +269,7 @@ export function LintView() {
       switch (item.type) {
         case "orphan": {
           if (item.suggestedSource) {
-            const sourcePath = `${pp}/wiki/${item.suggestedSource}`
+            const sourcePath = `${pp}/${item.suggestedSource}`
             const content = await readFile(sourcePath)
             await writeFile(sourcePath, appendWikilink(content, item.page))
           } else {
@@ -274,7 +280,7 @@ export function LintView() {
         }
 
         case "broken-link": {
-          const pagePath = `${pp}/wiki/${item.page}`
+          const pagePath = `${pp}/${item.page}`
           if (item.brokenTarget && item.suggestedTarget) {
             const content = await readFile(pagePath)
             await writeFile(pagePath, rewriteWikilinkTarget(content, item.brokenTarget, item.suggestedTarget))
@@ -291,7 +297,7 @@ export function LintView() {
 
         case "no-outlinks": {
           if (item.suggestedTarget) {
-            const pagePath = `${pp}/wiki/${item.page}`
+            const pagePath = `${pp}/${item.page}`
             const content = await readFile(pagePath)
             await writeFile(pagePath, appendWikilink(content, item.suggestedTarget))
           } else {
@@ -326,7 +332,7 @@ export function LintView() {
   async function handleDeleteOrphan(item: LintItem) {
     if (!project) return
     const pp = normalizePath(project.path)
-    const pagePath = `${pp}/wiki/${item.page}`
+    const pagePath = `${pp}/${item.page}`
     const confirmed = await appDialog.confirm({
       message: t("lint.deleteOrphanConfirm", { page: item.page }),
       variant: "destructive",
@@ -417,14 +423,14 @@ export function LintView() {
 
       for (const item of selectedLintItems) {
         if (item.type === "orphan" && item.suggestedSource) {
-          queueEdit(`${pp}/wiki/${item.suggestedSource}`, item.id, (content) => appendWikilink(content, item.page))
+          queueEdit(`${pp}/${item.suggestedSource}`, item.id, (content) => appendWikilink(content, item.page))
         } else if (item.type === "no-outlinks" && item.suggestedTarget) {
-          queueEdit(`${pp}/wiki/${item.page}`, item.id, (content) => appendWikilink(content, item.suggestedTarget!))
+          queueEdit(`${pp}/${item.page}`, item.id, (content) => appendWikilink(content, item.suggestedTarget!))
         } else if (item.type === "broken-link" && item.brokenTarget) {
           const stub = item.suggestedTarget ? null : await ensureBrokenLinkStub(pp, item.brokenTarget)
           if (stub) filesystemChanged = true
           const target = item.suggestedTarget ?? stub!.relativePath
-          queueEdit(`${pp}/wiki/${item.page}`, item.id, (content) =>
+          queueEdit(`${pp}/${item.page}`, item.id, (content) =>
             rewriteWikilinkTarget(content, item.brokenTarget!, target))
         } else {
           addLintItemToReview(item)

@@ -50,6 +50,28 @@ impl KnowledgeStore {
         self.search_matching(&terms.join(" OR "), limit)
     }
 
+    /// What else is about the same thing as `node`.
+    ///
+    /// "More like this": the same lexical index, asked in the other
+    /// direction. Any-term matching rather than every-term, because a
+    /// title is a phrase and the nodes worth relating to it rarely repeat
+    /// it word for word — `Attention Head` and `Attention` are about the
+    /// same subject and share one word of two.
+    ///
+    /// The node itself is never its own neighbour, and it is excluded
+    /// before the limit applies so asking for one candidate returns one.
+    pub fn similar(&self, node: &KnowledgeNode, limit: u32) -> Result<Vec<SearchHit>> {
+        let Some(terms) = fts_terms(&node.title) else {
+            return Ok(Vec::new());
+        };
+        let hits = self.search_matching(&terms.join(" OR "), limit.saturating_add(1))?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.node.id != node.id)
+            .take(limit as usize)
+            .collect())
+    }
+
     fn search_matching(&self, match_expr: &str, limit: u32) -> Result<Vec<SearchHit>> {
         // `rank` sits immediately after the node columns, which is the index
         // `map_node` stops at.

@@ -1,69 +1,70 @@
 /**
- * Scenario-driven lint tests.
+ * Scenario-driven semantic lint tests.
  *
- * Exercises runStructuralLint (always) and runSemanticLint (when the
- * scenario provides an llm-response.txt) against a materialized wiki dir.
+ * Each scenario is a small wiki plus the answer a model gave about it. The
+ * wiki reaches lint the way it reaches it in the app — through the
+ * knowledge index — so these scenarios describe indexed pages rather than
+ * files on disk. Structural scenarios moved to `vault::lint::tests` in
+ * `athenaeum-core` along with the rules they assert.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest"
-import path from "node:path"
-import fs from "node:fs/promises"
-import { realFs, createTempProject } from "@/test-helpers/fs-temp"
-import { materializeScenario, copyDir } from "@/test-helpers/scenarios/materialize"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { lintScenarios } from "@/test-helpers/scenarios/lint-scenarios"
 import type { LintScenario } from "@/test-helpers/scenarios/types"
+import type { IndexGraph } from "@/lib/knowledge-index"
 
-vi.mock("@/commands/fs", () => realFs)
-
-let currentLlmResponse: string | null = null
+let currentLlmResponse = ""
 vi.mock("./llm-client", () => ({
   streamChat: vi.fn(async (_cfg, _msgs, cb) => {
-    if (currentLlmResponse !== null) cb.onToken(currentLlmResponse)
+    if (currentLlmResponse) cb.onToken(currentLlmResponse)
     cb.onDone()
   }),
 }))
+vi.mock("@/lib/knowledge-index", () => ({
+  lintVault: vi.fn(),
+  loadKnowledgeGraph: vi.fn(),
+}))
 
-import { runStructuralLint, runSemanticLint, type LintResult } from "./lint"
+import { runSemanticLint, type LintResult } from "./lint"
+import { loadKnowledgeGraph } from "@/lib/knowledge-index"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useActivityStore } from "@/stores/activity-store"
 
-const FIXTURES_ROOT = path.join(process.cwd(), "tests", "fixtures", "scenarios-lint")
+const mockLoadGraph = vi.mocked(loadKnowledgeGraph)
 
-const shimScenarios = lintScenarios // shorthand
-
-beforeAll(async () => {
-  await fs.rm(FIXTURES_ROOT, { recursive: true, force: true })
-  await fs.mkdir(FIXTURES_ROOT, { recursive: true })
-  for (const s of shimScenarios) {
-    await materializeScenario(s, FIXTURES_ROOT)
-  }
-})
+/**
+ * The scenario's wiki, as the index would hold it.
+ *
+ * A stub, not a second indexer: the title comes off the frontmatter line
+ * the scenario wrote and the summary is the first line of prose. What the
+ * indexer really derives from a page is tested in Rust; what matters here
+ * is that lint is handed pages rather than paths.
+ */
+function indexOf(scenario: LintScenario): IndexGraph {
+  const nodes = Object.entries(scenario.initialWiki)
+    .filter(([path]) => !/\/(index|log)\.md$/.test(path))
+    .map(([path, content]) => ({
+      id: `vault_page_${path}`,
+      title: content.match(/^title:\s*(.+)$/m)?.[1].trim() ?? path,
+      kind: "concept",
+      type: "concept",
+      path,
+      summary:
+        content
+          .replace(/^---[\s\S]*?---\n/, "")
+          .split("\n")
+          .find((line) => line.trim() && !line.startsWith("#")) ?? "",
+      authority: "unverified_observation",
+      status: "valid",
+      origin: "page" as const,
+      linkCount: 0,
+    }))
+  return { nodes, edges: [] }
+}
 
 beforeEach(() => {
-  currentLlmResponse = null
+  currentLlmResponse = ""
+  mockLoadGraph.mockReset()
   useActivityStore.setState({ items: [] })
-})
-
-interface Ctx {
-  tmp: { path: string; cleanup: () => Promise<void> }
-}
-let ctx: Ctx | undefined
-
-async function setup(scenario: LintScenario): Promise<Ctx> {
-  const tmp = await createTempProject(
-    `lint-${scenario.name.replace(/\//g, "-")}`,
-  )
-  const initialWikiDir = path.join(FIXTURES_ROOT, scenario.name, "initial-wiki")
-  await copyDir(initialWikiDir, tmp.path)
-
-  useWikiStore.setState({
-    project: {
-      name: "t",
-      path: tmp.path,
-      createdAt: 0,
-      purposeText: "",
-      fileTree: [],
-    } as unknown as ReturnType<typeof useWikiStore.getState>["project"],
-  })
   useWikiStore.getState().setLlmConfig({
     provider: "openai",
     apiKey: "test-key",
@@ -72,67 +73,22 @@ async function setup(scenario: LintScenario): Promise<Ctx> {
     customEndpoint: "",
     maxContextSize: 128000,
   })
-
-  if (scenario.llmResponse !== undefined) {
-    currentLlmResponse = await fs.readFile(
-      path.join(FIXTURES_ROOT, scenario.name, "llm-response.txt"),
-      "utf-8",
-    )
-  }
-  return { tmp }
-}
-
-afterEach(async () => {
-  if (ctx) {
-    await ctx.tmp.cleanup()
-    ctx = undefined
-  }
 })
 
-// ── Assertions ──────────────────────────────────────────────────────────────
-
-function assertStructural(
-  scenario: LintScenario,
-  actual: LintResult[],
-): void {
-  const expected = scenario.expected.structural
+function assertSemantic(scenario: LintScenario, actual: LintResult[]): void {
+  const expected = scenario.expected.semantic
   try {
     expect(actual.length).toBe(expected.length)
-    for (const e of expected) {
+    for (const item of expected) {
       const match = actual.find(
-        (a) =>
-          a.type === e.type &&
-          a.page.includes(e.page) &&
-          (e.linkName === undefined || a.detail.includes(e.linkName)),
+        (finding) =>
+          finding.type === item.type &&
+          finding.severity === (item.severity as "warning" | "info") &&
+          (item.titleContains === undefined ||
+            finding.detail.includes(item.titleContains) ||
+            finding.page.includes(item.titleContains)),
       )
-      expect(match, `no structural finding matching ${JSON.stringify(e)}`).toBeTruthy()
-    }
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `\n[lint: ${scenario.name}] structural mismatch. Actual findings:\n` +
-        JSON.stringify(actual, null, 2),
-    )
-    throw err
-  }
-}
-
-function assertSemantic(
-  scenario: LintScenario,
-  actual: LintResult[],
-): void {
-  const expected = scenario.expected.semantic ?? []
-  try {
-    expect(actual.length).toBe(expected.length)
-    for (const e of expected) {
-      const match = actual.find(
-        (a) =>
-          a.type === e.type &&
-          a.severity === (e.severity as "warning" | "info") &&
-          (e.titleContains === undefined || a.detail.includes(e.titleContains) ||
-            a.page.includes(e.titleContains)),
-      )
-      expect(match, `no semantic finding matching ${JSON.stringify(e)}`).toBeTruthy()
+      expect(match, `no semantic finding matching ${JSON.stringify(item)}`).toBeTruthy()
     }
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -144,24 +100,19 @@ function assertSemantic(
   }
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────────
-
-describe("lint scenarios (fixture-driven)", () => {
-  it.each(shimScenarios.map((s) => [s.name, s]))(
+describe("semantic lint scenarios (fixture-driven)", () => {
+  it.each(lintScenarios.map((scenario) => [scenario.name, scenario] as const))(
     "%s",
     async (_name, scenario) => {
-      ctx = await setup(scenario)
+      mockLoadGraph.mockResolvedValue(indexOf(scenario))
+      currentLlmResponse = scenario.llmResponse
 
-      const structural = await runStructuralLint(ctx.tmp.path)
-      assertStructural(scenario, structural)
+      const findings = await runSemanticLint(
+        "/project",
+        useWikiStore.getState().llmConfig,
+      )
 
-      if (scenario.llmResponse !== undefined) {
-        const semantic = await runSemanticLint(
-          ctx.tmp.path,
-          useWikiStore.getState().llmConfig,
-        )
-        assertSemantic(scenario, semantic)
-      }
+      assertSemantic(scenario, findings)
     },
   )
 })

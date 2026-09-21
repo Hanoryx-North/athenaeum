@@ -163,13 +163,13 @@ own generated icon. Upstream's name, logo and release history do not ship here.
 
 ## Status
 
-Steps 1–6 of the order above are done, and step 7 landed with the code it depends on:
+Steps 1–7 and step 9 of the order above are done:
 
 - Licence, provenance, manifests — done.
 - Frontend foundation, layout, UI primitives, vault layer, editor, graph, sources, search,
-  lint, review, ingest pipeline — ported; 1,818 frontend tests pass.
+  lint, review, ingest pipeline — ported; 1,814 frontend tests pass.
 - Rust backend — document parsing, file sync, history, project management, vector search,
-  search backends; 357 workspace tests pass.
+  search backends; 378 workspace tests.
 - **Vault indexing** (step 5) — `crates/athenaeum-core/src/vault/` turns pages into typed
   nodes, `[[wikilinks]]` into deterministic edges, `raw/sources/` entries into source
   nodes and `sources:` frontmatter into evidence. Reconciles rather than rebuilds; the
@@ -178,6 +178,12 @@ Steps 1–6 of the order above are done, and step 7 landed with the code it depe
 - **Graph, search and knowledge panels over the index** (step 6) — one knowledge model
   rather than one per panel. `src/lib/knowledge-index.ts` is the frontend's only door to
   it.
+- **Lint, review and deep research over the index** (step 9) — structural lint is now a
+  projection in `crates/athenaeum-core/src/vault/lint.rs` rather than a second
+  link-resolver in TypeScript; semantic lint sends the index's pages and summaries;
+  the review sweep asks the index what the wiki contains instead of re-parsing every
+  frontmatter block; and deep research offers the model the indexed pages that bear on
+  its topic instead of the raw text of `index.md`.
 - `crates/athenaeum-providers` — retired and removed.
 
 Still open, in order:
@@ -187,11 +193,8 @@ Still open, in order:
    the SDK in `deepseek-harness/packages/sdk/` over stdio JSON-RPC, against a profile
    that mounts the `athenaeum_agent` bundle. Not ACP: that is automation-only, not a
    presentation layer.
-2. **Lint, review, deep research over the index** (step 9). All three are ported and
-   working against files; they have not been pointed at the derived index the way the
-   graph, search and knowledge panels now are.
-3. **Restyle toward SiYuan's density** (step 10).
-4. Optionally, the local HTTP API, once something in scope needs it.
+2. **Restyle toward SiYuan's density** (step 10).
+3. Optionally, the local HTTP API, once something in scope needs it.
 
 ### What the vault index does and does not claim
 

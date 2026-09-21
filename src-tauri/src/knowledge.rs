@@ -10,7 +10,10 @@ use std::sync::Mutex;
 
 use athenaeum_core::journal::Event;
 use athenaeum_core::prelude::*;
-use athenaeum_core::vault::{KnowledgeGraph, VaultIndexReport, VaultIndexer, VaultScanOptions};
+use athenaeum_core::vault::{
+    lint, KnowledgeGraph, LintOptions, VaultIndexReport, VaultIndexer, VaultLintReport,
+    VaultScanOptions,
+};
 use athenaeum_core::wiki::{WikiNodeDetail, WikiService};
 use serde::{Deserialize, Serialize};
 
@@ -371,6 +374,24 @@ pub fn index_vault(
     run_guarded("index_vault", || {
         let root = state.project_root()?;
         state.with(|store| VaultIndexer::scan_and_index(store, &root, VaultScanOptions::default()))
+    })
+}
+
+/// What the wiki links at, and what links at nothing.
+///
+/// The lint panel used to answer this by walking `wiki/` and resolving every
+/// `[[link]]` in TypeScript, beside the copy of those rules that already
+/// lives in the indexer. One implementation, in the library, where it is
+/// tested against a real vault.
+#[tauri::command]
+pub fn lint_vault(
+    state: tauri::State<'_, AppState>,
+    options: Option<LintOptions>,
+) -> std::result::Result<VaultLintReport, String> {
+    run_guarded("lint_vault", || {
+        let root = state.project_root()?;
+        let options = options.unwrap_or_default();
+        state.with(|store| lint::scan_and_lint(store, &root, VaultScanOptions::default(), &options))
     })
 }
 

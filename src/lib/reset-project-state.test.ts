@@ -7,7 +7,7 @@ import { useResearchStore } from "@/stores/research-store"
 import { getQueue, pauseQueue } from "./ingest-queue"
 
 // Dynamic-import mocks: resetProjectState uses `import("@/lib/ingest-queue")`
-// and `import("@/lib/graph-relevance")` at runtime. vi.mock hoists these
+// and `import("@/lib/knowledge-index")` at runtime. vi.mock hoists these
 // so the promise resolves to our stub immediately.
 vi.mock("./ingest-queue", async () => {
   const actual = await vi.importActual<typeof import("./ingest-queue")>("./ingest-queue")
@@ -17,19 +17,19 @@ vi.mock("./ingest-queue", async () => {
   }
 })
 
-vi.mock("./graph-relevance", () => ({
-  clearGraphCache: vi.fn(),
+vi.mock("./knowledge-index", () => ({
+  clearKnowledgeIndexCache: vi.fn(),
 }))
 
-import { clearGraphCache } from "./graph-relevance"
+import { clearKnowledgeIndexCache } from "./knowledge-index"
 
 const mockPauseQueue = vi.mocked(pauseQueue)
-const mockClearGraphCache = vi.mocked(clearGraphCache)
+const mockClearIndexCache = vi.mocked(clearKnowledgeIndexCache)
 
 beforeEach(() => {
   mockPauseQueue.mockReset()
   mockPauseQueue.mockImplementation(async () => {})
-  mockClearGraphCache.mockReset()
+  mockClearIndexCache.mockReset()
 })
 
 describe("resetProjectState — Zustand stores", () => {
@@ -123,9 +123,11 @@ describe("resetProjectState — module-level caches are awaited", () => {
     expect(mockPauseQueue).toHaveBeenCalledOnce()
   })
 
-  it("calls clearGraphCache before the returned promise resolves", async () => {
+  it("forgets the outgoing project's knowledge before the returned promise resolves", async () => {
+    // Otherwise the next project's panels can render the previous one's
+    // nodes for a frame before their own load lands.
     await resetProjectState()
-    expect(mockClearGraphCache).toHaveBeenCalledOnce()
+    expect(mockClearIndexCache).toHaveBeenCalledOnce()
   })
 
   it("ordering: when resolve() fires, BOTH module caches are already cleared", async () => {
@@ -133,7 +135,7 @@ describe("resetProjectState — module-level caches are awaited", () => {
     // By the time the outer await returns, BOTH clears must be done.
     await resetProjectState()
     expect(mockPauseQueue).toHaveBeenCalledOnce()
-    expect(mockClearGraphCache).toHaveBeenCalledOnce()
+    expect(mockClearIndexCache).toHaveBeenCalledOnce()
   })
 
   it("does not throw when pauseQueue itself throws — logs and continues", async () => {
@@ -144,12 +146,12 @@ describe("resetProjectState — module-level caches are awaited", () => {
 
     await expect(resetProjectState()).resolves.toBeUndefined()
     expect(warnSpy).toHaveBeenCalled()
-    expect(mockClearGraphCache).toHaveBeenCalledOnce() // still runs despite sibling failure
+    expect(mockClearIndexCache).toHaveBeenCalledOnce() // still runs despite sibling failure
     warnSpy.mockRestore()
   })
 
-  it("does not throw when clearGraphCache itself throws", async () => {
-    mockClearGraphCache.mockImplementationOnce(() => {
+  it("does not throw when clearing the knowledge cache itself throws", async () => {
+    mockClearIndexCache.mockImplementationOnce(() => {
       throw new Error("boom")
     })
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})

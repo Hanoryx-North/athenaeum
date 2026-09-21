@@ -1,21 +1,35 @@
-import { readFile, listDirectory } from "@/commands/fs"
+/**
+ * Wiki lint: what is disconnected, and what does not hold together.
+ *
+ * Two halves with different natures. **Structural** lint is a question
+ * about edges — what links to nothing, what nothing links to, what links at
+ * a page that is not there — and it is answered by the knowledge index,
+ * through `lintVault`. Nothing here re-reads `wiki/` to answer it: the
+ * indexer already resolved every link, and a second implementation of that
+ * rule in TypeScript was a second opinion nothing else was tested against.
+ *
+ * **Semantic** lint is a question about meaning — contradictions, stale
+ * claims, concepts referenced everywhere and written up nowhere — and only
+ * a model can answer it. It reads the index too, for the page list and the
+ * one-line summaries it sends, so the pages it reasons about are the pages
+ * the knowledge base holds.
+ */
 import { streamChat } from "@/lib/llm-client"
 import type { LlmConfig } from "@/stores/wiki-store"
-import type { FileNode } from "@/types/wiki"
 import { useActivityStore } from "@/stores/activity-store"
-import { getFileName, getRelativePath, normalizePath } from "@/lib/path-utils"
+import { normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
 import { normalizeReviewTitle } from "@/lib/review-utils"
-import {
-  computeStructuralLint,
-  type StructuralLintFinding,
-  type StructuralLintPage,
-} from "@/lib/lint-structural-core"
+import { lintVault, loadKnowledgeGraph, type IndexGraphNode } from "@/lib/knowledge-index"
 import type { LintConfig } from "@/lib/lint-config"
 
 export interface LintResult {
   type: "orphan" | "broken-link" | "no-outlinks" | "semantic"
   severity: "warning" | "info"
+  /**
+   * Vault-relative path of the page — `wiki/concepts/x.md` — for a
+   * structural finding, and the model's own title for a semantic one.
+   */
   page: string
   detail: string
   affectedPages?: string[]
@@ -24,36 +38,7 @@ export interface LintResult {
   suggestedSource?: string
 }
 
-const SUGGESTION_TOKEN_WINDOW = 4000
-
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-function flattenMdFiles(nodes: FileNode[]): FileNode[] {
-  const files: FileNode[] = []
-  for (const node of nodes) {
-    if (node.is_dir && node.children) {
-      files.push(...flattenMdFiles(node.children))
-    } else if (!node.is_dir && node.name.endsWith(".md")) {
-      files.push(node)
-    }
-  }
-  return files
-}
-
-function extractWikilinks(content: string): string[] {
-  const links: string[] = []
-  const regex = /\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(content)) !== null) {
-    links.push(match[1].trim())
-  }
-  return links
-}
-
-function relativeToSlug(relativePath: string): string {
-  // relativePath relative to wiki/ dir, e.g. "entities/foo-bar" or "queries/my-page-2024-01-01"
-  return relativePath.replace(/\.md$/, "")
-}
 
 /**
  * Normalize a name for missing-page existence comparison. NFKC folds full-width
@@ -79,30 +64,9 @@ function missingPageAlreadyExists(
   return existingPageNames.has(norm)
 }
 
-function extractTitle(content: string, fallbackPath: string): string {
-  const frontmatter = content.match(/^---\s*\n([\s\S]*?)\n---/)
-  if (frontmatter) {
-    const title = frontmatter[1].match(/^title:\s*["']?(.+?)["']?\s*$/m)
-    if (title?.[1]?.trim()) return title[1].trim()
-  }
-  const heading = content.match(/^#\s+(.+)$/m)
-  if (heading?.[1]?.trim()) return heading[1].trim()
-  return getFileName(fallbackPath)
-    .replace(/\.md$/i, "")
-    .replace(/[-_]+/g, " ")
-}
-
-function tokenizeForSuggestion(text: string): Set<string> {
-  const tokens = new Set<string>()
-  const normalized = text.normalize("NFKC").toLowerCase()
-  for (const match of normalized.matchAll(/[\p{L}\p{N}]+/gu)) {
-    const token = match[0]
-    if (token.length >= 2) tokens.add(token)
-    if (/[\u3400-\u9fff]/u.test(token)) {
-      for (const char of Array.from(token)) tokens.add(char)
-    }
-  }
-  return tokens
+/** The file stem of a vault-relative path, which is what a link names. */
+function pageStem(path: string): string {
+  return path.split("/").pop()?.replace(/\.md$/i, "") ?? path
 }
 
 // ── Structural lint ───────────────────────────────────────────────────────────
@@ -113,88 +77,41 @@ export interface StructuralLintOptions {
   config?: LintConfig
 }
 
-function runStructuralWorker(
-  pages: StructuralLintPage[],
-  options: StructuralLintOptions,
-): Promise<StructuralLintFinding[]> {
-  if (typeof Worker === "undefined") {
-    return Promise.resolve(computeStructuralLint(pages, options.onProgress, options.config))
-  }
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./lint-structural.worker.ts", import.meta.url), { type: "module" })
-    const abort = () => {
-      worker.terminate()
-      reject(new DOMException("Structural lint cancelled", "AbortError"))
-    }
-    if (options.signal?.aborted) {
-      abort()
-      return
-    }
-    options.signal?.addEventListener("abort", abort, { once: true })
-    worker.onerror = (event) => {
-      options.signal?.removeEventListener("abort", abort)
-      worker.terminate()
-      reject(new Error(event.message || "Structural lint worker failed"))
-    }
-    worker.onmessage = (event: MessageEvent<{
-      type: "progress" | "done"
-      completed?: number
-      total?: number
-      findings?: StructuralLintFinding[]
-    }>) => {
-      if (event.data.type === "progress") {
-        options.onProgress?.(event.data.completed ?? 0, event.data.total ?? pages.length)
-        return
-      }
-      options.signal?.removeEventListener("abort", abort)
-      worker.terminate()
-      resolve(event.data.findings ?? [])
-    }
-    worker.postMessage({ pages, config: options.config ?? {} })
-  })
-}
-
+/**
+ * Ask the index what is disconnected.
+ *
+ * One call: the backend indexes the vault and projects the findings out of
+ * the nodes and edges it just reconciled. The pass is a reconcile rather
+ * than a rebuild, so running lint after every edit costs a diff.
+ */
 export async function runStructuralLint(
   projectPath: string,
   options: StructuralLintOptions = {},
 ): Promise<LintResult[]> {
-  const wikiRoot = `${normalizePath(projectPath)}/wiki`
-  let tree: FileNode[]
-  try {
-    tree = await listDirectory(wikiRoot)
-  } catch {
-    return []
+  if (options.signal?.aborted) {
+    throw new DOMException("Structural lint cancelled", "AbortError")
   }
+  options.onProgress?.(0, 1)
 
-  const wikiFiles = flattenMdFiles(tree)
-  // Exclude index.md and log.md from orphan checks
-  const contentFiles = wikiFiles.filter(
-    (f) => f.name !== "index.md" && f.name !== "log.md"
-  )
+  const report = await lintVault(normalizePath(projectPath), options.config)
 
-  const pages: StructuralLintPage[] = []
-
-  for (let index = 0; index < contentFiles.length; index += 1) {
-    if (options.signal?.aborted) throw new DOMException("Structural lint cancelled", "AbortError")
-    const f = contentFiles[index]
-    try {
-      const content = await readFile(f.path)
-      const shortName = getRelativePath(f.path, wikiRoot)
-      const slug = relativeToSlug(shortName)
-      const title = extractTitle(content, shortName)
-      const outlinks = extractWikilinks(content)
-      const slugName = getFileName(slug)
-      const tokens = Array.from(tokenizeForSuggestion(`${title}\n${slugName}\n${content.slice(0, SUGGESTION_TOKEN_WINDOW)}`))
-      pages.push({ shortName, slug, title, outlinks, tokens })
-    } catch {
-      // skip unreadable files
-    }
-    options.onProgress?.(index + 1, contentFiles.length * 2)
+  // The work happened in one backend call, so there was nothing to report
+  // progress through. Cancellation is checked on the way out instead: the
+  // user's click still has to discard the result it arrived too late for.
+  if (options.signal?.aborted) {
+    throw new DOMException("Structural lint cancelled", "AbortError")
   }
-  return runStructuralWorker(pages, {
-    ...options,
-    onProgress: (completed, total) => options.onProgress?.(contentFiles.length + completed, contentFiles.length + total),
-  })
+  options.onProgress?.(report.pages, report.pages)
+
+  return report.findings.map((finding) => ({
+    type: finding.type,
+    severity: finding.severity,
+    page: finding.page,
+    detail: finding.detail,
+    brokenTarget: finding.brokenTarget,
+    suggestedTarget: finding.suggestedTarget,
+    suggestedSource: finding.suggestedSource,
+  }))
 }
 
 // ── Semantic lint ─────────────────────────────────────────────────────────────
@@ -217,38 +134,35 @@ export async function runSemanticLint(
     filesWritten: [],
   })
 
-  const wikiRoot = `${pp}/wiki`
-  let tree: FileNode[]
+  let pages: IndexGraphNode[]
   try {
-    tree = await listDirectory(wikiRoot)
-  } catch {
-    activity.updateItem(activityId, { status: "error", detail: "Failed to read wiki directory." })
+    const graph = await loadKnowledgeGraph(pp)
+    pages = graph.nodes.filter((node) => node.origin === "page")
+  } catch (error) {
+    activity.updateItem(activityId, {
+      status: "error",
+      detail: `Failed to read the knowledge index: ${error}`,
+    })
     return []
   }
 
-  const wikiFiles = flattenMdFiles(tree).filter(
-    (f) => f.name !== "log.md"
-  )
-
-  // Build a compact summary of each page (frontmatter + first 500 chars), and
-  // collect the set of existing page names (basename + frontmatter title) used
-  // to filter out `missing-page` findings for pages that already exist (#537).
+  // One line per page: its path, and the summary the index derived from it.
+  // Sending the first 500 characters of every file instead would cost a read
+  // per page and spend the budget on frontmatter and headings — the summary
+  // is the page's own account of itself, which is what the model is being
+  // asked to compare.
+  //
+  // `existingPageNames` collects each page's title and file stem, and filters
+  // out `missing-page` findings naming a page that already exists (#537).
   const summaries: string[] = []
   const existingPageNames = new Set<string>()
-  for (const f of wikiFiles) {
+  for (const page of pages) {
     if (signal?.aborted) throw new DOMException("Semantic lint cancelled", "AbortError")
-    const basename = f.name.replace(/\.md$/i, "")
-    if (basename) existingPageNames.add(normalizeForExistence(basename))
-    try {
-      const content = await readFile(f.path)
-      const preview = content.slice(0, 500) + (content.length > 500 ? "..." : "")
-      const shortPath = getRelativePath(f.path, wikiRoot)
-      const title = extractTitle(content, shortPath)
-      if (title) existingPageNames.add(normalizeForExistence(title))
-      summaries.push(`### ${shortPath}\n${preview}`)
-    } catch {
-      // skip
-    }
+    if (page.title) existingPageNames.add(normalizeForExistence(page.title))
+    const path = page.path ?? page.title
+    const stem = pageStem(path)
+    if (stem) existingPageNames.add(normalizeForExistence(stem))
+    summaries.push(`### ${path}\n${page.summary}`)
   }
 
   if (summaries.length === 0) {

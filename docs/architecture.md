@@ -87,12 +87,21 @@ Two properties are load-bearing and tested as such:
 * **A truncated scan never deletes.** Hitting a scan budget is not evidence
   that the user deleted half their wiki.
 
-The desktop shell reads the result through two commands — `index_vault` and
-`knowledge_graph` — and `athenaeum index-vault` does the same from a
-terminal. The graph view, the knowledge tree and search all draw from that
+The desktop shell reads the result through three commands — `index_vault`,
+`knowledge_graph` and `lint_vault` — and `athenaeum index-vault` and
+`athenaeum lint` do the same from a terminal. The graph view, the knowledge
+tree, search, lint, the review sweep and deep research all draw from that
 one projection, so the app holds one description of what is known rather
 than one per panel. Layout, filtering and community detection stay in the
 view, where the visual design can change without touching the library.
+
+**Lint is part of that projection.** Orphans, broken links and dead ends
+are questions about edges, so `vault::lint` answers them from the nodes and
+edges rather than by walking `wiki/` a third time; the broken links it
+reports are the ones the indexer could not resolve, not a second opinion
+about the same markdown. Semantic lint — contradictions, stale claims,
+concepts referenced everywhere and written up nowhere — still needs a model,
+and it reads the same index for the pages and summaries it sends.
 
 ## The knowledge model
 

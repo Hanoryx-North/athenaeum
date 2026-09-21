@@ -12,6 +12,7 @@ use athenaeum_core::graph::Reached;
 use athenaeum_core::journal::Event;
 use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
+use athenaeum_core::vault::{LintSeverity, VaultLintReport};
 use serde::Serialize;
 
 use crate::check::Problem;
@@ -228,6 +229,39 @@ pub fn vault_index(report: &VaultIndexReport, show_unresolved: bool) {
     }
     for warning in &report.warnings {
         eprintln!("warning: {warning}");
+    }
+}
+
+pub fn vault_lint(report: &VaultLintReport) {
+    if report.findings.is_empty() {
+        println!("{} page(s) linted, nothing to report", report.pages);
+    } else {
+        println!(
+            "{} page(s) linted, {} finding(s)",
+            report.pages,
+            report.findings.len()
+        );
+    }
+
+    for finding in &report.findings {
+        let mark = match finding.severity {
+            LintSeverity::Warning => "!",
+            LintSeverity::Info => "-",
+        };
+        println!("{mark} {} — {}", finding.page, finding.detail);
+        if let Some(target) = &finding.suggested_target {
+            println!("    link to: {target}");
+        }
+        if let Some(source) = &finding.suggested_source {
+            println!("    link from: {source}");
+        }
+    }
+
+    if report.broken_links_truncated {
+        eprintln!("warning: too many broken links to list; fix these and lint again");
+    }
+    if !report.scan_complete {
+        eprintln!("warning: the scan was truncated, so this is not the whole vault");
     }
 }
 

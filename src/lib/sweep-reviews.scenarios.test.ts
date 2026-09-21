@@ -28,6 +28,13 @@ import type { SweepScenario, ReviewFixture } from "@/test-helpers/scenarios/type
 
 vi.mock("@/commands/fs", () => realFs)
 
+// The sweep asks the knowledge index what the wiki contains. The scenario
+// has a real wiki on disk, so the index is stubbed from it — see
+// `test-helpers/index-graph.ts` for why that stub is not an indexer.
+vi.mock("@/lib/knowledge-index", () => ({
+  loadKnowledgeGraph: vi.fn(),
+}))
+
 // The LLM client is mocked per-test so we can inject the scenario's
 // llm-response.txt verbatim (streamed as a single token chunk, then onDone).
 let currentLlmResponse: string | null = null
@@ -41,6 +48,8 @@ vi.mock("./llm-client", () => ({
 }))
 
 import { sweepResolvedReviews } from "./sweep-reviews"
+import { loadKnowledgeGraph } from "@/lib/knowledge-index"
+import { graphFromWikiDir } from "@/test-helpers/index-graph"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { useActivityStore } from "@/stores/activity-store"
@@ -64,6 +73,9 @@ beforeEach(() => {
   currentLlmResponse = null
   useReviewStore.setState({ items: [] })
   useActivityStore.setState({ items: [] })
+  vi.mocked(loadKnowledgeGraph).mockImplementation((projectPath) =>
+    graphFromWikiDir(projectPath),
+  )
 })
 
 // ── Scenario runner ─────────────────────────────────────────────────────────

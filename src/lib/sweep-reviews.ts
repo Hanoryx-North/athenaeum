@@ -10,23 +10,21 @@
  * that need human judgment.
  */
 
-import { listDirectory, readFile } from "@/commands/fs"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { useActivityStore } from "@/stores/activity-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { streamChat } from "@/lib/llm-client"
-import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { normalizeReviewTitle } from "@/lib/review-utils"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { getTaskLlmConfig } from "@/lib/llm-task-routing"
-import { parseFrontmatter } from "@/lib/frontmatter"
+import { loadKnowledgeGraph } from "@/lib/knowledge-index"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
 interface WikiPageSummary {
   id: string // filename without .md
-  title: string | null // from frontmatter
+  title: string | null // the index's title: frontmatter, heading, or stem
 }
 
 interface WikiIndex {
@@ -37,49 +35,43 @@ interface WikiIndex {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function flattenMdFiles(nodes: FileNode[]): FileNode[] {
-  const files: FileNode[] = []
-  for (const node of nodes) {
-    if (node.is_dir && node.children) {
-      files.push(...flattenMdFiles(node.children))
-    } else if (!node.is_dir && node.name.endsWith(".md")) {
-      files.push(node)
-    }
-  }
-  return files
-}
-
-/** Build an index of wiki pages: id (filename without .md) + title → normalized */
+/**
+ * What the wiki currently contains, by the two names a review can use.
+ *
+ * Read from the knowledge index rather than by opening every page: a sweep
+ * runs whenever the ingest queue drains, and re-parsing the frontmatter of
+ * a whole vault to learn a set of titles is work the index has already
+ * done. It also ends a second implementation of "what is this page
+ * called?" — one that once mistook a body line beginning `title:` for the
+ * page's title and auto-resolved reviews for pages that did not exist.
+ *
+ * Every page has a title here, where before only a page with frontmatter
+ * did: the index falls back to the page's heading and then to its file
+ * stem. A page whose `# Heading` names the concept a review asks for does
+ * exist, so resolving that review is right.
+ */
 export async function buildWikiIndex(projectPath: string): Promise<WikiIndex> {
   const pp = normalizePath(projectPath)
   const byId = new Set<string>()
   const byTitle = new Set<string>()
   const pages: WikiPageSummary[] = []
 
+  let nodes: { title: string; path?: string; origin: string }[] = []
   try {
-    const tree = await listDirectory(`${pp}/wiki`)
-    const files = flattenMdFiles(tree)
-
-    for (const file of files) {
-      const id = file.name.replace(/\.md$/, "").toLowerCase()
-      byId.add(id)
-
-      let title: string | null = null
-      try {
-        const content = await readFile(file.path)
-        const fmTitle = parseFrontmatter(content).frontmatter?.title
-        if (typeof fmTitle === "string" && fmTitle.trim()) {
-          title = fmTitle.trim()
-          byTitle.add(title.toLowerCase())
-        }
-      } catch {
-        // skip unreadable files
-      }
-
-      pages.push({ id, title })
-    }
+    nodes = (await loadKnowledgeGraph(pp)).nodes
   } catch {
-    // no wiki directory yet
+    // No knowledge base yet, or none that opens. A sweep with nothing to
+    // check against resolves nothing, which is the safe direction.
+    return { byId, byTitle, pages }
+  }
+
+  for (const node of nodes) {
+    if (node.origin !== "page" || !node.path) continue
+    const id = (node.path.split("/").pop() ?? "").replace(/\.md$/i, "").toLowerCase()
+    if (id) byId.add(id)
+    const title = node.title.trim() || null
+    if (title) byTitle.add(title.toLowerCase())
+    pages.push({ id, title })
   }
 
   return { byId, byTitle, pages }

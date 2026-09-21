@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 const {
   clearKnowledgeIndexCache,
   indexVault,
+  lintVault,
   loadKnowledgeGraph,
   nodeFilePath,
   openKnowledgeBase,
@@ -161,6 +162,28 @@ describe("indexVault", () => {
     respond({ index_vault: report })
 
     expect(await indexVault("/project")).toBe(report)
+  })
+})
+
+describe("lintVault", () => {
+  it("opens the project before asking it for findings", async () => {
+    // The backend lints the vault it has open; asking before opening one
+    // answers "no project is open" rather than "nothing is wrong".
+    respond({ lint_vault: { pages: 0, findings: [], scanComplete: true, brokenLinksTruncated: false } })
+
+    await lintVault("/project")
+
+    expect(commands()).toEqual(["open_workspace", "lint_vault"])
+  })
+
+  it("states every check explicitly, so an omitted option is off rather than absent", async () => {
+    respond({ lint_vault: { pages: 0, findings: [], scanComplete: true, brokenLinksTruncated: false } })
+
+    await lintVault("/project", { ignoreOrphan: true })
+
+    expect(mockInvoke).toHaveBeenLastCalledWith("lint_vault", {
+      options: { ignoreOrphan: true, ignoreNoOutlinks: false, ignorePages: [] },
+    })
   })
 })
 

@@ -20,6 +20,7 @@ use std::process::ExitCode;
 
 use athenaeum_core::graph;
 use athenaeum_core::prelude::*;
+use athenaeum_core::vault::{lint, LintOptions, LintSeverity};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use render::emit;
@@ -95,6 +96,13 @@ enum Command {
     /// changed. Deleting `.athenaeum/knowledge.db` and running this costs
     /// nothing but the time it takes.
     IndexVault(IndexVaultArgs),
+    /// Report what the wiki links at and what links at nothing.
+    ///
+    /// Reads the index rather than the markdown, so the links it reports on
+    /// are the ones the knowledge base actually holds. Indexes first, so a
+    /// vault edited a second ago lints correctly. Exits non-zero only when
+    /// a link is broken; being unlinked is a shape, not an error.
+    Lint(LintArgs),
     /// Search for moved source anchors and update knowledge staleness.
     Relocate(RelocateArgs),
     /// Check the knowledge base for structural problems.
@@ -237,6 +245,31 @@ struct IndexVaultArgs {
     /// List every unresolved `[[link]]` rather than the first few.
     #[arg(long)]
     show_unresolved: bool,
+}
+
+#[derive(Args)]
+struct LintArgs {
+    /// Do not report pages nothing links to.
+    #[arg(long)]
+    ignore_orphan: bool,
+    /// Do not report pages that link to nothing.
+    #[arg(long)]
+    ignore_no_outlinks: bool,
+    /// Skip a page entirely. Repeatable; names a page by slug or path.
+    #[arg(long = "ignore-page", value_name = "PAGE")]
+    ignore_pages: Vec<String>,
+    /// Maximum number of wiki pages to index before linting.
+    #[arg(long, default_value_t = 50_000)]
+    max_pages: usize,
+    /// Maximum number of files under `raw/sources/` to index.
+    #[arg(long, default_value_t = 50_000)]
+    max_sources: usize,
+    /// Maximum UTF-8 bytes read from one page.
+    #[arg(long, default_value_t = 4_000_000)]
+    max_page_bytes: u64,
+    /// Maximum UTF-8 bytes read across the whole vault.
+    #[arg(long, default_value_t = 268_435_456)]
+    max_total_bytes: u64,
 }
 
 #[derive(Args)]
@@ -623,6 +656,45 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 render::vault_index(&report, args.show_unresolved);
                 Ok(())
             })?;
+        }
+
+        Command::Lint(args) => {
+            let project_root = workspace
+                .project_root()
+                .ok_or_else(|| Error::InvalidValue {
+                    field: "workspace",
+                    value: workspace.root().display().to_string(),
+                })?;
+            let report = lint::scan_and_lint(
+                &mut store,
+                project_root,
+                VaultScanOptions {
+                    max_pages: args.max_pages,
+                    max_sources: args.max_sources,
+                    max_page_bytes: args.max_page_bytes,
+                    max_total_bytes: args.max_total_bytes,
+                },
+                &LintOptions {
+                    ignore_orphan: args.ignore_orphan,
+                    ignore_no_outlinks: args.ignore_no_outlinks,
+                    ignore_pages: args.ignore_pages.clone(),
+                },
+            )?;
+            // Only a broken link fails the command. Orphans and dead ends
+            // are shapes a wiki legitimately has — plenty of vaults have
+            // deliberate leaves — and exiting non-zero for them would make
+            // the exit code mean "this wiki exists".
+            let broken = report
+                .findings
+                .iter()
+                .any(|finding| finding.severity == LintSeverity::Warning);
+            emit(cli.json, &report, || {
+                render::vault_lint(&report);
+                Ok(())
+            })?;
+            if broken {
+                return Ok(Outcome::ProblemsFound);
+            }
         }
 
         Command::Relocate(args) => {

@@ -8,29 +8,34 @@ vi.mock("./llm-client", () => ({
   streamChat: (...args: unknown[]) => harness.mock(...args),
 }))
 
-// Mock fs: listDirectory for buildWikiIndex, readFile for page content
+// Page content still comes from files; what the wiki *contains* comes from
+// the knowledge index, mocked below.
 vi.mock("@/commands/fs", () => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   listDirectory: vi.fn(),
 }))
 
+vi.mock("@/lib/knowledge-index", () => ({
+  loadKnowledgeGraph: vi.fn(),
+}))
+
 import { sweepResolvedReviews } from "./sweep-reviews"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { listDirectory, readFile } from "@/commands/fs"
-import type { FileNode } from "@/types/wiki"
+import { loadKnowledgeGraph, type IndexGraph } from "@/lib/knowledge-index"
+import { graphOf, indexedPage } from "@/test-helpers/index-graph"
 
 const mockListDirectory = vi.mocked(listDirectory)
 const mockReadFile = vi.mocked(readFile)
+const mockLoadGraph = vi.mocked(loadKnowledgeGraph)
 
-function fileNode(name: string): FileNode {
-  return {
-    name,
-    path: `/project/wiki/${name}`,
-    is_dir: false,
-    children: [],
-  } as FileNode
+/** Say that the wiki holds these pages, by file stem. */
+function indexHolds(...stems: string[]): void {
+  mockLoadGraph.mockResolvedValue(
+    graphOf(stems.map((stem) => indexedPage(`wiki/${stem}.md`))),
+  )
 }
 
 function addPending(items: Array<Partial<ReviewItem>>) {
@@ -97,9 +102,10 @@ beforeEach(() => {
   mockReadFile.mockReset()
   useReviewStore.setState({ items: [] })
 
-  // Default: empty wiki dir, no files
+  // Default: an empty wiki — nothing indexed, no files
   mockListDirectory.mockResolvedValue([])
   mockReadFile.mockResolvedValue("")
+  indexHolds()
 })
 
 describe("sweep race — project-identity guard", () => {
@@ -117,10 +123,9 @@ describe("sweep race — project-identity guard", () => {
     setProject("/project-A")
     addPending([{ title: "Missing page: Foo" }])
 
-    // Set up the wiki dir to contain foo.md so the rule stage WOULD have
-    // resolved the review. The project switch should prevent that write.
-    mockListDirectory.mockResolvedValue([fileNode("foo.md")])
-    mockReadFile.mockResolvedValue("---\ntitle: Foo\n---\n")
+    // Index foo.md so the rule stage WOULD have resolved the review. The
+    // project switch should prevent that write.
+    indexHolds("foo")
 
     const sweepPromise = sweepResolvedReviews("/project-A")
     // Switch projects before sweep has a chance to finish
@@ -136,9 +141,9 @@ describe("sweep race — project-identity guard", () => {
     setProject("/project-A")
     addPending([{ title: "Ambiguous concept", type: "suggestion" }])
 
-    // Pause buildWikiIndex so we can switch projects at a deterministic point.
-    const listDirDeferred = createDeferred<FileNode[]>()
-    mockListDirectory.mockReturnValue(listDirDeferred.promise)
+    // Pause the index read so we can switch projects at a deterministic point.
+    const graphDeferred = createDeferred<IndexGraph>()
+    mockLoadGraph.mockReturnValue(graphDeferred.promise)
 
     const sweepPromise = sweepResolvedReviews("/project-A")
     await flushMicrotasks(3)
@@ -147,7 +152,7 @@ describe("sweep race — project-identity guard", () => {
     useWikiStore.setState({ project: null })
 
     // Now let buildWikiIndex finish; the post-await identity guard should bail
-    listDirDeferred.resolve([])
+    graphDeferred.resolve({ nodes: [], edges: [] })
 
     const resolved = await sweepPromise
     expect(resolved).toBe(0)
@@ -200,8 +205,7 @@ describe("sweep — rule-based auto-resolution", () => {
     setProject("/project")
     addPending([{ title: "Missing page: attention", type: "missing-page" }])
 
-    mockListDirectory.mockResolvedValue([fileNode("attention.md")])
-    mockReadFile.mockResolvedValue("no frontmatter")
+    indexHolds("attention")
 
     const resolved = await sweepResolvedReviews("/project")
     expect(resolved).toBe(1)
@@ -216,8 +220,7 @@ describe("sweep — rule-based auto-resolution", () => {
     disableLlm() // prevent stage-2 LLM stage from running
     addPending([{ title: "Missing page: neverwritten", type: "missing-page" }])
 
-    mockListDirectory.mockResolvedValue([fileNode("other.md")])
-    mockReadFile.mockResolvedValue("")
+    indexHolds("other")
 
     const resolved = await sweepResolvedReviews("/project")
     expect(resolved).toBe(0)

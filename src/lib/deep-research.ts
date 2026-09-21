@@ -2,7 +2,7 @@ import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
 import { streamChat } from "./llm-client"
 import { currentWikiDate } from "./ingest"
-import { writeFile, readFile } from "@/commands/fs"
+import { writeFile } from "@/commands/fs"
 import { useWikiStore, type LlmConfig, type SearchApiConfig } from "@/stores/wiki-store"
 import { useResearchStore } from "@/stores/research-store"
 import { normalizePath } from "@/lib/path-utils"
@@ -10,10 +10,71 @@ import { buildLanguageDirective } from "@/lib/output-language"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { useReviewStore } from "@/stores/review-store"
+import { loadKnowledgeGraph, searchKnowledge } from "@/lib/knowledge-index"
 
 const MAX_RESEARCH_SOURCES = 20
+/**
+ * How many existing pages the synthesis prompt names. A wiki of ten
+ * thousand pages cannot all be offered for cross-referencing, and the ones
+ * that matter are the ones about this topic.
+ */
+const MAX_CROSS_REFERENCE_PAGES = 60
 const MIN_RESEARCH_CONTENT_CHARS = 120
 const MIN_RESEARCH_BLOCK_CHARS = 40
+
+/**
+ * The pages this research can link into, most relevant first.
+ *
+ * This used to be the raw text of `wiki/index.md`. That file is a table of
+ * contents maintained beside the wiki rather than derived from it: it goes
+ * out of date, it is not indexed, and on a large vault it is far too long
+ * to put in a prompt whole. The index knows which pages exist and which of
+ * them are about this topic, so the model is offered the pages worth
+ * linking to instead of the first few thousand characters of a list.
+ *
+ * Each line is `slug — Title`, because a `[[slug]]` resolves whatever the
+ * page currently calls itself.
+ */
+export async function crossReferenceablePages(
+  projectPath: string,
+  topic: string,
+): Promise<string> {
+  const pp = normalizePath(projectPath)
+  let lines: string[] = []
+  try {
+    const pages = new Map<string, { slug: string; title: string }>()
+    for (const node of (await loadKnowledgeGraph(pp)).nodes) {
+      if (node.origin !== "page" || !node.path) continue
+      const slug = node.path.split("/").pop()?.replace(/\.md$/i, "") ?? ""
+      if (slug) pages.set(node.id, { slug, title: node.title })
+    }
+
+    // Search first so a big wiki offers what bears on the topic; then the
+    // rest, so a small wiki still offers all of itself.
+    const ordered: { slug: string; title: string }[] = []
+    const seen = new Set<string>()
+    for (const hit of await searchKnowledge(pp, topic, MAX_CROSS_REFERENCE_PAGES)) {
+      const page = pages.get(hit.node.id)
+      if (page && !seen.has(hit.node.id)) {
+        seen.add(hit.node.id)
+        ordered.push(page)
+      }
+    }
+    for (const [id, page] of pages) {
+      if (ordered.length >= MAX_CROSS_REFERENCE_PAGES) break
+      if (!seen.has(id)) ordered.push(page)
+    }
+
+    lines = ordered
+      .slice(0, MAX_CROSS_REFERENCE_PAGES)
+      .map((page) => `- ${page.slug} — ${page.title}`)
+  } catch {
+    // No knowledge base yet. Research still runs; it just cannot link into
+    // a wiki that has nothing in it.
+    return ""
+  }
+  return lines.join("\n")
+}
 
 export interface ResearchSynthesisValidation {
   valid: boolean
@@ -333,13 +394,9 @@ async function executeResearch(
       .map((r, i) => `[${i + 1}] **${r.title}** (${r.source})\n${r.snippet}`)
       .join("\n\n")
 
-    // Read existing wiki index to enable cross-referencing
-    let wikiIndex = ""
-    try {
-      wikiIndex = await readFile(`${pp}/wiki/index.md`)
-    } catch {
-      // no index yet
-    }
+    // What the wiki already knows, so the synthesis links into it rather
+    // than beside it.
+    const wikiIndex = await crossReferenceablePages(pp, topic)
 
     const systemPrompt = [
       "You are a research assistant. Synthesize the collected research sources into a comprehensive wiki page.",
@@ -347,7 +404,7 @@ async function executeResearch(
       buildLanguageDirective(topic),
       "",
       "## Cross-referencing (IMPORTANT)",
-      "- The wiki already has existing pages listed in the Wiki Index below.",
+      "- The wiki already has the pages listed below, named by their link target.",
       "- When your synthesis mentions an entity or concept that exists in the wiki, ALWAYS use [[wikilink]] syntax to link to it.",
       "- For example, if the wiki has an entity 'anthropic', write [[anthropic]] when mentioning it.",
       "- This is critical for connecting new research to existing knowledge in the graph.",
@@ -359,7 +416,7 @@ async function executeResearch(
       "- Suggest additional sources worth finding",
       "- Neutral, encyclopedic tone",
       "",
-      wikiIndex ? `## Existing Wiki Index (link to these pages with [[wikilink]])\n${wikiIndex}` : "",
+      wikiIndex ? `## Existing Wiki Pages (link to these with [[wikilink]])\n${wikiIndex}` : "",
     ].filter(Boolean).join("\n")
 
     let accumulated = ""

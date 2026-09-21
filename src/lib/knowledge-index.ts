@@ -85,6 +85,64 @@ export interface VaultIndexReport {
   warnings: string[]
 }
 
+/** What a lint finding says is wrong. */
+export type LintFindingType = "orphan" | "broken-link" | "no-outlinks"
+
+export interface LintFinding {
+  type: LintFindingType
+  severity: "warning" | "info"
+  /** Vault-relative path of the page, which is also the page a fix edits. */
+  page: string
+  /** The indexed node behind `page`. */
+  node: string
+  detail: string
+  /** For a broken link, the target exactly as it was written. */
+  brokenTarget?: string
+  /** A page this one could link to. Vault-relative. */
+  suggestedTarget?: string
+  /** A page that could link to this one. Vault-relative. */
+  suggestedSource?: string
+}
+
+export interface VaultLintReport {
+  pages: number
+  findings: LintFinding[]
+  /** False when a scan budget truncated the pass behind these findings. */
+  scanComplete: boolean
+  /** True when there were more broken links than the indexer collects. */
+  brokenLinksTruncated: boolean
+}
+
+/** Checks the user has switched off, and pages they have muted. */
+export interface LintIgnores {
+  ignoreOrphan?: boolean
+  ignoreNoOutlinks?: boolean
+  ignorePages?: string[]
+}
+
+/**
+ * What the wiki links at, and what links at nothing.
+ *
+ * Orphans, broken links and dead ends are questions about edges, and the
+ * index is where the edges are. Answering them here rather than by walking
+ * `wiki/` again is what keeps the link-resolution rule single: the broken
+ * links reported are the ones the indexer could not resolve, not a second
+ * opinion about the same markdown.
+ */
+export async function lintVault(
+  projectPath: string,
+  options: LintIgnores = {},
+): Promise<VaultLintReport> {
+  await openKnowledgeBase(projectPath)
+  return invoke<VaultLintReport>("lint_vault", {
+    options: {
+      ignoreOrphan: options.ignoreOrphan === true,
+      ignoreNoOutlinks: options.ignoreNoOutlinks === true,
+      ignorePages: options.ignorePages ?? [],
+    },
+  })
+}
+
 /**
  * How many projects hold a cached graph. Two, because switching back and
  * forth between a pair of projects is common and holding every project's

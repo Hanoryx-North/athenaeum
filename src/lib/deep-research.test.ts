@@ -1,12 +1,21 @@
 import { describe, expect, it, vi } from "vitest"
+
+vi.mock("@/lib/knowledge-index", () => ({
+  loadKnowledgeGraph: vi.fn(),
+  searchKnowledge: vi.fn(),
+}))
+
 import {
   citedResearchSourceIndexes,
   collectResearchSources,
+  crossReferenceablePages,
   makeDeepResearchFileName,
   noResearchSourcesTaskPatch,
   resolveReviewForSavedResearch,
   validateResearchSynthesis,
 } from "./deep-research"
+import { loadKnowledgeGraph, searchKnowledge } from "@/lib/knowledge-index"
+import { graphOf, indexedPage } from "@/test-helpers/index-graph"
 import type { SearchApiConfig } from "@/stores/wiki-store"
 import type { WebSearchResult } from "./web-search"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -363,5 +372,58 @@ describe("collectResearchSources", () => {
     expect(out.results).toHaveLength(20)
     expect(infoSpy).toHaveBeenCalledTimes(1)
     infoSpy.mockRestore()
+  })
+})
+
+describe("crossReferenceablePages", () => {
+  const mockLoadGraph = vi.mocked(loadKnowledgeGraph)
+  const mockSearch = vi.mocked(searchKnowledge)
+
+  /** A search hit carrying only the field the caller reads. */
+  function hit(id: string) {
+    return { node: { id }, score: 1 } as unknown as Awaited<ReturnType<typeof searchKnowledge>>[number]
+  }
+
+  it("offers the pages about this topic first, then the rest", async () => {
+    // A wiki of any size has more pages than belong in a prompt, and the
+    // ones worth linking to are the ones the topic is about.
+    mockLoadGraph.mockResolvedValue(
+      graphOf([
+        indexedPage("wiki/concepts/attention.md", { title: "Attention" }),
+        indexedPage("wiki/concepts/rope.md", { title: "Rotary Embeddings" }),
+        indexedPage("wiki/entities/openai.md", { title: "OpenAI" }),
+      ]),
+    )
+    mockSearch.mockResolvedValue([hit("vault_page_wiki/concepts/rope.md")])
+
+    const listing = await crossReferenceablePages("/project", "rotary position embeddings")
+
+    expect(listing.split("\n")[0]).toBe("- rope — Rotary Embeddings")
+    expect(listing).toContain("- attention — Attention")
+    expect(listing).toContain("- openai — OpenAI")
+  })
+
+  it("does not offer knowledge that is not a page", async () => {
+    // A [[wikilink]] to a PDF or to a node the agent proposed resolves to
+    // nothing, so offering either would invite a broken link.
+    mockLoadGraph.mockResolvedValue({
+      nodes: [
+        indexedPage("wiki/a.md", { title: "A" }),
+        indexedPage("raw/sources/paper.pdf", { title: "paper.pdf", origin: "source" }),
+        indexedPage("", { title: "A decision", origin: "curated", path: undefined }),
+      ],
+      edges: [],
+    })
+    mockSearch.mockResolvedValue([])
+
+    const listing = await crossReferenceablePages("/project", "anything")
+
+    expect(listing).toBe("- a — A")
+  })
+
+  it("says nothing when there is no knowledge base to read", async () => {
+    mockLoadGraph.mockRejectedValue(new Error("no project is open"))
+
+    expect(await crossReferenceablePages("/project", "anything")).toBe("")
   })
 })

@@ -43,7 +43,24 @@ const EDGE_PREFIX: &str = "vault_index:";
 /// evidence table does not carry.
 const EVIDENCE_PREFIX: &str = "ev_vault_";
 
-/// A `[[link]]` that names no page in the vault.
+/// Which promise a page failed to keep.
+///
+/// The two are worth telling apart: a missing page is usually a page the
+/// wiki intends to have, and a missing source file is usually a citation
+/// that was written before the file was dropped in, or after it moved.
+/// Offering to create the first is helpful; offering to create the second
+/// would invent evidence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnresolvedKind {
+    /// A `[[wikilink]]` or a `related:` entry naming no page.
+    #[default]
+    Link,
+    /// A `sources:` entry naming no file under `raw/sources/`.
+    Source,
+}
+
+/// A link that names nothing the vault contains.
 ///
 /// Worth reporting rather than silently dropping: an unresolved link is
 /// usually a page the wiki intends to have and does not yet, which is
@@ -55,6 +72,8 @@ pub struct UnresolvedLink {
     pub from: String,
     /// The link target exactly as written.
     pub target: String,
+    #[serde(default)]
+    pub kind: UnresolvedKind,
 }
 
 /// How many unresolved links a report carries before it stops collecting.
@@ -98,6 +117,15 @@ impl VaultIndexReport {
             && self.evidence_attached == 0
             && self.evidence_updated == 0
             && self.evidence_removed == 0
+    }
+
+    /// True when [`Self::unresolved`] is a sample rather than the whole
+    /// list, because the collector hit its budget.
+    ///
+    /// A caller that believed a truncated sample was complete would show a
+    /// list of broken links that never shrinks as they are fixed.
+    pub fn unresolved_truncated(&self) -> bool {
+        self.unresolved.len() >= MAX_REPORTED_UNRESOLVED
     }
 }
 
@@ -516,6 +544,7 @@ fn desired_for_page(
                 None => unresolved.push(UnresolvedLink {
                     from: page.path.clone(),
                     target: target.clone(),
+                    kind: UnresolvedKind::Link,
                 }),
             }
         }
@@ -528,6 +557,7 @@ fn desired_for_page(
             unresolved.push(UnresolvedLink {
                 from: page.path.clone(),
                 target: identity.clone(),
+                kind: UnresolvedKind::Source,
             });
             continue;
         };
