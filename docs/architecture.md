@@ -417,7 +417,10 @@ Test references are recorded once, as `tests` rather than as `calls`: a test
 naming the code it exercises is one fact, and describing it with two edges
 would be the bloat §40 warns about. Each is recorded at both declaration and
 file granularity, because "which function does this cover" and "which tests
-cover this file" are different questions. All of them read back the other way
+cover this file" are different questions. Whether the caller is a test is
+asked of the declaration and not only of its path, because Rust keeps its
+tests in a `#[cfg(test)]` module inside the file they cover, where nothing
+file-level can see them. All of them read back the other way
 for free — `called_by`, `implemented_by`, `tested_by` — through
 `EdgeType::inverse()` rather than a second row.
 

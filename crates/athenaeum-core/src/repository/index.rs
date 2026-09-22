@@ -220,8 +220,12 @@ impl RepositoryIndexer {
                     }
                     // A test naming the code it exercises is a test
                     // relationship, not a plain call (§19). Recording it as
-                    // both would describe one fact with two edges.
-                    let (edge_type, counter) = if file.is_test && !target.is_test {
+                    // both would describe one fact with two edges. Whether
+                    // the caller is a test is asked of the declaration, not
+                    // only of its file: Rust keeps its tests inside the file
+                    // they cover.
+                    let caller_is_test = file.is_test || symbol.test_scoped;
+                    let (edge_type, counter) = if caller_is_test && !target.is_test {
                         (EdgeType::Tests, &mut report.test_links)
                     } else {
                         (EdgeType::Calls, &mut report.resolved_calls)
@@ -369,7 +373,7 @@ impl SymbolNames {
                     node: node.clone(),
                     file: file.path.clone(),
                     language: file.language,
-                    is_test: file.is_test,
+                    is_test: file.is_test || symbol.test_scoped,
                     owner: owner_of(&symbol.qualified_name),
                 };
                 for key in [&symbol.name, &symbol.qualified_name] {
@@ -1102,6 +1106,24 @@ mod tests {
             out(&store, "AuthService", EdgeType::Implements),
             ["AuthProvider"]
         );
+    }
+
+    #[test]
+    fn a_rust_test_module_covers_the_file_it_lives_in() {
+        let (_dir, store) = indexed(&[(
+            "src/auth.rs",
+            "pub fn authenticate() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn it_authenticates() {\n        authenticate();\n    }\n}\n",
+        )]);
+
+        assert_eq!(
+            out(&store, "it_authenticates", EdgeType::Tests),
+            ["authenticate"]
+        );
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::TestedBy),
+            ["it_authenticates"]
+        );
+        assert!(out(&store, "it_authenticates", EdgeType::Calls).is_empty());
     }
 
     #[test]

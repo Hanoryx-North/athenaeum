@@ -111,6 +111,14 @@ pub struct RepositorySymbol {
     /// name something this repository actually declares.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<RepositoryCall>,
+    /// Whether the declaration is test code although its file is not a test
+    /// file — a Rust `#[cfg(test)] mod tests` and everything inside it.
+    ///
+    /// Languages that keep tests in their own files are covered by
+    /// [`RepositoryFile::is_test`]; Rust conventionally does not, so without
+    /// this a Rust project's tests reference nothing (§19, §29).
+    #[serde(default)]
+    pub test_scoped: bool,
 }
 
 /// One call site, and how it was written.

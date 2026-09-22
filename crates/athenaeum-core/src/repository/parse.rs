@@ -180,6 +180,8 @@ fn parse_rust(content: &str) -> crate::Result<ParsedFile> {
     let mut call_sites = Vec::new();
     let mut spans = BraceSpans::default();
     let mut implementation: Option<(String, i32)> = None;
+    let mut test_modules = Vec::new();
+    let mut cfg_test_pending = false;
     let mut depth = 0_i32;
     let cleaned = strip_comments_from_content(content, false, false);
 
@@ -204,6 +206,15 @@ fn parse_rust(content: &str) -> crate::Result<ParsedFile> {
         let scan = scan_braces(line, depth);
         if trimmed.is_empty() {
             spans.advance(&mut symbols, line_number, &scan, false);
+            depth = scan.end;
+            continue;
+        }
+
+        // `#[cfg(test)]` sits on the line above the item it guards, possibly
+        // with further attributes between.
+        if trimmed.starts_with("#[") {
+            cfg_test_pending |= trimmed.contains("cfg(test)");
+            spans.advance(&mut symbols, line_number, &scan, ends_statement(line));
             depth = scan.end;
             continue;
         }
@@ -237,8 +248,12 @@ fn parse_rust(content: &str) -> crate::Result<ParsedFile> {
             };
             let exported = trimmed.starts_with("pub");
             symbols.push(symbol(name, qualified_name, kind, line_number, exported));
+            if cfg_test_pending && kind == SymbolKind::Module {
+                test_modules.push(symbols.len() - 1);
+            }
             spans.open(symbols.len() - 1, depth);
         }
+        cfg_test_pending = false;
         if let Some(captures) = compiled(&RUST_MOD, "Rust")?.captures(trimmed) {
             imports.push(import(format!("mod:{}", &captures[1]), line_number));
         }
@@ -254,6 +269,7 @@ fn parse_rust(content: &str) -> crate::Result<ParsedFile> {
         }
     }
     spans.close_remaining(&mut symbols, last_line);
+    mark_test_modules(&mut symbols, &test_modules);
     finish(symbols, imports, implements, call_sites)
 }
 
@@ -715,6 +731,23 @@ fn symbol(
         line_end: line,
         exported,
         calls: Vec::new(),
+        test_scoped: false,
+    }
+}
+
+/// Marks everything inside a `#[cfg(test)]` module as test code.
+///
+/// Run once spans are final, so a module's span is what decides membership
+/// rather than the order declarations happen to appear in.
+fn mark_test_modules(symbols: &mut [RepositorySymbol], modules: &[usize]) {
+    let spans = modules
+        .iter()
+        .map(|index| (symbols[*index].line_start, symbols[*index].line_end))
+        .collect::<Vec<_>>();
+    for symbol in symbols.iter_mut() {
+        symbol.test_scoped = spans
+            .iter()
+            .any(|(start, end)| symbol.line_start >= *start && symbol.line_start <= *end);
     }
 }
 
@@ -1039,6 +1072,35 @@ export const createWiki = () => new WikiService();
         assert_eq!(imports.len(), 1);
         assert_eq!(imports[0].specifier, "./wiki");
         assert_eq!(imports[0].line, 1);
+    }
+
+    #[test]
+    fn rust_tests_living_inside_the_file_they_cover_are_recognised() {
+        // Rust does not put its tests in test files, so nothing file-level
+        // can find them (§19, §29).
+        let source = "pub fn authenticate() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn it_authenticates() {\n        authenticate();\n    }\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+
+        assert!(!named(&symbols, "authenticate").test_scoped);
+        assert!(named(&symbols, "tests").test_scoped);
+        assert!(named(&symbols, "it_authenticates").test_scoped);
+        assert_eq!(
+            calls_of(&symbols, "it_authenticates"),
+            vec!["authenticate".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_module_is_not_test_code() {
+        let source = "mod store {\n    pub fn open() {}\n}\n#[derive(Debug)]\npub struct Plain;\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert!(
+            symbols.iter().all(|symbol| !symbol.test_scoped),
+            "{symbols:#?}"
+        );
+        // An attribute line is not a declaration, and must not swallow the
+        // one beneath it.
+        assert!(symbols.iter().any(|symbol| symbol.name == "Plain"));
     }
 
     #[test]
