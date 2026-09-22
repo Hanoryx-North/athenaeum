@@ -101,7 +101,14 @@ pub fn conflicts(a: &KnowledgeNode, b: &KnowledgeNode) -> bool {
 /// Anything a model merely proposed is not, no matter how confident the
 /// wording (§13).
 pub fn is_trustworthy(node: &KnowledgeNode) -> bool {
-    node.status == NodeStatus::Valid && node.authority.rank() <= Authority::VerifiedKnowledge.rank()
+    is_trustworthy_parts(node.status, node.authority)
+}
+
+/// [`is_trustworthy`] for callers holding the two fields rather than the
+/// node — a brief carries a summary of a node, not the node itself, and two
+/// copies of this rule would eventually disagree.
+pub fn is_trustworthy_parts(status: NodeStatus, authority: Authority) -> bool {
+    status == NodeStatus::Valid && authority.rank() <= Authority::VerifiedKnowledge.rank()
 }
 
 #[cfg(test)]

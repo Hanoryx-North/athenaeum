@@ -4,7 +4,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    GitCommit, RepositoryFile, RepositoryScanOptions, RepositorySnapshot, RepositorySymbol,
+    GitCommit, RepositoryCall, RepositoryFile, RepositoryScanOptions, RepositorySnapshot,
+    RepositorySymbol, SourceLanguage,
 };
 use crate::error::Result;
 use crate::id::{EvidenceId, NodeId};
@@ -211,7 +212,7 @@ impl RepositoryIndexer {
                     continue;
                 };
                 for call in &symbol.calls {
-                    let Some(target) = names.resolve(&file.path, call) else {
+                    let Some(target) = names.resolve(file, call) else {
                         continue;
                     };
                     if target.node == *symbol_id {
@@ -248,9 +249,11 @@ impl RepositoryIndexer {
             }
 
             for relation in &file.implements {
+                // A supertype is always written as a bare name in the clause
+                // that announces it, never reached through a receiver.
                 let (Some(subject), Some(object)) = (
-                    names.resolve(&file.path, &relation.subject),
-                    names.resolve(&file.path, &relation.object),
+                    names.resolve(file, &bare(&relation.subject)),
+                    names.resolve(file, &bare(&relation.object)),
                 ) else {
                     continue;
                 };
@@ -316,17 +319,32 @@ impl Expected {
 struct ResolvedSymbol {
     node: NodeId,
     file: String,
+    language: Option<SourceLanguage>,
     is_test: bool,
+    /// The type a method hangs off, when it hangs off one: `WikiService` for
+    /// `WikiService::context`.
+    owner: Option<String>,
 }
 
 /// Turns names written at a call site or in an `implements` clause back into
 /// declarations.
 ///
-/// It resolves only what it can resolve without guessing: a name declared in
-/// the same file, or a name that exactly one declaration in the repository
-/// carries. Everything else is dropped. That is the conservative half of
-/// §21 — a graph where `open` links to all eleven `open`s is worse than one
-/// where it links to none, because the reader cannot tell the difference.
+/// It resolves only what it can resolve without guessing, and what counts as
+/// a guess depends on how the name was written.
+///
+/// A name declared in the same file is the same file's. Beyond that, a **bare
+/// name** had to be in lexical scope to be called at all, so if exactly one
+/// declaration in the repository carries it, that is the one. A **name on a
+/// receiver** is dispatched on the receiver's type, which this reader cannot
+/// see: `values.push(x)` and a project's own `push` are written identically,
+/// and a repository that happens to declare exactly one `push` is not
+/// evidence that every `.push(` in it means that one. So a receiver call
+/// reaches another file only when this file imports it — you can only call
+/// what you can name.
+///
+/// Everything else is dropped. That is the conservative half of §21: a graph
+/// where `open` links to all eleven `open`s is worse than one where it links
+/// to none, because the reader cannot tell the difference.
 #[derive(Debug, Default)]
 struct SymbolNames {
     /// `None` marks a name that more than one declaration answers to.
@@ -350,7 +368,9 @@ impl SymbolNames {
                 let resolved = ResolvedSymbol {
                     node: node.clone(),
                     file: file.path.clone(),
+                    language: file.language,
                     is_test: file.is_test,
+                    owner: owner_of(&symbol.qualified_name),
                 };
                 for key in [&symbol.name, &symbol.qualified_name] {
                     record(
@@ -365,11 +385,73 @@ impl SymbolNames {
         names
     }
 
-    fn resolve(&self, file: &str, name: &str) -> Option<&ResolvedSymbol> {
-        if let Some(local) = self.in_file.get(&(file.to_string(), name.to_string())) {
+    fn resolve(&self, from: &RepositoryFile, call: &RepositoryCall) -> Option<&ResolvedSymbol> {
+        if let Some(local) = self.in_file.get(&(from.path.clone(), call.name.clone())) {
             return local.as_ref();
         }
-        self.repository.get(name)?.as_ref()
+        let resolved = self.repository.get(&call.name)?.as_ref()?;
+        // A TypeScript test calling `bare()` does not reach a Rust `fn bare`,
+        // however unique that name is. Nothing in one language can call a
+        // declaration in another without a boundary this scan does not read.
+        if resolved.language != from.language {
+            return None;
+        }
+        if call.on_receiver && !can_name(from, resolved) {
+            return None;
+        }
+        Some(resolved)
+    }
+}
+
+/// Whether `file` could have written this name: it imports the file that
+/// declares it, or it imports the type the method hangs off.
+///
+/// The second half is what keeps a real call across a crate boundary. A file
+/// holding `use athenaeum_core::wiki::WikiService` can write
+/// `…​.context(…)`, and that it did not import a *file* only means the
+/// declaration lives somewhere this scan resolves by name rather than by
+/// path.
+fn can_name(file: &RepositoryFile, resolved: &ResolvedSymbol) -> bool {
+    if file
+        .imports
+        .iter()
+        .any(|import| import.target.as_deref() == Some(resolved.file.as_str()))
+    {
+        return true;
+    }
+    let Some(owner) = &resolved.owner else {
+        return false;
+    };
+    file.imports
+        .iter()
+        .any(|import| names_segment(&import.specifier, owner))
+}
+
+/// Whether `specifier` mentions `name` as a whole path segment, rather than
+/// as a substring of a longer identifier.
+fn names_segment(specifier: &str, name: &str) -> bool {
+    specifier
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .any(|segment| segment == name)
+}
+
+/// The type part of a qualified name, for the names that have one.
+fn owner_of(qualified_name: &str) -> Option<String> {
+    for separator in ["::", "."] {
+        if let Some((owner, _)) = qualified_name.rsplit_once(separator) {
+            if !owner.is_empty() {
+                return Some(owner.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// A name written plainly, not reached through anything.
+fn bare(name: &str) -> RepositoryCall {
+    RepositoryCall {
+        name: name.to_string(),
+        on_receiver: false,
     }
 }
 
@@ -891,6 +973,77 @@ mod tests {
         assert_eq!(
             out(&store, "authenticate", EdgeType::Calls),
             ["create_session"]
+        );
+    }
+
+    #[test]
+    fn a_method_call_does_not_reach_a_file_this_one_never_named() {
+        // Regression: `values.push(x)` resolved to a project's own unique
+        // `push`, because the name matched and nothing checked that the
+        // caller could possibly have meant it.
+        let (_dir, store) = indexed(&[
+            (
+                "src/collect.rs",
+                "pub struct Bag;\nimpl Bag {\n    pub fn push(&self, v: u32) {}\n}\n",
+            ),
+            (
+                "src/parse.rs",
+                "pub fn parse() {\n    let mut values = Vec::new();\n    values.push(1);\n}\n",
+            ),
+        ]);
+
+        assert!(
+            out(&store, "parse", EdgeType::Calls).is_empty(),
+            "a standard-library method call became a project relationship"
+        );
+    }
+
+    #[test]
+    fn a_method_call_resolves_once_this_file_can_name_its_type() {
+        let (_dir, store) = indexed(&[
+            (
+                "src/collect.rs",
+                "pub struct Bag;\nimpl Bag {\n    pub fn stash(&self, v: u32) {}\n}\n",
+            ),
+            (
+                "src/parse.rs",
+                "use crate::collect::Bag;\npub fn parse() {\n    let bag = Bag;\n    bag.stash(1);\n}\n",
+            ),
+        ]);
+
+        assert_eq!(out(&store, "parse", EdgeType::Calls), ["Bag::stash"]);
+    }
+
+    #[test]
+    fn a_bare_call_still_reaches_a_uniquely_named_declaration_anywhere() {
+        // A bare name had to be in scope to be written at all, so a single
+        // repository-wide match is the one that was meant.
+        let (_dir, store) = indexed(&[
+            ("src/session.rs", "pub fn create_session() {}\n"),
+            (
+                "src/auth.rs",
+                "pub fn authenticate() {\n    create_session();\n}\n",
+            ),
+        ]);
+
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::Calls),
+            ["create_session"]
+        );
+    }
+
+    #[test]
+    fn a_call_never_crosses_from_one_language_into_another() {
+        // Regression: a TypeScript test calling `bare()` was linked to a Rust
+        // `fn bare`, on the strength of the name alone.
+        let (_dir, store) = indexed(&[
+            ("src/helpers.rs", "pub fn shared() {}\n"),
+            ("src/app.ts", "export function run() {\n  shared();\n}\n"),
+        ]);
+
+        assert!(
+            out(&store, "run", EdgeType::Calls).is_empty(),
+            "a TypeScript call reached a Rust declaration"
         );
     }
 

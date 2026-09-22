@@ -381,15 +381,29 @@ a refactor. Inside that span, an identifier applied to an argument list is a
 call site, and the `impl ... for ...`, `implements`, `extends` and base-class
 clauses are supertype claims. Neither becomes an edge on the parser's word.
 
-Resolution is where §21 is enforced — *do not connect everything*. A written
-name becomes a relationship only when it can be resolved without guessing:
-a declaration in the same file, or exactly one declaration in the repository
-carrying that name. A name that several declarations answer to resolves to
-none of them, because a graph where `open` links to all eleven `open`s is
-worse than one where it links to none — the reader cannot tell the difference
-between a real relationship and a coincidence of naming. Names the repository
-never declares are words, not relationships, which is what keeps standard
-library calls out of the graph without a list of them having to be kept.
+Resolution is where §21 is enforced — *do not connect everything* — and what
+counts as a guess depends on how the name was written.
+
+A name declared in the same file is that file's. Beyond it, a **bare name**
+had to be in lexical scope to be written at all, so if exactly one declaration
+in the repository carries it, that is the one. A **name on a receiver** —
+`value.name(…)`, `Type::name(…)` — is dispatched on the receiver's type, which
+a line-oriented reader cannot see. `values.push(x)` and a project's own `push`
+are written identically, and a repository that happens to declare exactly one
+`push` is no evidence that every `.push(` in it means that one. So a receiver
+call reaches another file only when this file can name it: it imports that
+file, or it imports the type the method hangs off. That second clause is what
+keeps a real call across a crate boundary, where the declaration is named
+rather than pathed.
+
+Two further refusals. A name several declarations answer to resolves to none
+of them, because a graph where `open` links to all eleven `open`s is worse
+than one where it links to none — the reader cannot tell a relationship from a
+coincidence of naming. And a call never crosses languages: a TypeScript test
+calling `bare()` does not reach a Rust `fn bare`, however unique that name is.
+
+Names the repository never declares are words, not relationships, which keeps
+standard library calls out without a list of them having to be maintained.
 
 What survives becomes:
 

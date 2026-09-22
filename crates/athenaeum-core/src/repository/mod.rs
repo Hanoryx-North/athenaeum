@@ -110,7 +110,25 @@ pub struct RepositorySymbol {
     /// (§30). Unresolved at this stage — the indexer decides which of them
     /// name something this repository actually declares.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calls: Vec<String>,
+    pub calls: Vec<RepositoryCall>,
+}
+
+/// One call site, and how it was written.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCall {
+    pub name: String,
+    /// True when the name was reached through something else —
+    /// `value.name(…)` or `Type::name(…)`.
+    ///
+    /// It matters because the two forms can be trusted differently. A bare
+    /// name had to be in lexical scope, so if the repository declares exactly
+    /// one thing by that name, that is the thing. A name on a receiver is
+    /// dispatched on the receiver's type, which a line-oriented reader cannot
+    /// see — `values.push(x)` and a project's own `push` are written
+    /// identically.
+    #[serde(default)]
+    pub on_receiver: bool,
 }
 
 /// A supertype named at a declaration: a trait implemented, an interface

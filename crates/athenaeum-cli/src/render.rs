@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use athenaeum_core::graph::Reached;
+use athenaeum_core::graph::{Reached, Step};
 use athenaeum_core::journal::Event;
 use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
@@ -261,6 +261,41 @@ pub fn vault_lint(report: &VaultLintReport) {
     if !report.scan_complete {
         eprintln!("warning: the scan was truncated, so this is not the whole vault");
     }
+}
+
+/// The chain of relationships that connects two nodes, as a reader would
+/// explain it: each line names the relationship and where it led.
+pub fn path(
+    store: &KnowledgeStore,
+    from: &KnowledgeNode,
+    to: &KnowledgeNode,
+    steps: Option<&[Step]>,
+) -> Result<()> {
+    let Some(steps) = steps else {
+        println!(
+            "no path from {:?} to {:?} within the search depth",
+            from.title, to.title
+        );
+        return Ok(());
+    };
+    if steps.is_empty() {
+        println!("{:?} is {:?}", from.title, to.title);
+        return Ok(());
+    }
+
+    println!("{} hop(s):", steps.len());
+    println!("{}", from.title);
+    // A step records the edge and the node it was traversed *from*, so the
+    // node each one arrived at is named by the next step's origin — and for
+    // the last one, by the destination itself.
+    for (index, step) in steps.iter().enumerate() {
+        let arrived = match steps.get(index + 1) {
+            Some(next) => store.get_node(&next.from)?.title,
+            None => to.title.clone(),
+        };
+        println!("  --{}-> {}", step.edge_type, arrived);
+    }
+    Ok(())
 }
 
 pub fn review(report: &ReviewReport) {

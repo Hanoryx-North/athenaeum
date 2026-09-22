@@ -91,6 +91,11 @@ enum Command {
     },
     /// Walk outward from a node and show what is reachable.
     Navigate(NavigateArgs),
+    /// Show how one node connects to another: `path <from> <to>`.
+    ///
+    /// The answer to "why is this relevant to that", which a list of
+    /// neighbours cannot give.
+    Path(PathArgs),
     /// Assemble a knowledge brief for a task.
     Brief(BriefArgs),
     /// Show every archived revision of a node.
@@ -232,6 +237,17 @@ struct NavigateArgs {
     #[arg(long, short, default_value_t = 2)]
     depth: u8,
     #[arg(long, default_value_t = 25)]
+    max_nodes: usize,
+}
+
+#[derive(Args)]
+struct PathArgs {
+    from: String,
+    to: String,
+    /// How far to look before giving up.
+    #[arg(long, short, default_value_t = 6)]
+    depth: u8,
+    #[arg(long, default_value_t = 2000)]
     max_nodes: usize,
 }
 
@@ -628,6 +644,25 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 render::navigation(&reached);
                 Ok(())
             })?;
+        }
+
+        Command::Path(args) => {
+            let from = resolve(&store, &args.from)?;
+            let to = resolve(&store, &args.to)?;
+            let path = graph::shortest_path(
+                &store,
+                &from.id,
+                &to.id,
+                &NavigationOptions::default()
+                    .depth(args.depth)
+                    .max_nodes(args.max_nodes),
+            )?;
+            emit(cli.json, &path, || {
+                render::path(&store, &from, &to, path.as_deref())
+            })?;
+            if path.is_none() {
+                return Ok(Outcome::ProblemsFound);
+            }
         }
 
         Command::Brief(args) => {

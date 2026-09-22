@@ -13,7 +13,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::{RepositoryImport, RepositoryRelation, RepositorySymbol, SourceLanguage, SymbolKind};
+use super::{
+    RepositoryCall, RepositoryImport, RepositoryRelation, RepositorySymbol, SourceLanguage,
+    SymbolKind,
+};
 
 static RUST_DECL: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::new(|| {
     Regex::new(
@@ -80,10 +83,11 @@ static GO_DECL: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::n
 static GO_IMPORT: LazyLock<std::result::Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r#"^import\s+(?:[A-Za-z_.][A-Za-z0-9_.]*\s+)?"([^"]+)""#));
 
-/// An identifier applied to an argument list. Macros escape it for free: the
-/// `!` in `println!(` sits between the name and the parenthesis.
+/// An identifier applied to an argument list, with whatever reached it.
+/// Macros escape it for free: the `!` in `println!(` sits between the name
+/// and the parenthesis.
 static CALL_SITE: LazyLock<std::result::Result<Regex, regex::Error>> =
-    LazyLock::new(|| Regex::new(r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\("));
+    LazyLock::new(|| Regex::new(r"(\.|::)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\("));
 
 /// Words that take an argument list without naming anything.
 ///
@@ -468,7 +472,7 @@ fn finish(
     mut symbols: Vec<RepositorySymbol>,
     mut imports: Vec<RepositoryImport>,
     mut implements: Vec<RepositoryRelation>,
-    call_sites: Vec<(u32, String)>,
+    call_sites: Vec<(u32, RepositoryCall)>,
 ) -> crate::Result<ParsedFile> {
     deduplicate(&mut symbols, &mut imports);
     attribute_calls(&mut symbols, call_sites);
@@ -487,7 +491,7 @@ fn finish(
 /// A name that matches the enclosing declaration is dropped: on a declaration
 /// line it is the declaration itself, and inside the body it is recursion,
 /// which describes nothing a reader of the graph did not already know.
-fn attribute_calls(symbols: &mut [RepositorySymbol], mut call_sites: Vec<(u32, String)>) {
+fn attribute_calls(symbols: &mut [RepositorySymbol], mut call_sites: Vec<(u32, RepositoryCall)>) {
     if symbols.is_empty() || call_sites.is_empty() {
         return;
     }
@@ -496,7 +500,7 @@ fn attribute_calls(symbols: &mut [RepositorySymbol], mut call_sites: Vec<(u32, S
 
     let mut open: Vec<usize> = Vec::new();
     let mut next = 0usize;
-    for (line, name) in call_sites {
+    for (line, call) in call_sites {
         while next < symbols.len() && symbols[next].line_start <= line {
             while open
                 .last()
@@ -516,10 +520,10 @@ fn attribute_calls(symbols: &mut [RepositorySymbol], mut call_sites: Vec<(u32, S
         let Some(&enclosing) = open.last() else {
             continue;
         };
-        if symbols[enclosing].name == name {
+        if symbols[enclosing].name == call.name {
             continue;
         }
-        symbols[enclosing].calls.push(name);
+        symbols[enclosing].calls.push(call);
     }
 
     for symbol in symbols.iter_mut() {
@@ -529,16 +533,22 @@ fn attribute_calls(symbols: &mut [RepositorySymbol], mut call_sites: Vec<(u32, S
 }
 
 fn collect_calls(
-    sites: &mut Vec<(u32, String)>,
+    sites: &mut Vec<(u32, RepositoryCall)>,
     line: &str,
     line_number: u32,
 ) -> crate::Result<()> {
     static KEYWORDS: LazyLock<HashSet<&'static str>> =
         LazyLock::new(|| CALL_KEYWORDS.iter().copied().collect());
     for captures in compiled(&CALL_SITE, "call site")?.captures_iter(line) {
-        let name = &captures[1];
+        let name = &captures[2];
         if !KEYWORDS.contains(name) {
-            sites.push((line_number, name.to_string()));
+            sites.push((
+                line_number,
+                RepositoryCall {
+                    name: name.to_string(),
+                    on_receiver: captures.get(1).is_some(),
+                },
+            ));
         }
     }
     Ok(())
@@ -914,6 +924,15 @@ mod tests {
         parse(language, source).unwrap().symbols
     }
 
+    /// The names a declaration invokes, ignoring how they were written.
+    fn calls_of(symbols: &[RepositorySymbol], qualified: &str) -> Vec<String> {
+        named(symbols, qualified)
+            .calls
+            .iter()
+            .map(|call| call.name.clone())
+            .collect()
+    }
+
     fn named<'a>(symbols: &'a [RepositorySymbol], qualified: &str) -> &'a RepositorySymbol {
         symbols
             .iter()
@@ -1099,7 +1118,7 @@ pub fn create_session() {}
 "#;
         let symbols = symbols_of(SourceLanguage::Rust, source);
         assert_eq!(
-            named(&symbols, "authenticate").calls,
+            calls_of(&symbols, "authenticate"),
             vec!["create_session".to_string(), "validate_token".to_string()]
         );
         assert!(named(&symbols, "validate_token").calls.is_empty());
@@ -1137,9 +1156,15 @@ pub fn create_session() {}
             "export function handle() {\n  service.authenticate();\n  Session.create();\n}\n";
         let symbols = symbols_of(SourceLanguage::TypeScript, source);
         assert_eq!(
-            named(&symbols, "handle").calls,
+            calls_of(&symbols, "handle"),
             vec!["authenticate".to_string(), "create".to_string()]
         );
+        // Both were reached through something, which is what stops them
+        // being matched against a unique name in an unrelated file.
+        assert!(named(&symbols, "handle")
+            .calls
+            .iter()
+            .all(|call| call.on_receiver));
     }
 
     #[test]
@@ -1221,6 +1246,7 @@ pub fn create_session() {}
         let symbols = symbols_of(SourceLanguage::Go, source);
         let open = named(&symbols, "Open");
         assert_eq!((open.line_start, open.line_end), (1, 3));
-        assert_eq!(open.calls, vec!["validate".to_string()]);
+        assert_eq!(calls_of(&symbols, "Open"), vec!["validate".to_string()]);
+        assert!(!open.calls[0].on_receiver);
     }
 }
