@@ -115,6 +115,31 @@ str_enum! {
     }
 }
 
+impl NodeType {
+    /// True when the node describes something that *exists* and is identified
+    /// by where it is — a file, a declaration, a commit — rather than
+    /// something somebody *asserted* about the project.
+    ///
+    /// The distinction matters wherever two nodes describing one subject would
+    /// be a conflict. Two rules titled "Database" are rival claims and one of
+    /// them governs; the `Error` enum and the `error` module are simply two
+    /// different things whose names happen to collide. Structure cannot
+    /// contradict structure, because it was read rather than judged.
+    pub fn is_structural(&self) -> bool {
+        matches!(
+            self,
+            NodeType::Project
+                | NodeType::Repository
+                | NodeType::Module
+                | NodeType::File
+                | NodeType::Symbol
+                | NodeType::Test
+                | NodeType::Source
+                | NodeType::Dependency
+        )
+    }
+}
+
 str_enum! {
     /// How two nodes relate (buildplan §8).
     pub enum EdgeType {
@@ -359,6 +384,17 @@ mod tests {
         for a in Authority::ALL {
             assert_eq!(a.as_str().parse::<Authority>(), Ok(*a));
         }
+    }
+
+    #[test]
+    fn every_node_type_is_either_structure_or_a_claim() {
+        // Adding a type without deciding which it is would silently put it
+        // on the claim side and start reporting disputes about it.
+        let structural = NodeType::ALL.iter().filter(|t| t.is_structural()).count();
+        assert_eq!(structural, 8, "a node type changed side");
+        assert!(NodeType::Symbol.is_structural());
+        assert!(!NodeType::Rule.is_structural());
+        assert!(!NodeType::Concept.is_structural());
     }
 
     #[test]

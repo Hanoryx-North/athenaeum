@@ -173,6 +173,44 @@ Briefs are budgeted. A test adds 200 unrelated nodes and asserts the brief for
 an existing task does not grow, because context efficiency is the entire value
 proposition.
 
+## The review queue
+
+Phase 6's acceptance test is that contradictions stay *visible* and that stale
+knowledge can be restored rather than silently dropped. `review::sweep` is the
+visibility half, and it is deliberately only that half: it reads, and never
+rewrites a status, resolves a dispute or deletes anything. Deciding which of
+two rival claims is right is a judgement, and judgement belongs to the person
+or to the runtime's verifier. Noticing that a decision is owed is mechanical,
+so it lives here, where it runs offline and is tested without a model.
+
+| Finding | What it means |
+| --- | --- |
+| `contradicted` | Marked contradicted, awaiting a decision (§17) |
+| `disputed` | Several live claims describe one subject; one governs (§14) |
+| `anchor_lost` | Its anchor no longer resolves to anything (§16) |
+| `stale` | Its source moved or changed; the claim may still hold (§17) |
+| `unsupported` | A rule or decision resting on no evidence (§15) |
+| `proposed_edge` | A relationship a model proposed, not yet accepted (§20) |
+| `unreachable` | Live, but no traversable edge reaches it (§22) |
+| `empty` | No title, or no words at all |
+
+`disputed` is the §14 worked example made operational. Claims are grouped by
+subject — same scope, same type, same title — and `authority::rank` decides
+which one an agent is actually being handed. The finding is raised against the
+*others*, because those are what somebody has to merge, supersede or re-scope.
+
+Two restrictions keep it honest. Claims at different scopes are not rivals:
+"React state is immutable" and "this file mutates a cache deliberately" are
+both true, which is why the subject includes scope. And **structure cannot
+contradict structure** — the `Error` enum and the `error` module share a
+lowercased name and disagree about nothing, so node types that describe things
+that *exist* take no part in dispute detection, only types that describe things
+somebody *asserted*.
+
+Only findings that could hand an agent a wrong answer fail a build. Being
+untidy — an unsupported rule, an unreachable node — is reported and forgiven
+unless `athenaeum check --strict` says otherwise.
+
 ## The trust boundary
 
 Anything that reaches the graph may be untrusted: READMEs, code comments, git
@@ -238,7 +276,7 @@ the knowledge belongs to the user.
 | 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
-| 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation done:** exact, symbol, fingerprint and stale outcomes are searched and persisted; semantic/model revalidation remains external |
+| 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation and review done:** exact, symbol, fingerprint and stale outcomes are searched and persisted, and `review::sweep` makes disputes, contradictions, lost anchors, unsupported rules and unaccepted proposals visible; semantic/model revalidation remains external |
 | 7 — Obsidian-style app | **Shell ported and wired:** the `llm_wiki` desktop application supplies the UI and the wiki engine, and its graph, knowledge and search panels read the derived index rather than re-deriving one from files. Chat still needs the harness behind it |
 
 Phase 5 was the real product milestone, and it is met without this repository
@@ -255,9 +293,11 @@ implementation — over the published protocol, from a different language.
    line-oriented reader cannot see is dispatch through a variable, a name
    reached through an alias, and the difference between two `open`s in
    different modules.
-2. **Verification workflows** (Phase 6 tail) — contradiction review and
-   semantic revalidation belong behind the existing protocol and the runtime's
-   verifier policy; the local library continues to own persisted outcomes.
+2. **Verification workflows** (Phase 6 tail) — the review queue is built and
+   deterministic. What remains is the judgement half: deciding *which* rival
+   claim is right, and revalidating a stale claim against changed source.
+   Both belong behind the existing protocol and the runtime's verifier
+   policy; the local library continues to own persisted outcomes.
 3. **Chat on the harness** (Phase 7 tail) — the chat UI is ported and its
    agent-CLI transports are gone; it now needs `athenaeum_agent` behind it,
    driven through the harness SDK. That is the last place where the visible

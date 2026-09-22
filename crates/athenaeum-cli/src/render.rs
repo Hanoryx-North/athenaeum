@@ -15,8 +15,6 @@ use athenaeum_core::prelude::*;
 use athenaeum_core::vault::{LintSeverity, VaultLintReport};
 use serde::Serialize;
 
-use crate::check::Problem;
-
 /// Emit `value` as JSON, or run `text` to render it for a human.
 pub fn emit<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> Result<()>) -> Result<()> {
     if json {
@@ -265,13 +263,42 @@ pub fn vault_lint(report: &VaultLintReport) {
     }
 }
 
-pub fn problems(problems: &[Problem]) {
-    if problems.is_empty() {
-        println!("no problems found");
+pub fn review(report: &ReviewReport) {
+    if report.findings.is_empty() {
+        println!("{} node(s) reviewed, nothing to report", report.nodes);
         return;
     }
-    for problem in problems {
-        println!("{problem}");
+    println!(
+        "{} node(s) reviewed, {} finding(s)",
+        report.nodes,
+        report.findings.len()
+    );
+    let counts = report.counts();
+    println!(
+        "  {}",
+        counts
+            .iter()
+            .map(|(kind, count)| format!("{kind} {count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let mut current = None;
+    for finding in &report.findings {
+        if current != Some(finding.kind) {
+            println!();
+            println!(
+                "{} {}",
+                if finding.kind.is_blocking() { "!" } else { "-" },
+                finding.kind
+            );
+            current = Some(finding.kind);
+        }
+        if finding.title.is_empty() {
+            println!("    {} — {}", finding.node, finding.problem);
+        } else {
+            println!("    {} — {}", finding.title, finding.problem);
+        }
     }
 }
 

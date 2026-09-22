@@ -105,6 +105,7 @@ crates/athenaeum-core/src/
   brief.rs               assembling what an agent receives
   wiki.rs                typed, storage-independent agent integration boundary
   authority.rs           conflict resolution between claims
+  review.rs              what in the base needs a decision
   workspace.rs           locating and creating `.athenaeum/`
   blobs.rs               content-addressed evidence material
   id.rs · error.rs       typed ids; the crate's error enum
@@ -113,7 +114,6 @@ crates/athenaeum-cli/src/
   main.rs                argument definitions and dispatch only
   bridge.rs              versioned Wiki JSON transport
   render.rs              turning library values into text or JSON
-  check.rs               knowledge-base validation
 
 src-tauri/src/
   commands.rs            one thin translation per command; no knowledge logic
@@ -199,7 +199,7 @@ Everything persists to one SQLite file plus a directory of content-addressed blo
 ## 9. The CLI
 
 * The CLI is the acceptance harness for the library. Every operation the desktop app performs is reachable here, with no window, no frontend build and no API key.
-* `main.rs` defines arguments and dispatches. Rendering lives in `render.rs`; validation in `check.rs`.
+* `main.rs` defines arguments and dispatches; rendering lives in `render.rs`. Rules about knowledge quality are not CLI concerns and live in the library, where the desktop shell and the bridge can reach them too — `athenaeum check` is a renderer over `review::sweep`.
 * **Global flags are honored by every command.** `--json` is documented as global; a command that ignores it is broken for the scripting use case it exists to serve.
 * Text output is for humans, JSON for machines, and the two come from the same value — never from two separately-constructed representations.
 * Accept either an id or a title wherever a node is named.

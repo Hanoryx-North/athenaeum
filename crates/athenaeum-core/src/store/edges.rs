@@ -212,6 +212,23 @@ impl KnowledgeStore {
             .collect())
     }
 
+    /// Every edge in the base, in creation order.
+    ///
+    /// The whole-graph counterpart of [`KnowledgeStore::edges_of`], for
+    /// callers that would otherwise ask about every node in turn: a review
+    /// sweep, a graph projection, an export.
+    pub fn list_edges(&self, filter: &EdgeFilter) -> Result<Vec<KnowledgeEdge>> {
+        let sql = format!("SELECT {EDGE_COLUMNS} FROM edges ORDER BY created_at ASC, id ASC");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let edges = stmt
+            .query_map([], map_edge)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(edges
+            .into_iter()
+            .filter(|edge| filter.admits(edge))
+            .collect())
+    }
+
     /// Every edge touching a node, unoriented.
     pub fn edges_of(&self, id: &NodeId) -> Result<Vec<KnowledgeEdge>> {
         let sql = format!("SELECT {EDGE_COLUMNS} FROM edges WHERE from_node = ?1 OR to_node = ?1");

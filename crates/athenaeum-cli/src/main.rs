@@ -12,7 +12,6 @@
 //! [`render`]; knowledge-base validation lives in [`check`].
 
 mod bridge;
-mod check;
 mod render;
 
 use std::path::PathBuf;
@@ -105,8 +104,21 @@ enum Command {
     Lint(LintArgs),
     /// Search for moved source anchors and update knowledge staleness.
     Relocate(RelocateArgs),
-    /// Check the knowledge base for structural problems.
-    Check,
+    /// Review the knowledge base: contradictions, disputes, stale anchors,
+    /// unsupported rules, proposals awaiting acceptance, unreachable nodes.
+    ///
+    /// Exits non-zero when something found could hand an agent a wrong
+    /// answer. Findings that are only untidy are reported and forgiven,
+    /// unless `--strict` says otherwise.
+    Check(CheckArgs),
+}
+
+#[derive(Args)]
+struct CheckArgs {
+    /// Treat every finding as a failure, not only the ones that could hand
+    /// an agent a wrong answer.
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Args)]
@@ -737,13 +749,17 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
-        Command::Check => {
-            let problems = check::run(&store)?;
-            emit(cli.json, &problems, || {
-                render::problems(&problems);
+        Command::Check(args) => {
+            let report = athenaeum_core::review::sweep(&store)?;
+            let blocking = report.has_blocking();
+            emit(cli.json, &report, || {
+                render::review(&report);
                 Ok(())
             })?;
-            if !problems.is_empty() {
+            // Being untidy is not a build failure; being wrong is. Only the
+            // findings that mean an agent may be handed something incorrect
+            // set the exit code, unless the caller asks for all of them.
+            if blocking || (args.strict && !report.findings.is_empty()) {
                 return Ok(Outcome::ProblemsFound);
             }
         }
