@@ -289,6 +289,12 @@ impl KnowledgeStore {
     /// Mark `old` as superseded by `new`, wiring the relationship both into
     /// the graph and into the journal (§44).
     pub fn supersede(&mut self, old: &NodeId, new: &NodeId) -> Result<()> {
+        if old == new {
+            return Err(Error::InvalidValue {
+                field: "supersede",
+                value: "a claim cannot supersede itself".to_string(),
+            });
+        }
         self.connect(KnowledgeEdge::deterministic(
             new.clone(),
             EdgeType::Supersedes,
@@ -297,6 +303,33 @@ impl KnowledgeStore {
         ))?;
         self.set_node_status(old, NodeStatus::Superseded)?;
         Ok(())
+    }
+
+    /// Record that two claims disagree, and stop offering either until
+    /// somebody decides between them (§39's CONTRADICT, §17's lifecycle).
+    ///
+    /// Both ends are marked, not just one. Which of two disagreeing claims is
+    /// wrong is exactly the question nobody has answered yet, and answering
+    /// it by picking the older one would be a guess dressed up as a fact.
+    /// Neither is deleted: §17 is explicit that old knowledge is kept, and
+    /// resolving the dispute — with `supersede`, or by setting the survivor
+    /// back to valid — is a separate, deliberate act.
+    pub fn contradict(&mut self, a: &NodeId, b: &NodeId) -> Result<KnowledgeEdge> {
+        if a == b {
+            return Err(Error::InvalidValue {
+                field: "contradict",
+                value: "a claim cannot contradict itself".to_string(),
+            });
+        }
+        let edge = self.connect(KnowledgeEdge::deterministic(
+            a.clone(),
+            EdgeType::Contradicts,
+            b.clone(),
+            "contradict",
+        ))?;
+        self.set_node_status(a, NodeStatus::Contradicted)?;
+        self.set_node_status(b, NodeStatus::Contradicted)?;
+        Ok(edge)
     }
 }
 

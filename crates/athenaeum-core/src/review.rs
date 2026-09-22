@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::authority;
 use crate::error::Result;
 use crate::id::NodeId;
-use crate::model::{KnowledgeNode, NodeStatus, NodeType, ProvenanceSource};
+use crate::model::{EdgeType, KnowledgeNode, NodeStatus, NodeType, ProvenanceSource};
 use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter};
 
 /// Why a node is in the queue.
@@ -153,17 +153,44 @@ pub fn sweep(store: &KnowledgeStore) -> Result<ReviewReport> {
 
     let mut findings = Vec::new();
     let mut reachable = HashSet::new();
-    for edge in &edges {
-        if edge.is_traversable() {
-            reachable.insert(edge.from.clone());
-            reachable.insert(edge.to.clone());
-        }
-    }
 
     let titles = nodes
         .iter()
         .map(|node| (node.id.clone(), node.title.clone()))
         .collect::<HashMap<_, _>>();
+    // Claims still in play: being offered, or withheld pending a decision.
+    // A superseded or archived claim is neither, and cannot be a party to an
+    // open dispute.
+    let in_play = nodes
+        .iter()
+        .filter(|node| node.is_live() || node.status == NodeStatus::Contradicted)
+        .map(|node| node.id.clone())
+        .collect::<HashSet<_>>();
+
+    // Who each node is recorded as disagreeing with, so a contradiction
+    // finding can name the other side instead of leaving the reader to go
+    // looking for it.
+    let mut disagrees_with: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for edge in &edges {
+        if edge.is_traversable() {
+            reachable.insert(edge.from.clone());
+            reachable.insert(edge.to.clone());
+        }
+        if edge.edge_type == EdgeType::Contradicts
+            && edge.is_traversable()
+            && in_play.contains(&edge.from)
+            && in_play.contains(&edge.to)
+        {
+            disagrees_with
+                .entry(edge.from.clone())
+                .or_default()
+                .push(edge.to.clone());
+            disagrees_with
+                .entry(edge.to.clone())
+                .or_default()
+                .push(edge.from.clone());
+        }
+    }
 
     for node in &nodes {
         if node.title.trim().is_empty() {
@@ -172,12 +199,39 @@ pub fn sweep(store: &KnowledgeStore) -> Result<ReviewReport> {
             findings.push(finding(ReviewKind::Empty, node, "has no content at all"));
         }
 
+        // A contradiction is visible either way it was recorded: a node
+        // marked contradicted, or an accepted `contradicts` relationship
+        // between two claims still being offered. Phase 6 asks that they stay
+        // visible, not that they be recorded one particular way.
+        let rivals = disagrees_with.get(&node.id);
+        if node.status == NodeStatus::Contradicted || (rivals.is_some() && node.is_live()) {
+            let named = rivals
+                .map(|ids| {
+                    ids.iter()
+                        .map(|id| {
+                            titles
+                                .get(id)
+                                .map(|title| format!("{title:?}"))
+                                .unwrap_or_else(|| id.to_string())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            findings.push(ReviewFinding {
+                kind: ReviewKind::Contradicted,
+                node: node.id.clone(),
+                title: node.title.clone(),
+                problem: if named.is_empty() {
+                    "is contradicted and awaiting a decision".to_string()
+                } else {
+                    format!("disagrees with {named}, and nobody has decided between them")
+                },
+                related: rivals.cloned().unwrap_or_default(),
+            });
+        }
+
         match node.status {
-            NodeStatus::Contradicted => findings.push(finding(
-                ReviewKind::Contradicted,
-                node,
-                "is contradicted and awaiting a decision",
-            )),
             NodeStatus::StaleRequiresReview => findings.push(finding(
                 ReviewKind::AnchorLost,
                 node,
@@ -444,6 +498,74 @@ mod tests {
                 kinds(&report)
             );
         }
+    }
+
+    #[test]
+    fn a_recorded_contradiction_names_the_claim_it_disagrees_with() {
+        let mut store = store();
+        let a = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Fact, "Sessions last 24h").with_summary("s"),
+        );
+        let b = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Fact, "Sessions last an hour").with_summary("s"),
+        );
+        store.contradict(&a, &b).unwrap();
+
+        let report = sweep(&store).unwrap();
+        let found = report.of_kind(ReviewKind::Contradicted).collect::<Vec<_>>();
+        assert_eq!(found.len(), 2, "{:#?}", report.findings);
+        // Both ends are marked: which of two disagreeing claims is wrong is
+        // exactly the question nobody has answered yet.
+        assert!(found
+            .iter()
+            .any(|f| f.node == a && f.problem.contains("\"Sessions last an hour\"")));
+        assert!(found
+            .iter()
+            .any(|f| f.node == b && f.problem.contains("\"Sessions last 24h\"")));
+        assert!(report.has_blocking());
+    }
+
+    #[test]
+    fn superseding_one_of_two_contradicting_claims_settles_it() {
+        let mut store = store();
+        let old = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Fact, "Sessions last 24h").with_summary("s"),
+        );
+        let new = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Fact, "Sessions last an hour").with_summary("s"),
+        );
+        store.contradict(&old, &new).unwrap();
+        store.supersede(&old, &new).unwrap();
+        // The survivor is put back into service; the loser stays as history.
+        store.set_node_status(&new, NodeStatus::Valid).unwrap();
+
+        let report = sweep(&store).unwrap();
+        assert!(
+            report.of_kind(ReviewKind::Contradicted).next().is_none(),
+            "{:#?}",
+            report.findings
+        );
+        assert_eq!(
+            store.get_node(&old).unwrap().status,
+            NodeStatus::Superseded,
+            "superseded knowledge is kept, not deleted (§17)"
+        );
+    }
+
+    #[test]
+    fn a_claim_cannot_supersede_or_contradict_itself() {
+        let mut store = store();
+        let node = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Fact, "Only claim").with_summary("s"),
+        );
+        assert!(store.supersede(&node, &node).is_err());
+        assert!(store.contradict(&node, &node).is_err());
+        assert_eq!(store.get_node(&node).unwrap().status, NodeStatus::Valid);
     }
 
     #[test]

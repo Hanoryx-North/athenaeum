@@ -66,6 +66,16 @@ enum Command {
     Link(LinkArgs),
     /// Attach evidence to a node.
     Evidence(EvidenceArgs),
+    /// Replace one claim with another: `supersede <old> <new>`.
+    ///
+    /// The old claim is kept and stops being offered; §17 is explicit that
+    /// historical knowledge is not deleted.
+    Supersede { old: String, new: String },
+    /// Record that two claims disagree: `contradict <a> <b>`.
+    ///
+    /// Both stop being offered until somebody decides between them. Resolve
+    /// it with `supersede`, or by setting the survivor back to valid.
+    Contradict { a: String, b: String },
     /// Find candidate nodes by text.
     Search {
         query: Vec<String>,
@@ -477,6 +487,34 @@ fn run(cli: &Cli) -> Result<Outcome> {
             store.delete_node(&node.id)?;
             emit(cli.json, &node, || {
                 println!("removed {} ({})", node.id, node.title);
+                Ok(())
+            })?;
+        }
+
+        Command::Supersede { old, new } => {
+            let old = resolve(&store, old)?;
+            let new = resolve(&store, new)?;
+            store.supersede(&old.id, &new.id)?;
+            let old = store.get_node(&old.id)?;
+            emit(cli.json, &old, || {
+                println!(
+                    "{:?} now supersedes {:?}, which is {} and kept",
+                    new.title, old.title, old.status
+                );
+                Ok(())
+            })?;
+        }
+
+        Command::Contradict { a, b } => {
+            let a = resolve(&store, a)?;
+            let b = resolve(&store, b)?;
+            let edge = store.contradict(&a.id, &b.id)?;
+            emit(cli.json, &edge, || {
+                println!(
+                    "{:?} and {:?} are recorded as contradicting; neither is offered \
+                     until one is resolved",
+                    a.title, b.title
+                );
                 Ok(())
             })?;
         }

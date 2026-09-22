@@ -195,6 +195,16 @@ so it lives here, where it runs offline and is tested without a model.
 | `noisy` | Retrieved again and again, never used (§40, §41) |
 | `empty` | No title, or no words at all |
 
+A contradiction is visible however it was recorded — a node marked
+contradicted, or an accepted `contradicts` relationship between two claims
+still being offered — and the finding names the claim on the other side.
+`athenaeum contradict a b` records one and withholds *both* claims until
+somebody decides, because which of two disagreeing claims is wrong is exactly
+the question nobody has answered yet; picking the older one would be a guess
+dressed as a fact. `athenaeum supersede old new` settles it, and the loser is
+kept rather than deleted (§17). Once one side is superseded the disagreement
+is history, not an open dispute, and the finding goes away.
+
 `disputed` is the §14 worked example made operational. Claims are grouped by
 subject — same scope, same type, same title — and `authority::rank` decides
 which one an agent is actually being handed. The finding is raised against the
