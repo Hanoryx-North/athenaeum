@@ -227,6 +227,41 @@ Only findings that could hand an agent a wrong answer fail a build. Being
 untidy — an unsupported rule, an unreachable node — is reported and forgiven
 unless `athenaeum check --strict` says otherwise.
 
+## Promotion
+
+§13 says generated text is never automatically authoritative: a model's
+statement arrives as an observation and becomes a fact, a rule or a decision
+only through validation. §47 says what validation means for a rule — a model
+proposing *never modify generated files* is asked **why**, and only
+authoritative evidence promotes it.
+
+`KnowledgeStore::verify` is that gate, and it is a gate rather than a setter.
+Confirming a claim that rests on no evidence is refused outright, and raising
+one above what backs it is refused by kind:
+
+| Raised to | Needs |
+| --- | --- |
+| `user_instruction` | Nothing can. Who said it is a fact about provenance, not a conclusion |
+| `project_rule`, `project_decision` | Configuration, project documentation, a recorded decision, or the user saying so (§47) |
+| `verified_evidence`, `verified_knowledge` | Anything actually checked — so not an external source |
+| everything below | Nothing; the claim is offered for what it is |
+
+The bar only applies upward. Lowering a claim, or confirming it without
+changing what it counts as, is always allowed.
+
+The distinction it draws is between what *is* and what *should be*. A file
+containing generated code establishes a fact about that file; it does not
+establish a rule about what to do with it. The same source file is exactly the
+right evidence for "`AuthService` validates before it creates", which is why
+the bar is written per authority level rather than per evidence kind.
+
+**Promotion is local, like superseding and contradicting.** The bridge lets a
+model *propose* — create, update, link, attach evidence, all recorded as
+proposals with the model named. Deciding is a separate act on this side of the
+seam. Exposing verification across it would hand back what the bar takes away,
+because a model that can attach evidence claiming to quote `AGENTS.md` could
+then verify against its own attachment. Models propose; people decide.
+
 ## The trust boundary
 
 Anything that reaches the graph may be untrusted: READMEs, code comments, git
@@ -289,7 +324,7 @@ the knowledge belongs to the user.
 | 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
 | 1 — External model agent: agent loop, tools, permissions, sessions | **Runtime responsibility; intentionally not built here.** DeepSeek Harness serves it |
 | 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic extraction done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go declarations with spans and visibility, imports, calls, implements and test references, local dependency edges and Git modification history. Compiler-grade AST identities and broader language coverage remain. |
-| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
+| 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations, conservative near-duplicate resolution, and the §47 evidence bar on promotion are exposed |
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
 | 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation and review done:** exact, symbol, fingerprint and stale outcomes are searched and persisted, and `review::sweep` makes disputes, contradictions, lost anchors, unsupported rules and unaccepted proposals visible; semantic/model revalidation remains external |

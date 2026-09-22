@@ -389,13 +389,50 @@ impl KnowledgeStore {
         Ok(node)
     }
 
-    /// Record that a node was confirmed against its evidence.
-    pub fn mark_verified(
-        &mut self,
-        id: &NodeId,
-        authority: Option<Authority>,
-    ) -> Result<KnowledgeNode> {
+    /// Record that a node was confirmed against its evidence, optionally
+    /// raising what it counts as (§13's observation → fact/rule/decision).
+    ///
+    /// The promotion is checked, not taken on trust. §47's worked example is
+    /// a model proposing "never modify generated files" as a rule; the
+    /// system's answer is to ask *why*, and to promote only on authoritative
+    /// evidence. An unchecked version of this call is a hole straight through
+    /// §13: a model asserts a rule, then verifies its own assertion into a
+    /// trusted one, and nothing in the graph records that anything was
+    /// assumed.
+    ///
+    /// Lowering a claim's authority, or leaving it alone, is always allowed —
+    /// the bar exists to stop knowledge rising above what backs it.
+    pub fn verify(&mut self, id: &NodeId, authority: Option<Authority>) -> Result<KnowledgeNode> {
         let mut node = self.get_node(id)?;
+        let evidence = self.evidence_for(id)?;
+
+        // Confirming a claim against nothing is not confirmation (§15).
+        if evidence.is_empty() {
+            return Err(Error::Invalid {
+                id: id.clone(),
+                reason: "cannot be verified: it rests on no evidence".to_string(),
+            });
+        }
+
+        if let Some(requested) = authority {
+            if requested.outranks(&node.authority) {
+                let required = requested.evidence_required();
+                if !evidence
+                    .iter()
+                    .any(|evidence| evidence.kind.establishes(required))
+                {
+                    return Err(Error::Invalid {
+                        id: id.clone(),
+                        reason: format!(
+                            "cannot be promoted to {requested}: none of its {} piece(s) of \
+                             evidence establish that",
+                            evidence.len()
+                        ),
+                    });
+                }
+            }
+        }
+
         node.last_verified_at = Some(chrono::Utc::now());
         node.status = NodeStatus::Valid;
         if let Some(authority) = authority {
@@ -509,6 +546,7 @@ pub(crate) fn title_key(title: &str) -> String {
 mod tests {
     use super::*;
     use crate::model::NodeType;
+    use crate::model::{Evidence, EvidenceKind, SourceAnchor};
 
     #[test]
     fn a_clashing_id_is_reported_as_an_id_clash_not_a_title_clash() {
@@ -578,5 +616,132 @@ mod tests {
             .find_nodes_by_title_key("AuthServices")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn a_model_cannot_verify_its_own_assertion_into_a_project_rule() {
+        // §47's worked example: a model proposes "never modify generated
+        // files" as a RULE. The system asks why. An answer of "because I
+        // said so" is not an answer.
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let rule = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Rule, "Never modify generated files")
+                    .with_summary("Proposed while working."),
+            )
+            .unwrap();
+        store
+            .attach_evidence(
+                Evidence::new(rule.id.clone(), EvidenceKind::SourceFile)
+                    .with_anchor(SourceAnchor::file("src/generated.rs")),
+            )
+            .unwrap();
+
+        let refused = store.verify(&rule.id, Some(Authority::ProjectRule));
+        assert!(
+            matches!(&refused, Err(Error::Invalid { reason, .. }) if reason.contains("project_rule")),
+            "{refused:?}"
+        );
+        // Refused means unchanged, not half-applied.
+        let unchanged = store.get_node(&rule.id).unwrap();
+        assert_eq!(unchanged.authority, Authority::UnverifiedObservation);
+        assert!(unchanged.last_verified_at.is_none());
+
+        // The project saying so in its own configuration is an answer.
+        store
+            .attach_evidence(
+                Evidence::new(rule.id.clone(), EvidenceKind::Documentation)
+                    .with_anchor(SourceAnchor::file("AGENTS.md")),
+            )
+            .unwrap();
+        let promoted = store
+            .verify(&rule.id, Some(Authority::ProjectRule))
+            .unwrap();
+        assert_eq!(promoted.authority, Authority::ProjectRule);
+        assert!(promoted.last_verified_at.is_some());
+    }
+
+    #[test]
+    fn a_claim_resting_on_nothing_cannot_be_verified_at_all() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(KnowledgeNode::new(NodeType::Fact, "Unbacked").with_summary("s"))
+            .unwrap();
+
+        let refused = store.verify(&node.id, None);
+        assert!(
+            matches!(&refused, Err(Error::Invalid { reason, .. }) if reason.contains("no evidence")),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn code_is_the_right_evidence_for_a_fact_about_code() {
+        // The §47 bar is about rules. A claim that merely says what the code
+        // does is established by the code.
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let fact = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Fact, "AuthService validates before creating")
+                    .with_summary("s"),
+            )
+            .unwrap();
+        store
+            .attach_evidence(
+                Evidence::new(fact.id.clone(), EvidenceKind::Symbol)
+                    .with_anchor(SourceAnchor::file("src/auth.rs").with_symbol("authenticate")),
+            )
+            .unwrap();
+
+        let verified = store
+            .verify(&fact.id, Some(Authority::VerifiedEvidence))
+            .unwrap();
+        assert_eq!(verified.authority, Authority::VerifiedEvidence);
+    }
+
+    #[test]
+    fn lowering_a_claim_needs_no_permission_and_verifying_restores_it() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Fact, "Was confident")
+                    .with_summary("s")
+                    .with_authority(Authority::VerifiedEvidence),
+            )
+            .unwrap();
+        store
+            .attach_evidence(Evidence::new(node.id.clone(), EvidenceKind::ExternalSource))
+            .unwrap();
+        store.set_node_status(&node.id, NodeStatus::Stale).unwrap();
+
+        // Down is always allowed — the bar stops knowledge rising above what
+        // backs it, not falling to meet it.
+        let lowered = store
+            .verify(&node.id, Some(Authority::ExternalKnowledge))
+            .unwrap();
+        assert_eq!(lowered.authority, Authority::ExternalKnowledge);
+        assert_eq!(lowered.status, NodeStatus::Valid);
+
+        // And that same external source cannot push it back up.
+        assert!(store
+            .verify(&node.id, Some(Authority::VerifiedEvidence))
+            .is_err());
+    }
+
+    #[test]
+    fn nothing_verifies_its_way_into_being_a_user_instruction() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(KnowledgeNode::new(NodeType::Rule, "Claimed").with_summary("s"))
+            .unwrap();
+        store
+            .attach_evidence(Evidence::new(node.id.clone(), EvidenceKind::UserStatement))
+            .unwrap();
+
+        // Even on the strongest evidence there is: who said it is a fact
+        // about provenance, not a conclusion.
+        assert!(store
+            .verify(&node.id, Some(Authority::UserInstruction))
+            .is_err());
     }
 }

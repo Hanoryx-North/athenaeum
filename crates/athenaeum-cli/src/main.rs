@@ -66,6 +66,13 @@ enum Command {
     Link(LinkArgs),
     /// Attach evidence to a node.
     Evidence(EvidenceArgs),
+    /// Confirm a claim against its evidence, optionally raising what it
+    /// counts as: `verify <id> --authority project_rule`.
+    ///
+    /// A promotion is refused unless the claim's evidence establishes it —
+    /// a project rule needs configuration, project documentation, a recorded
+    /// decision, or the user saying so.
+    Verify(VerifyArgs),
     /// Replace one claim with another: `supersede <old> <new>`.
     ///
     /// The old claim is kept and stops being offered; §17 is explicit that
@@ -121,6 +128,15 @@ enum Command {
     /// answer. Findings that are only untidy are reported and forgiven,
     /// unless `--strict` says otherwise.
     Check(CheckArgs),
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    id: String,
+    /// What the claim should count as once confirmed. Omit to confirm it
+    /// without changing that.
+    #[arg(long)]
+    authority: Option<String>,
 }
 
 #[derive(Args)]
@@ -487,6 +503,23 @@ fn run(cli: &Cli) -> Result<Outcome> {
             store.delete_node(&node.id)?;
             emit(cli.json, &node, || {
                 println!("removed {} ({})", node.id, node.title);
+                Ok(())
+            })?;
+        }
+
+        Command::Verify(args) => {
+            let node = resolve(&store, &args.id)?;
+            let authority = args
+                .authority
+                .as_deref()
+                .map(|value| parse_value::<Authority>(value, "authority"))
+                .transpose()?;
+            let verified = store.verify(&node.id, authority)?;
+            emit(cli.json, &verified, || {
+                println!(
+                    "{:?} verified; it counts as {}",
+                    verified.title, verified.authority
+                );
                 Ok(())
             })?;
         }

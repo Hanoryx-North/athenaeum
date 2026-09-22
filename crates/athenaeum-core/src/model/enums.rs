@@ -236,7 +236,45 @@ str_enum! {
     }
 }
 
+/// What a claim must be able to show before it may be raised to a given
+/// authority (§13, §47).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EvidenceRequirement {
+    /// Nothing. The claim is offered for what it is.
+    None,
+    /// Something was actually checked, so anything except a source we did not
+    /// check ourselves.
+    Verified,
+    /// The project decided it. §47's list: configuration, project
+    /// documentation such as `AGENTS.md`, a recorded architectural decision,
+    /// or the user saying so.
+    Authoritative,
+    /// Not grantable by verification at all.
+    Never,
+}
+
 impl Authority {
+    /// What evidence a claim must carry before it may be *raised* to this
+    /// level.
+    ///
+    /// §47's worked example is a model proposing "never modify generated
+    /// files" as a RULE. The system's answer is to ask why, and to promote it
+    /// only on authoritative evidence. Without this, a model could assert a
+    /// rule and then verify its own assertion into one.
+    pub fn evidence_required(&self) -> EvidenceRequirement {
+        use Authority::*;
+        match self {
+            // Only the user states a user instruction. That is a fact about
+            // who said it, not a conclusion anything can check its way into.
+            UserInstruction => EvidenceRequirement::Never,
+            ProjectRule | ProjectDecision => EvidenceRequirement::Authoritative,
+            VerifiedEvidence | VerifiedKnowledge => EvidenceRequirement::Verified,
+            UserPreference | ImportedKnowledge | ExternalKnowledge | UnverifiedObservation => {
+                EvidenceRequirement::None
+            }
+        }
+    }
+
     /// Lower rank wins. `0` is the most authoritative.
     pub fn rank(&self) -> u8 {
         use Authority::*;
@@ -369,6 +407,23 @@ str_enum! {
     }
 }
 
+impl EvidenceKind {
+    /// Whether resting on this kind of evidence satisfies `requirement`.
+    pub fn establishes(&self, requirement: EvidenceRequirement) -> bool {
+        use EvidenceKind::*;
+        match requirement {
+            EvidenceRequirement::None => true,
+            // Someone else's blog post is not something we checked.
+            EvidenceRequirement::Verified => !matches!(self, ExternalSource),
+            EvidenceRequirement::Authoritative => matches!(
+                self,
+                UserStatement | Configuration | Documentation | ArchitecturalDecision
+            ),
+            EvidenceRequirement::Never => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,6 +479,33 @@ mod tests {
         assert!(Authority::UserInstruction.outranks(&Authority::ProjectRule));
         assert!(Authority::ProjectRule.outranks(&Authority::UnverifiedObservation));
         assert!(!Authority::ExternalKnowledge.outranks(&Authority::UserInstruction));
+    }
+
+    #[test]
+    fn a_rule_cannot_be_promoted_by_a_model_reading_its_own_output() {
+        // §47: only authoritative evidence promotes a rule.
+        let bar = Authority::ProjectRule.evidence_required();
+        assert_eq!(bar, EvidenceRequirement::Authoritative);
+        assert!(EvidenceKind::Documentation.establishes(bar));
+        assert!(EvidenceKind::Configuration.establishes(bar));
+        assert!(EvidenceKind::UserStatement.establishes(bar));
+        assert!(!EvidenceKind::ExternalSource.establishes(bar));
+        // A file containing generated code shows what *is*, not what should
+        // be, so it does not establish a rule about what to do with it.
+        assert!(!EvidenceKind::SourceFile.establishes(bar));
+
+        // A fact about behaviour is a different question, and the code is
+        // exactly the right evidence for it.
+        let checked = Authority::VerifiedEvidence.evidence_required();
+        assert!(EvidenceKind::SourceFile.establishes(checked));
+        assert!(EvidenceKind::Test.establishes(checked));
+        assert!(!EvidenceKind::ExternalSource.establishes(checked));
+
+        // Nothing verifies its way into being something the user said.
+        let never = Authority::UserInstruction.evidence_required();
+        assert!(EvidenceKind::ALL
+            .iter()
+            .all(|kind| !kind.establishes(never)));
     }
 
     #[test]
