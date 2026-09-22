@@ -80,9 +80,9 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
         };
         total_bytes += metadata.len();
         let language = language_for(&path);
-        let (symbols, imports) = match language {
+        let parsed = match language {
             Some(language) => parse::parse(language, content)?,
-            None => (Vec::new(), Vec::new()),
+            None => parse::ParsedFile::default(),
         };
         files.push(RepositoryFile {
             path: path.clone(),
@@ -92,8 +92,9 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
             is_test: is_test_path(&path),
             is_documentation: is_documentation(&path),
             is_configuration: is_configuration(&path),
-            symbols,
-            imports,
+            symbols: parsed.symbols,
+            imports: parsed.imports,
+            implements: parsed.implements,
         });
     }
 

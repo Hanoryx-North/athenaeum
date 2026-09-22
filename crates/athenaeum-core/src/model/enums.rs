@@ -143,6 +143,9 @@ str_enum! {
         GotchaOf => "gotcha_of",
         EvidencedBy => "evidenced_by",
         ModifiedBy => "modified_by",
+        /// A declaration invokes another declaration (§30).
+        Calls => "calls",
+        CalledBy => "called_by",
     }
 }
 
@@ -173,6 +176,8 @@ impl EdgeType {
             Constrains => ConstrainedBy,
             HasGotcha => GotchaOf,
             GotchaOf => HasGotcha,
+            Calls => CalledBy,
+            CalledBy => Calls,
             // Symmetric, or with no meaningful named inverse.
             RelatedTo => RelatedTo,
             Contradicts => Contradicts,

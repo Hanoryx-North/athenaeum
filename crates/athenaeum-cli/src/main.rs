@@ -617,8 +617,16 @@ fn run(cli: &Cli) -> Result<Outcome> {
             )?;
             emit(cli.json, &report, || {
                 println!(
-                    "indexed {} files, {} symbols, {} imports and {} commits",
-                    report.files, report.symbols, report.resolved_imports, report.commits
+                    "indexed {} files, {} symbols ({} exported), {} imports and {} commits",
+                    report.files,
+                    report.symbols,
+                    report.exported_symbols,
+                    report.resolved_imports,
+                    report.commits
+                );
+                println!(
+                    "code graph: {} call(s), {} implementation(s), {} test reference(s)",
+                    report.resolved_calls, report.implementations, report.test_links
                 );
                 println!(
                     "{} nodes created, {} updated, {} stale; {} edges created, {} removed",

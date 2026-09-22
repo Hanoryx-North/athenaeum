@@ -234,7 +234,7 @@ the knowledge belongs to the user.
 | --- | --- |
 | 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
 | 1 — External model agent: agent loop, tools, permissions, sessions | **Runtime responsibility; intentionally not built here.** DeepSeek Harness serves it |
-| 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic foundation done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go symbols and imports, local dependency edges and Git modification history. Full AST call graphs and broader language-specific extractors remain. |
+| 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic extraction done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go declarations with spans and visibility, imports, calls, implements and test references, local dependency edges and Git modification history. Compiler-grade AST identities and broader language coverage remain. |
 | 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations and conservative near-duplicate resolution are exposed |
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
@@ -250,8 +250,11 @@ implementation — over the published protocol, from a different language.
 ## Next
 
 1. **Deeper structural extraction** (Phase 2 tail) — compiler-grade AST
-   identities, calls, implements/exports, test discovery and additional
-   languages where measured project value justifies them.
+   identities and additional languages where measured project value justifies
+   them. Calls, implements, exports and test references are built; what the
+   line-oriented reader cannot see is dispatch through a variable, a name
+   reached through an alias, and the difference between two `open`s in
+   different modules.
 2. **Verification workflows** (Phase 6 tail) — contradiction review and
    semantic revalidation belong behind the existing protocol and the runtime's
    verifier policy; the local library continues to own persisted outcomes.
@@ -275,9 +278,49 @@ that disappear are retained as `stale_requires_review`.
 
 The first parser set covers the languages used by this repository plus common
 agent projects: Rust, TypeScript/JavaScript, Python and Go. It extracts named
-declarations and import structure conservatively. It is not presented as a
-full compiler AST: call graphs, implements relationships, exports and richer
-language coverage remain Phase 2 work.
+declarations, their visibility, their spans, the names they invoke and the
+supertypes they announce. It is not a compiler front end and does not claim to
+be; richer language coverage and true AST identities remain Phase 2 work.
+
+### The code graph
+
+A declaration's span is its body, not its signature line, which is both what
+its evidence anchor covers and what an anchor fingerprint has to match after
+a refactor. Inside that span, an identifier applied to an argument list is a
+call site, and the `impl ... for ...`, `implements`, `extends` and base-class
+clauses are supertype claims. Neither becomes an edge on the parser's word.
+
+Resolution is where §21 is enforced — *do not connect everything*. A written
+name becomes a relationship only when it can be resolved without guessing:
+a declaration in the same file, or exactly one declaration in the repository
+carrying that name. A name that several declarations answer to resolves to
+none of them, because a graph where `open` links to all eleven `open`s is
+worse than one where it links to none — the reader cannot tell the difference
+between a real relationship and a coincidence of naming. Names the repository
+never declares are words, not relationships, which is what keeps standard
+library calls out of the graph without a list of them having to be kept.
+
+What survives becomes:
+
+```text
+authenticate  ──calls──▶      validate_token      §30
+Sqlite        ──implements──▶ Store               §19
+auth.test.ts  ──tests──▶      AuthService         §19
+```
+
+Test references are recorded once, as `tests` rather than as `calls`: a test
+naming the code it exercises is one fact, and describing it with two edges
+would be the bloat §40 warns about. Each is recorded at both declaration and
+file granularity, because "which function does this cover" and "which tests
+cover this file" are different questions. All of them read back the other way
+for free — `called_by`, `implemented_by`, `tested_by` — through
+`EdgeType::inverse()` rather than a second row.
+
+Two declarations in one file can carry the same qualified name: `from` on two
+`impl From` blocks, a helper redefined further down a test file. They are
+different declarations, they get different nodes, and their titles carry the
+line that tells them apart. The first occurrence keeps the plain name, so the
+ordinary case never grows a suffix.
 
 `athenaeum relocate` checks every anchored evidence record. An unchanged
 file or region stays exact; a unique named declaration updates by symbol; a
