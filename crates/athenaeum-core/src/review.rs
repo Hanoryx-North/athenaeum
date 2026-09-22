@@ -45,6 +45,9 @@ pub enum ReviewKind {
     /// Live, but no traversable relationship reaches it. Navigation is
     /// retrieval (§22), so nothing but a literal search will ever find it.
     Unreachable,
+    /// Keeps being retrieved and never helps: it matches searches without
+    /// answering them (§41).
+    Noisy,
     /// No title, or no words at all.
     Empty,
 }
@@ -59,6 +62,7 @@ impl ReviewKind {
             ReviewKind::Unsupported => "unsupported",
             ReviewKind::ProposedEdge => "proposed_edge",
             ReviewKind::Unreachable => "unreachable",
+            ReviewKind::Noisy => "noisy",
             ReviewKind::Empty => "empty",
         }
     }
@@ -145,6 +149,7 @@ impl ReviewReport {
 pub fn sweep(store: &KnowledgeStore) -> Result<ReviewReport> {
     let nodes = store.list_nodes(&NodeFilter::all())?;
     let edges = store.list_edges(&EdgeFilter::all())?;
+    let utilities = store.utilities()?;
 
     let mut findings = Vec::new();
     let mut reachable = HashSet::new();
@@ -205,6 +210,21 @@ pub fn sweep(store: &KnowledgeStore) -> Result<ReviewReport> {
                 node,
                 "has no traversable relationship, so navigation can never reach it",
             ));
+        }
+
+        // §40's warning, measured rather than guessed at: the wiki should get
+        // more useful as it grows, not noisier.
+        if let Some(utility) = utilities.get(&node.id) {
+            if utility.looks_like_noise() {
+                findings.push(finding(
+                    ReviewKind::Noisy,
+                    node,
+                    &format!(
+                        "has been retrieved {} times and used none of them",
+                        utility.retrievals
+                    ),
+                ));
+            }
         }
     }
 
@@ -317,6 +337,7 @@ fn finding(kind: ReviewKind, node: &KnowledgeNode, problem: &str) -> ReviewFindi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::journal::{EventKind, NewEvent};
     use crate::model::{
         Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, NodeType, Scope, SourceAnchor,
     };
@@ -583,6 +604,72 @@ mod tests {
 
         let report = sweep(&store).unwrap();
         assert_eq!(kinds(&report), vec![ReviewKind::Unsupported]);
+    }
+
+    #[test]
+    fn a_node_that_keeps_surfacing_and_never_helps_is_reported() {
+        // §41 measures whether a node earns its place; §40 says the wiki
+        // should get more useful as it grows, not noisier.
+        let mut store = store();
+        let node = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Observation, "Matches everything").with_summary("s"),
+        );
+        let helpful = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Observation, "Actually answers things").with_summary("s"),
+        );
+        for _ in 0..6 {
+            store
+                .record(NewEvent::about(EventKind::NodeRetrieved, &node))
+                .unwrap();
+            store
+                .record(NewEvent::about(EventKind::NodeRetrieved, &helpful))
+                .unwrap();
+            store
+                .record(NewEvent::about(EventKind::NodeUsed, &helpful))
+                .unwrap();
+        }
+
+        let report = sweep(&store).unwrap();
+        let noisy = report.of_kind(ReviewKind::Noisy).collect::<Vec<_>>();
+        assert_eq!(noisy.len(), 1, "{:#?}", report.findings);
+        assert_eq!(noisy[0].node, node);
+        assert!(noisy[0].problem.contains("6 times"));
+        // Reading the base did not change it: utility is derived, never
+        // written onto the node (§41).
+        assert_eq!(store.get_node(&node).unwrap().version, 1);
+    }
+
+    #[test]
+    fn the_whole_base_reading_of_utility_agrees_with_the_per_node_one() {
+        let mut store = store();
+        let node = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Observation, "Read a few times").with_summary("s"),
+        );
+        for kind in [
+            EventKind::NodeRetrieved,
+            EventKind::NodeRetrieved,
+            EventKind::NodeUsed,
+            EventKind::NodeCited,
+        ] {
+            store.record(NewEvent::about(kind, &node)).unwrap();
+        }
+
+        let bulk = store.utilities().unwrap();
+        assert_eq!(
+            bulk.get(&node).copied(),
+            Some(store.utility(&node).unwrap())
+        );
+        assert_eq!(bulk[&node].retrievals, 2);
+        // A node nobody has read has not failed to be useful, so it is absent
+        // rather than present and zero.
+        let unread = anchored(
+            &mut store,
+            KnowledgeNode::new(NodeType::Observation, "Never read").with_summary("s"),
+        );
+        assert!(!store.utilities().unwrap().contains_key(&unread));
     }
 
     #[test]

@@ -192,6 +192,7 @@ so it lives here, where it runs offline and is tested without a model.
 | `unsupported` | A rule or decision resting on no evidence (§15) |
 | `proposed_edge` | A relationship a model proposed, not yet accepted (§20) |
 | `unreachable` | Live, but no traversable edge reaches it (§22) |
+| `noisy` | Retrieved again and again, never used (§40, §41) |
 | `empty` | No title, or no words at all |
 
 `disputed` is the §14 worked example made operational. Claims are grouped by
@@ -206,6 +207,11 @@ contradict structure** — the `Error` enum and the `error` module share a
 lowercased name and disagree about nothing, so node types that describe things
 that *exist* take no part in dispute detection, only types that describe things
 somebody *asserted*.
+
+`noisy` is §40's warning measured rather than guessed at. Utility is counted
+from the journal on demand and never written back onto a node, so a sweep that
+notices a node has been retrieved nine times and used none of them has still
+not modified it — reading knowledge does not rewrite it (§41).
 
 Only findings that could hand an agent a wrong answer fail a build. Being
 untidy — an unsupported rule, an unreachable node — is reported and forgiven
