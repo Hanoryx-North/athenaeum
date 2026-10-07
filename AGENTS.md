@@ -123,8 +123,8 @@ is not a licence to implement it in this repository.
 npm install && cargo build          # Rust 1.88+, Node 20+
 npm run dev                         # Vite dev server
 npm run tauri dev                   # the app
-npm run typecheck && npx vitest run  # frontend: 1,814 tests
-cargo test --workspace              # Rust: 432 tests, offline, no API key
+npm run typecheck && npx vitest run  # frontend: 1,818 tests
+cargo test --workspace              # Rust: 474 tests, offline, no API key
 npm run build                       # typecheck + bundle
 ```
 

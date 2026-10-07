@@ -16,51 +16,58 @@ gives it somewhere to put what it learns — typed knowledge nodes, typed
 relationships, evidence pointing back at real source — and a cheap way to walk
 back to it later.
 
-Everything lives in one SQLite file inside your project. No server, no vector
-database, no local model.
+Knowledge lives as **markdown files on disk** — an Obsidian-compatible vault,
+`[[wikilink]]`-connected — with a SQLite index over it that can be rebuilt at any
+time (delete `.athenaeum/knowledge.db` and you lose nothing but time). No server,
+no vector database, no local model.
 
 ---
 
 ## Status
 
-This is the **base application**: the knowledge library, a CLI, and a desktop
-shell that runs on Windows, macOS and Linux. It is genuinely usable today for
-reading and writing knowledge by hand.
+Athenaeum is the **visible layer**: a desktop application a person opens, and the
+knowledge library behind it. The agent that maintains the wiki is not in this
+repository — see below.
 
 What works:
 
-- The knowledge model — nodes, typed edges, evidence, provenance, authority,
-  history — persisted in SQLite with full-text search.
-- Graph navigation, bidirectional traversal, shortest paths, knowledge briefs.
-- A CLI (`athenaeum`) covering every operation.
-- A desktop shell (Tauri 2 + React) for browsing and editing.
-- A provider-agnostic model client with per-role routing.
-- A versioned Wiki integration service and cross-language CLI bridge.
-- Conservative curator entity resolution for identifier-style lookalikes.
-- Deterministic repository indexing for files, symbols, local imports and Git
-  history, with no model involved.
-- Source-anchor relocation by symbol and region fingerprint.
+- **The vault** — `wiki/*.md`, `raw/sources/`, `purpose.md`, `schema.md` — is the
+  source of truth. `athenaeum index-vault` turns it into typed nodes, deterministic
+  `[[wikilink]]` edges and evidence, reconciling rather than rebuilding, so a page
+  edited by the app, by Obsidian or by an agent is picked up and nothing else is
+  touched. `athenaeum lint` reports orphans, broken links and dead ends from the
+  same index.
+- **The knowledge library** — nodes, typed edges, evidence, provenance, authority,
+  history — in SQLite, with full-text search that finds a node named by an
+  identifier from the words a person would type (`oauth callback` reaches
+  `OAuthCallback`), graph navigation, shortest paths and knowledge briefs.
+- **Review** — `athenaeum check` lists contradictions, lost source anchors, rules
+  resting on nothing, proposals nobody accepted and knowledge that keeps surfacing
+  without ever helping. A claim is promoted only against evidence
+  (`verify`), and a disagreement is recorded and then settled (`contradict`,
+  `supersede`) rather than silently picked.
+- **A CLI** (`athenaeum`) covering every operation, with `--json` on all of it.
+- **A versioned Wiki integration service and bridge** for an agent runtime: typed in
+  Rust through `WikiService`, or JSON over `athenaeum bridge`. A node that is a page
+  says which file it is, and the bridge keeps the index current with the vault while
+  an agent edits it. See [docs/agent-integration.md](docs/agent-integration.md).
+- **Deterministic repository indexing** — files, symbols, local imports, calls,
+  tests and Git history — with no model involved.
+- **Source-anchor relocation** by symbol and region fingerprint.
+- **A desktop shell** (Tauri 2 + React 19) with the Obsidian-style interface ported
+  from [llm_wiki](https://github.com/nashsu/llm_wiki): three-column layout, graph
+  view, markdown editor and the auto wiki builder that turns dropped sources into
+  linked wiki pages. [`docs/porting-llm-wiki.md`](docs/porting-llm-wiki.md) records
+  what was copied, what was rewired and what was deliberately refused.
 
-### Where this is going
+### Where the agent lives
 
-The desktop shell is currently thin. It is being replaced by a full Obsidian-style
-interface ported from [llm_wiki](https://github.com/nashsu/llm_wiki) — three-column
-layout, graph view, markdown editor, and the auto wiki builder that turns dropped sources
-into linked wiki pages. [`docs/porting-llm-wiki.md`](docs/porting-llm-wiki.md) records
-what is copied, what is rewired, and what is deliberately refused.
-
-After that port, knowledge lives as **markdown files on disk** — Obsidian-compatible,
-`[[wikilink]]`-connected — and the SQLite knowledge base becomes a derived index over
-them, rebuildable at any time.
-
-The coding-agent runtime is intentionally **not built in this repository**.
-It is [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), which
-owns providers, streaming, tools, permissions and sessions, with
-[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the
-bundle that plugs this library into it. Athenaeum exposes a versioned,
-storage-independent Wiki contract for that: typed in-process Rust through
-`WikiService`, or JSON over the `athenaeum bridge` command. See
-[docs/agent-integration.md](docs/agent-integration.md).
+The coding-agent runtime is intentionally **not built in this repository**. It is
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), which owns
+providers, streaming, tools, permissions and sessions, with
+[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the bundle
+that plugs this library into it. Athenaeum exposes a versioned, storage-independent
+Wiki contract for that, and the agent reaches the library through nothing else.
 
 ---
 
@@ -74,7 +81,18 @@ cargo build --release
 ./target/release/athenaeum --help
 ```
 
-Teach it something, then ask for it back:
+Point it at a vault — a folder of markdown pages — and ask it something:
+
+```bash
+cd ~/notes/my-wiki          # wiki/*.md, raw/sources/, purpose.md …
+athenaeum init
+athenaeum index-vault       # pages become nodes, [[wikilinks]] become edges
+athenaeum search "oauth callback"
+athenaeum brief "fix the oauth callback bug"
+athenaeum lint              # orphans, broken links, dead ends
+```
+
+Or teach it something by hand and ask for it back:
 
 ```bash
 cd ~/code/my-project
@@ -182,12 +200,16 @@ reason.
 
 ### Building locally
 
-Rust 1.82+ and Node 20+. Linux additionally needs the webview headers:
+Rust 1.88+ and Node 20+. Linux additionally needs the webview headers and the
+protobuf compiler with its well-known types (LanceDB's build script needs both):
 
 ```bash
 sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-  librsvg2-dev patchelf
+  librsvg2-dev patchelf protobuf-compiler libprotobuf-dev
 ```
+
+The `athenaeum` CLI and `athenaeum-core` need none of that: `cargo build --release
+-p athenaeum-cli` builds without a window, a webview or a model.
 
 ```bash
 cargo test --workspace     # offline; no API key required
@@ -199,16 +221,26 @@ npm run build              # typecheck + bundle the frontend
 ## Where the knowledge lives
 
 ```text
+purpose.md  schema.md        the vault's governance pages
+wiki/                        the pages — the source of truth, plain markdown
+raw/sources/                 ingested source material
 .athenaeum/
-├── knowledge.db     nodes, edges, evidence, history, journal
-├── blobs/sha256/    content-addressed evidence material
-├── exports/         human-readable views, written on demand
-└── cache/           derived; safe to delete at any time
+├── knowledge.db             the derived index: nodes, edges, evidence, history, journal
+├── blobs/sha256/            content-addressed evidence material
+├── exports/                 human-readable views, written on demand
+└── cache/                   derived; safe to delete at any time
 ```
 
+The markdown is what you keep; the index is what makes it answerable quickly,
+and it can be dropped and rebuilt (`athenaeum index-vault`) without losing
+anything. Knowledge that was only ever proposed over the bridge — a model's
+suggestion, a hand-added node — lives in the index alone, so back up
+`knowledge.db` if you rely on it.
+
 Note what is absent: no `models/` directory. Knowledge is local; intelligence
-is not. It is your SQLite file — inspectable with any SQLite browser, and it
-outlives whichever model provider you happen to be using this month.
+is not. Your pages are files and your index is a SQLite file inspectable with any
+SQLite browser, and both outlive whichever model provider you happen to be using
+this month.
 
 ---
 
