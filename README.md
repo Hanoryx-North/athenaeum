@@ -23,6 +23,26 @@ no vector database, no local model.
 
 ---
 
+## Install
+
+Download the installer for your system from the
+[latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest):
+
+- **Windows:** `Athenaeum_<version>_x64-setup.exe`. A normal setup wizard; it installs for your
+  user (no administrator prompt) and installs WebView2 for you if your PC lacks it.
+- **macOS:** the `.dmg` (`aarch64` for Apple silicon, `x64` for Intel). Drag Athenaeum to
+  Applications.
+- **Linux:** the `.AppImage` (make it executable and run it) or the `.deb`.
+
+Windows and macOS ask for a one-time approval on first launch because the installers are not yet
+signed with a paid certificate: [what to click](docs/releasing.md#first-launch-on-macos-and-windows).
+
+Athenaeum then **updates itself**. A new release is built automatically whenever `main` changes;
+the app notices, offers **Update and restart**, and installs it in place. How that works, and the
+one-time key setup it needs, is in [docs/releasing.md](docs/releasing.md).
+
+---
+
 ## Status
 
 Athenaeum is the **visible layer**: a desktop application a person opens, and the
@@ -179,11 +199,14 @@ One codebase, five bundles, built by
 
 | Platform | Target | Bundle |
 | --- | --- | --- |
-| Windows | `x86_64-pc-windows-msvc` | `.msi`, `.exe` (NSIS) |
+| Windows | `x86_64-pc-windows-msvc` | `.exe` (NSIS setup wizard) |
 | macOS (Apple silicon) | `aarch64-apple-darwin` | `.dmg` |
 | macOS (Intel) | `x86_64-apple-darwin` | `.dmg` |
 | Linux | `x86_64-unknown-linux-gnu` | `.deb`, `.AppImage` |
 | Linux (ARM) | `aarch64-unknown-linux-gnu` | `.deb`, `.AppImage` |
+
+A local `npm run tauri build` still builds every format (`bundle.targets` is `all`); the release
+narrows it, bundles PDFium, and signs the update bundles. See [docs/releasing.md](docs/releasing.md).
 
 The differences between them are confined to `src-tauri/tauri.*.conf.json`.
 Two choices do the heavy lifting:
