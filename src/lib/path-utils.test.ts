@@ -6,6 +6,7 @@ import {
   getFileStem,
   getRelativePath,
   isAbsolutePath,
+  isHostAbsolutePath,
 } from "./path-utils"
 
 describe("normalizePath", () => {
@@ -167,5 +168,43 @@ describe("isAbsolutePath", () => {
   it("rejects drive-letter WITHOUT a separator (ambiguous)", () => {
     // "C:foo" is a Windows drive-relative path, not absolute.
     expect(isAbsolutePath("C:foo")).toBe(false)
+  })
+})
+
+// The host is passed explicitly so both branches run everywhere, rather than
+// only the one matching whichever machine happens to run the suite. These
+// mirror the cfg'd tests around `require_absolute_path` in fs.rs.
+describe("isHostAbsolutePath", () => {
+  it("accepts drive and UNC roots on Windows, but not POSIX roots", () => {
+    expect(isHostAbsolutePath("C:/project/page.md", "windows")).toBe(true)
+    expect(isHostAbsolutePath("C:\\project\\page.md", "windows")).toBe(true)
+    expect(isHostAbsolutePath("\\\\server\\share\\page.md", "windows")).toBe(true)
+    expect(isHostAbsolutePath("//server/share/page.md", "windows")).toBe(true)
+    // Rooted but drive-relative: resolves against the current drive.
+    expect(isHostAbsolutePath("/tmp/project/page.md", "windows")).toBe(false)
+    expect(isHostAbsolutePath("\\wiki\\page.md", "windows")).toBe(false)
+    expect(isHostAbsolutePath("C:wiki/page.md", "windows")).toBe(false)
+  })
+
+  it("accepts POSIX roots on Unix, but not Windows roots", () => {
+    expect(isHostAbsolutePath("/tmp/project/page.md", "unix")).toBe(true)
+    // A doubled slash is still an ordinary POSIX root.
+    expect(isHostAbsolutePath("//server/share/page.md", "unix")).toBe(true)
+    expect(isHostAbsolutePath("C:/project/page.md", "unix")).toBe(false)
+    expect(isHostAbsolutePath("C:\\project\\page.md", "unix")).toBe(false)
+    expect(isHostAbsolutePath("\\\\server\\share\\page.md", "unix")).toBe(false)
+  })
+
+  it("falls back to the permissive answer when the host is unknown", () => {
+    expect(isHostAbsolutePath("/tmp/project/page.md", "unknown")).toBe(true)
+    expect(isHostAbsolutePath("C:/project/page.md", "unknown")).toBe(true)
+  })
+
+  it("rejects relative paths on every host", () => {
+    for (const host of ["windows", "unix", "unknown"] as const) {
+      expect(isHostAbsolutePath("", host)).toBe(false)
+      expect(isHostAbsolutePath("wiki/page.md", host)).toBe(false)
+      expect(isHostAbsolutePath("./wiki/page.md", host)).toBe(false)
+    }
   })
 })
