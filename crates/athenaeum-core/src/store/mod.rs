@@ -66,11 +66,13 @@ impl KnowledgeStore {
         schema::apply_pragmas(&conn)?;
         schema::migrate(&mut conn)?;
 
-        Ok(Self {
+        let mut store = Self {
             conn,
             blobs: BlobStore::new(root.join("blobs")),
             root,
-        })
+        };
+        store.ensure_search_index_current()?;
+        Ok(store)
     }
 
     /// An ephemeral store held entirely in memory.
@@ -84,11 +86,13 @@ impl KnowledgeStore {
         schema::migrate(&mut conn)?;
 
         let root = std::env::temp_dir().join(format!("athenaeum-{}", uuid::Uuid::new_v4()));
-        Ok(Self {
+        let mut store = Self {
             conn,
             blobs: BlobStore::new(root.join("blobs")),
             root,
-        })
+        };
+        store.ensure_search_index_current()?;
+        Ok(store)
     }
 
     /// The workspace directory this store manages.

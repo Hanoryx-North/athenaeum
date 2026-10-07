@@ -4,7 +4,7 @@
 //! find seed nodes so that graph navigation has somewhere to start. The
 //! index is derived data and can be dropped and rebuilt at any time (§60).
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::nodes::{map_node, node_columns_for, NODE_COLUMNS};
@@ -23,7 +23,46 @@ pub struct SearchHit {
     pub score: f32,
 }
 
+/// What the full-text index holds for a node, as a version.
+///
+/// Bump it whenever [`index_text`] changes. The index is derived data, so a database
+/// written by an older build is simply re-indexed once on open instead of answering
+/// from terms the current build would no longer produce. Version 1 was the title,
+/// summary and content alone; version 2 adds the words inside camelCase identifiers.
+const SEARCH_INDEX_VERSION: u32 = 2;
+
+/// The `meta` key recording which [`SEARCH_INDEX_VERSION`] the stored index was built with.
+const SEARCH_INDEX_VERSION_KEY: &str = "search_index_version";
+
 impl KnowledgeStore {
+    /// Re-index when the stored full-text index was built by an older build.
+    ///
+    /// A fresh database has no recorded version and no nodes, so this is a no-op rebuild that
+    /// stamps it. An index recorded by a *newer* build is left alone: it only holds more terms
+    /// than this build would write, and rebuilding it down would just make two builds sharing
+    /// one project undo each other's work on every open.
+    pub(crate) fn ensure_search_index_current(&mut self) -> Result<()> {
+        let stored: Option<u32> = self
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                params![SEARCH_INDEX_VERSION_KEY],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .and_then(|value| value.parse().ok());
+        if stored.is_some_and(|version| version >= SEARCH_INDEX_VERSION) {
+            return Ok(());
+        }
+        self.rebuild_search_index()?;
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![SEARCH_INDEX_VERSION_KEY, SEARCH_INDEX_VERSION.to_string()],
+        )?;
+        Ok(())
+    }
+
     /// Find candidate nodes by text.
     ///
     /// Returns *candidates*, not an answer (§24). The wiki agent decides what
@@ -126,9 +165,83 @@ impl KnowledgeStore {
 pub(crate) fn index_node(conn: &Connection, node: &KnowledgeNode) -> Result<()> {
     conn.execute(
         "INSERT INTO nodes_fts (id, body) VALUES (?1, ?2)",
-        params![node.id, node.search_text()],
+        params![node.id, index_text(node)],
     )?;
     Ok(())
+}
+
+/// The text FTS5 indexes for a node: its search text, then the words inside its identifiers.
+///
+/// FTS5's `unicode61` tokenizer splits on punctuation, so `oauth_callback` and `oauth-callback`
+/// are already two terms. It does not split on case, so `OAuthCallback` is one term and a query
+/// written the way a person or a model phrases it — `oauth callback` — never reaches a node named
+/// by the identifier. In a knowledge base about code that is most of the nodes. The original token
+/// stays in the text, so searching for the identifier itself still matches.
+fn index_text(node: &KnowledgeNode) -> String {
+    let text = node.search_text();
+    let parts = identifier_parts(&text);
+    if parts.is_empty() {
+        text
+    } else {
+        format!("{text}\n{parts}")
+    }
+}
+
+/// The words inside every camelCase, PascalCase or digit-joined identifier in `text`, space separated.
+///
+/// Each identifier is cut two ways and both are kept. Cutting only where a lowercase letter or
+/// digit meets an uppercase one keeps `OAuth` whole, which is what a query says. Cutting as well
+/// where an acronym ends splits `HTTPServer` into `HTTP` and `Server`, which a plain cut would
+/// not, and also yields `Auth` from `OAuth`, which is harmless. Single characters are dropped,
+/// because `O` and `I` are noise rather than terms. Text with no identifiers returns an empty string.
+fn identifier_parts(text: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for token in text.split(|c: char| !c.is_alphanumeric()) {
+        // Shorter than two characters per part cannot contain a boundary worth indexing.
+        if token.chars().count() < 4 {
+            continue;
+        }
+        let whole = split_identifier(token, false);
+        let acronyms = split_identifier(token, true);
+        if whole.len() < 2 && acronyms.len() < 2 {
+            continue;
+        }
+        let first_of_token = out.len();
+        for part in whole.into_iter().chain(acronyms) {
+            if part.chars().count() >= 2 && part != token && !out[first_of_token..].contains(&part)
+            {
+                out.push(part);
+            }
+        }
+    }
+    out.join(" ")
+}
+
+/// Cut one alphanumeric token at its case boundaries.
+///
+/// A boundary falls before an uppercase letter that follows a lowercase letter or a digit. With
+/// `split_acronyms` it also falls before the last capital of a run that is followed by lowercase
+/// (`HTTPServer` → `HTTP`, `Server`).
+fn split_identifier(token: &str, split_acronyms: bool) -> Vec<&str> {
+    let chars: Vec<(usize, char)> = token.char_indices().collect();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for i in 1..chars.len() {
+        let (previous, current) = (chars[i - 1].1, chars[i].1);
+        let next = chars.get(i + 1).map(|&(_, c)| c);
+        let after_lower_or_digit =
+            (previous.is_lowercase() || previous.is_numeric()) && current.is_uppercase();
+        let acronym_ends = split_acronyms
+            && previous.is_uppercase()
+            && current.is_uppercase()
+            && next.is_some_and(char::is_lowercase);
+        if after_lower_or_digit || acronym_ends {
+            parts.push(&token[chars[start].0..chars[i].0]);
+            start = i;
+        }
+    }
+    parts.push(&token[chars[start].0..]);
+    parts
 }
 
 pub(crate) fn reindex_node(conn: &Connection, node: &KnowledgeNode) -> Result<()> {
@@ -170,9 +283,217 @@ fn fts_terms(raw: &str) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::NodeType;
 
     fn terms(raw: &str) -> Option<Vec<String>> {
         fts_terms(raw)
+    }
+
+    fn parts(text: &str) -> Vec<String> {
+        identifier_parts(text)
+            .split(' ')
+            .filter(|part| !part.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn camel_case_identifiers_give_up_their_words() {
+        // `OAuth` stays whole, because that is how a query spells it; the plain cut and the
+        // acronym cut are both kept, so `Auth` is a harmless extra.
+        assert_eq!(parts("OAuthCallback"), ["OAuth", "Callback", "Auth"]);
+        assert_eq!(parts("AuthService"), ["Auth", "Service"]);
+        assert_eq!(parts("parseURL"), ["parse", "URL"]);
+        assert_eq!(parts("HTTPServer"), ["HTTP", "Server"]);
+    }
+
+    #[test]
+    fn digits_join_the_word_before_them() {
+        assert_eq!(parts("utf8Decode"), ["utf8", "Decode"]);
+        assert_eq!(parts("Base64Encode"), ["Base64", "Encode"]);
+        assert_eq!(parts("HTTP2Server"), ["HTTP2", "Server"]);
+    }
+
+    #[test]
+    fn text_with_no_identifiers_adds_nothing() {
+        // Plain words, snake_case and kebab-case are already split by the tokenizer, and a
+        // sentence-initial capital is not an identifier.
+        assert_eq!(identifier_parts("Sessions expire after 24h"), "");
+        assert_eq!(identifier_parts("oauth_callback and oauth-callback"), "");
+        assert_eq!(identifier_parts("ALLCAPS API ID"), "");
+        assert_eq!(identifier_parts(""), "");
+    }
+
+    #[test]
+    fn single_characters_are_not_terms() {
+        assert!(!parts("OAuthCallback").iter().any(|part| part == "O"));
+        // The leading `i` is dropped; the word after it is still worth finding.
+        assert_eq!(parts("iPhone"), ["Phone"]);
+    }
+
+    #[test]
+    fn a_word_is_listed_once_per_identifier() {
+        assert_eq!(parts("FooFoo"), ["Foo"]);
+    }
+
+    #[test]
+    fn a_query_in_words_finds_a_node_named_by_its_identifier() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Symbol, "OAuthCallback")
+                    .with_summary("Handles the redirect."),
+            )
+            .unwrap();
+        let unrelated = store
+            .create_node(KnowledgeNode::new(NodeType::Concept, "Sessions").with_summary("Expire."))
+            .unwrap();
+
+        for query in [
+            "oauth callback",
+            "callback",
+            "OAuth",
+            "OAuthCallback",
+            "auth callback",
+        ] {
+            let ids: Vec<_> = store
+                .search(query, 10)
+                .unwrap()
+                .into_iter()
+                .map(|hit| hit.node.id)
+                .collect();
+            assert!(
+                ids.contains(&node.id),
+                "{query:?} should find OAuthCallback"
+            );
+            assert!(
+                !ids.contains(&unrelated.id),
+                "{query:?} should not find Sessions"
+            );
+        }
+    }
+
+    #[test]
+    fn an_edit_reindexes_the_words_inside_the_new_identifier() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let mut node = store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "Handler"))
+            .unwrap();
+        assert!(store.search("session store", 5).unwrap().is_empty());
+
+        node.title = "SessionStore".to_string();
+        store.update_node(node.clone(), None).unwrap();
+
+        let hits = store.search("session store", 5).unwrap();
+        assert_eq!(hits.first().map(|hit| &hit.node.id), Some(&node.id));
+    }
+
+    #[test]
+    fn a_database_indexed_by_an_older_build_is_reindexed_once_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = {
+            let mut store = KnowledgeStore::open(dir.path()).unwrap();
+            let node = store
+                .create_node(KnowledgeNode::new(NodeType::Symbol, "OAuthCallback"))
+                .unwrap();
+            // What version 1 wrote: the plain search text, and no recorded version.
+            store.conn.execute("DELETE FROM nodes_fts", []).unwrap();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO nodes_fts (id, body) VALUES (?1, ?2)",
+                    params![node.id, node.search_text()],
+                )
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "DELETE FROM meta WHERE key = ?1",
+                    params![SEARCH_INDEX_VERSION_KEY],
+                )
+                .unwrap();
+            assert!(store.search("oauth callback", 5).unwrap().is_empty());
+            node.id
+        };
+
+        let store = KnowledgeStore::open(dir.path()).unwrap();
+
+        let hits = store.search("oauth callback", 5).unwrap();
+        assert_eq!(hits.first().map(|hit| &hit.node.id), Some(&id));
+    }
+
+    #[test]
+    fn an_index_from_a_newer_build_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut store = KnowledgeStore::open(dir.path()).unwrap();
+            store
+                .create_node(KnowledgeNode::new(NodeType::Symbol, "OAuthCallback"))
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "UPDATE meta SET value = ?2 WHERE key = ?1",
+                    params![
+                        SEARCH_INDEX_VERSION_KEY,
+                        (SEARCH_INDEX_VERSION + 1).to_string()
+                    ],
+                )
+                .unwrap();
+            // A sentinel row a rebuild would erase.
+            store
+                .conn
+                .execute(
+                    "INSERT INTO nodes_fts (id, body) VALUES ('sentinel', 'zzzsentinel')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let store = KnowledgeStore::open(dir.path()).unwrap();
+
+        let still_there: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM nodes_fts WHERE id = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            still_there, 1,
+            "an index recorded by a newer build must not be rebuilt"
+        );
+    }
+
+    #[test]
+    fn reopening_a_current_index_does_not_rebuild_it() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let mut store = KnowledgeStore::open(dir.path()).unwrap();
+            store
+                .create_node(KnowledgeNode::new(NodeType::Symbol, "OAuthCallback"))
+                .unwrap();
+            store
+                .conn
+                .execute(
+                    "INSERT INTO nodes_fts (id, body) VALUES ('sentinel', 'zzzsentinel')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let store = KnowledgeStore::open(dir.path()).unwrap();
+
+        let still_there: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM nodes_fts WHERE id = 'sentinel'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1, "a current index must be opened as is");
     }
 
     #[test]
