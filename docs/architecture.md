@@ -95,6 +95,14 @@ one projection, so the app holds one description of what is known rather
 than one per panel. Layout, filtering and community detection stay in the
 view, where the visual design can change without touching the library.
 
+**The index stays current while an agent edits the vault.** The desktop app watches the vault; a
+headless agent session does not, and it changes pages with ordinary file tools. Before the bridge
+answers a read it compares a metadata-only fingerprint of the vault with the one recorded at the
+last index (`vault_fingerprint` in `meta`, written by every `scan_and_index`, so the CLI and the app
+keep it fresh too) and reconciles only when they differ. It maintains an index that exists and never
+builds the first one — that stays an explicit `athenaeum index-vault` — and a failure to refresh
+never fails the read.
+
 **Lint is part of that projection.** Orphans, broken links and dead ends
 are questions about edges, so `vault::lint` answers them from the nodes and
 edges rather than by walking `wiki/` a third time; the broken links it

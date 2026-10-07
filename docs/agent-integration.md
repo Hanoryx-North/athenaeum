@@ -225,6 +225,28 @@ anchored at its file and carrying the hash it read, and the pointer is read back
 `features` and an absent `page` mean "an older library, do not assume", while a present feature and
 an absent `page` mean "this node is not a page".
 
+**Staying current (`vault_sync`).** An agent changes the vault with file tools, and a headless
+session has nothing watching it the way the desktop app does. Left alone, a question asked just
+after an edit would be answered from the index as it was before the edit, with nothing to say so. So
+before the bridge answers a *read* — search, open, navigate, related, evidence, history, context —
+it compares a fingerprint of the vault's files (path, length and modification time; no file is
+read) with the one recorded when the vault was last indexed, and reconciles only when they differ.
+The same pass that picks up an edit picks up a page the agent created or deleted.
+
+* An unchanged vault costs one directory walk: measured at about +4 ms at 1,000 pages and +55 ms at
+  10,000, against a read that takes 21 ms and 113 ms. A reconcile after a change is a full re-read
+  of the vault, 0.3 s and 3 s at those sizes, paid once rather than on every call.
+* It **keeps an index that exists; it never builds the first one.** A first index of a large vault
+  outlasts what a caller waiting on an answer should be made to wait, so it stays explicit:
+  `athenaeum index-vault`, or opening the project in the app. Until then a read simply finds no
+  vault knowledge.
+* A mutation does not trigger it, and a failure to refresh never fails the read: the answer comes
+  from the last index, exactly what it would have been without the step, and the reason is written
+  to stderr.
+* The fingerprint is a heuristic. An edit that leaves both length and modification time unchanged
+  is invisible to it; nanosecond timestamps make that a non-event on the filesystems the app ships
+  on, and the next explicit index repairs a miss.
+
 **Renaming.** A page's node id is a hash of its path. Editing a page keeps its node; moving or
 renaming it is a different page to the indexer, which removes the departed node and creates a new
 one, and the utility history and any model-proposed edges go with the old id. That is deliberate

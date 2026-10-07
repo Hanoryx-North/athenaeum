@@ -32,7 +32,10 @@ pub const WIKI_PROTOCOL_VERSION: u32 = 1;
 /// * `page_pointers` — a node that is a page of the vault carries a `page` with its file path, in
 ///   `open` and in a brief. Absence of the feature means an older library; absence of `page` on a
 ///   node, with the feature present, means the node is not a page.
-const FEATURES: &[&str] = &["page_pointers"];
+/// * `vault_sync` — the bridge compares the vault with the index before it answers a read and
+///   reconciles when they differ, so a page an agent just edited is what the next question sees.
+///   It keeps an index that was built; it does not build the first one.
+const FEATURES: &[&str] = &["page_pointers", "vault_sync"];
 
 const DEFAULT_SEARCH_LIMIT: u32 = 20;
 const MAX_SEARCH_LIMIT: u32 = 100;
@@ -122,6 +125,25 @@ pub enum WikiRequest {
         #[serde(default)]
         session: Option<SessionId>,
     },
+}
+
+impl WikiRequest {
+    /// True for the requests that only look at knowledge: search, open, navigate, related,
+    /// evidence, history and context. These are the ones a stale index would answer wrongly, and
+    /// the ones a runtime can issue on every turn, which is why a transport refreshes the index
+    /// for them and not for a mutation.
+    pub fn reads_knowledge(&self) -> bool {
+        matches!(
+            self,
+            Self::Search { .. }
+                | Self::Open { .. }
+                | Self::Navigate { .. }
+                | Self::Related { .. }
+                | Self::Evidence { .. }
+                | Self::History { .. }
+                | Self::Context { .. }
+        )
+    }
 }
 
 /// Identity attached to knowledge proposed by a model.

@@ -7,7 +7,9 @@
 //! without a database anywhere near it.
 
 use std::path::Path;
+use std::time::UNIX_EPOCH;
 
+use sha2::{Digest, Sha256};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::error::{Error, Result};
@@ -56,6 +58,84 @@ pub(super) fn scan(root: &Path, options: VaultScanOptions) -> Result<VaultSnapsh
     snapshot.pages.sort_by(|a, b| a.path.cmp(&b.path));
     snapshot.sources.sort_by(|a, b| a.identity.cmp(&b.identity));
     Ok(snapshot)
+}
+
+/// A hash of how the vault's files look from the outside: which exist, how long each is and when
+/// it was last written.
+///
+/// It covers exactly the files [`scan`] would read — the root governance pages, `wiki/` minus
+/// scaffolding, and `raw/sources/` — and reads none of them, only their metadata. That is the whole
+/// point: it answers "has the vault changed since it was indexed?" in a directory walk rather than
+/// the full read-and-hash a reconcile costs, which is what lets a reader check on every call.
+///
+/// It is a heuristic and says so. An edit that leaves both the length and the modification time
+/// untouched is invisible to it, and on a filesystem with coarse timestamps two same-length edits
+/// inside one tick can look identical. Nanosecond timestamps make that a non-event on the
+/// filesystems the app ships on, and a missed edit is repaired by the next explicit index.
+pub(super) fn fingerprint(root: &Path) -> Result<String> {
+    let mut hasher = Sha256::new();
+    let mut feed = |relative: &str, metadata: &std::fs::Metadata| {
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        hasher.update(format!("{relative}\0{}\0{modified}\n", metadata.len()));
+    };
+
+    for name in ROOT_PAGES {
+        if let Ok(metadata) = std::fs::metadata(root.join(name)) {
+            if metadata.is_file() {
+                feed(name, &metadata);
+            }
+        }
+    }
+
+    let wiki = root.join(WIKI_DIR);
+    if wiki.is_dir() {
+        for entry in WalkDir::new(&wiki)
+            .follow_links(false)
+            .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|entry| !hidden(entry))
+        {
+            let entry = entry.map_err(walk_error)?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let Some(relative) = relative_path(root, entry.path()) else {
+                continue;
+            };
+            if !relative.to_ascii_lowercase().ends_with(".md") || is_scaffolding(&relative) {
+                continue;
+            }
+            feed(&relative, &entry.metadata().map_err(walk_error)?);
+        }
+    }
+
+    let sources = root.join("raw").join("sources");
+    if sources.is_dir() {
+        for entry in WalkDir::new(&sources)
+            .follow_links(false)
+            .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|entry| !hidden(entry))
+        {
+            let entry = entry.map_err(walk_error)?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let Some(identity) = relative_path(&sources, entry.path()) else {
+                continue;
+            };
+            feed(
+                &format!("{RAW_SOURCES_DIR}/{identity}"),
+                &entry.metadata().map_err(walk_error)?,
+            );
+        }
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnapshot) -> Result<()> {

@@ -113,6 +113,27 @@ impl KnowledgeStore {
         std::path::absolute(self.root.parent()?).ok()
     }
 
+    /// One value from the `meta` table, which holds what is neither knowledge nor derived text.
+    pub(crate) fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    /// Record one value in the `meta` table, replacing any earlier one.
+    pub(crate) fn meta_set(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
     /// Where large evidence material is kept.
     pub fn blobs(&self) -> &BlobStore {
         &self.blobs

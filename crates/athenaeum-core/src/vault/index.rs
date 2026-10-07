@@ -136,15 +136,64 @@ impl VaultIndexReport {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VaultIndexer;
 
+/// The `meta` key holding the fingerprint of the vault as it was last indexed.
+const FINGERPRINT_KEY: &str = "vault_fingerprint";
+
+/// What [`VaultIndexer::sync_if_changed`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VaultSync {
+    /// No vault has been indexed into this knowledge base, so there is nothing to keep current.
+    ///
+    /// Building a first index is deliberately not something a read does: on a large vault it
+    /// takes longer than a caller waiting on an answer should be made to wait, so it stays an
+    /// explicit act (`athenaeum index-vault`, or opening the project in the app).
+    NotIndexed,
+    /// The vault looks the same as when it was last indexed; nothing was read or written.
+    Unchanged,
+    /// The vault had changed and the index was reconciled against it.
+    Reconciled(VaultIndexReport),
+}
+
 impl VaultIndexer {
     /// Scan the vault at `root` and reconcile the store against it.
+    ///
+    /// Records the vault's fingerprint afterwards, which is what lets
+    /// [`sync_if_changed`](Self::sync_if_changed) tell later whether anything moved.
     pub fn scan_and_index(
         store: &mut KnowledgeStore,
         root: impl AsRef<Path>,
         options: VaultScanOptions,
     ) -> Result<VaultIndexReport> {
+        // Taken before the scan, never after: an edit that lands while the scan is reading leaves
+        // a fingerprint that no longer matches, so the next call reconciles again. Taken after,
+        // the same edit would be recorded as already indexed and never seen.
+        let fingerprint = super::scan::fingerprint(root.as_ref())?;
         let snapshot = VaultSnapshot::scan(root.as_ref(), options)?;
-        Self::index(store, &snapshot)
+        let report = Self::index(store, &snapshot)?;
+        store.meta_set(FINGERPRINT_KEY, &fingerprint)?;
+        Ok(report)
+    }
+
+    /// Bring an index that already exists up to date with the vault, if the vault has changed.
+    ///
+    /// This is the read-path counterpart of [`scan_and_index`](Self::scan_and_index). An agent
+    /// that edits a page with its file tools and then asks the library a question must not be
+    /// answered from the pre-edit index with no sign that it is behind, and the way to avoid that
+    /// without making every question pay for a full re-read is a metadata-only comparison first.
+    ///
+    /// It maintains an index; it never starts one. See [`VaultSync::NotIndexed`].
+    pub fn sync_if_changed(
+        store: &mut KnowledgeStore,
+        root: impl AsRef<Path>,
+        options: VaultScanOptions,
+    ) -> Result<VaultSync> {
+        let Some(recorded) = store.meta_get(FINGERPRINT_KEY)? else {
+            return Ok(VaultSync::NotIndexed);
+        };
+        if super::scan::fingerprint(root.as_ref())? == recorded {
+            return Ok(VaultSync::Unchanged);
+        }
+        Self::scan_and_index(store, root, options).map(VaultSync::Reconciled)
     }
 
     /// Reconcile the store against an already-scanned vault.

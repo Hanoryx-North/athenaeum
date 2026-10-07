@@ -340,3 +340,77 @@ fn bridge_omits_the_page_for_a_node_that_is_not_one() {
     // Absent, not null: a consumer that ignores unknown fields never has to tell the two apart.
     assert!(opened["response"]["detail"].get("page").is_none());
 }
+
+#[test]
+fn bridge_answers_from_the_vault_as_it_is_now_not_as_it_was_indexed() {
+    // An agent edits a page and creates another with its file tools, then asks. A headless
+    // session has nothing watching the vault, so the bridge has to notice for itself.
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("wiki/concepts/oauthcallback.md");
+    std::fs::create_dir_all(page.parent().unwrap()).unwrap();
+    std::fs::write(
+        &page,
+        "---\ntype: concept\ntitle: OAuthCallback\n---\n\n# OAuthCallback\n\nExchanges the code.\n",
+    )
+    .unwrap();
+    assert!(cli(dir.path(), &["init"]).status.success());
+    assert!(cli(dir.path(), &["index-vault"]).status.success());
+    let open =
+        json!({"protocolVersion": 1, "request": {"method": "open", "node": "OAuthCallback"}});
+    let before = bridge_ok(dir.path(), open.clone());
+    let hash_before = before["response"]["detail"]["page"]["contentHash"].clone();
+    assert!(!before["response"]["detail"]["node"]["content"]
+        .as_str()
+        .unwrap()
+        .contains("state parameter"));
+
+    std::fs::write(
+        &page,
+        "---\ntype: concept\ntitle: OAuthCallback\n---\n\n# OAuthCallback\n\nExchanges the code. Also validates the state parameter.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("wiki/gotchas.md"),
+        "---\ntype: gotcha\ntitle: Session fixation\n---\n\n# Session fixation\n\nRotate the session id on login.\n",
+    )
+    .unwrap();
+    let after = bridge_ok(dir.path(), open);
+
+    assert!(after["response"]["detail"]["node"]["content"]
+        .as_str()
+        .unwrap()
+        .contains("state parameter"));
+    assert_ne!(
+        after["response"]["detail"]["page"]["contentHash"],
+        hash_before
+    );
+    let search = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "search", "query": "session fixation"}}),
+    );
+    assert_eq!(search["response"]["hits"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn bridge_does_not_build_a_first_index_on_a_read() {
+    // A first index of a large vault would outlast what a waiting caller should be made to wait
+    // for, so it stays explicit. Here nothing has been indexed, and a read must not start.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("wiki")).unwrap();
+    std::fs::write(
+        dir.path().join("wiki/a.md"),
+        "---\ntype: concept\ntitle: Alpha\n---\n\n# Alpha\n\nBody.\n",
+    )
+    .unwrap();
+    assert!(cli(dir.path(), &["init"]).status.success());
+
+    let search = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "search", "query": "alpha"}}),
+    );
+
+    assert!(search["response"]["hits"].as_array().unwrap().is_empty());
+    let stats = cli(dir.path(), &["--json", "stats"]);
+    let stats: Value = serde_json::from_slice(&stats.stdout).unwrap();
+    assert_eq!(stats["nodes"], 0, "a read must not have indexed the vault");
+}

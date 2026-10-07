@@ -43,7 +43,7 @@
           "source_file", "symbol", "test", "git_commit", "documentation",
           "configuration", "user_statement", "architectural_decision", "external_source"
         ],
-        "features": ["page_pointers"]
+        "features": ["page_pointers", "vault_sync"]
       }
     }
   },

@@ -66,7 +66,7 @@ mod wikilink;
 pub use frontmatter::{Frontmatter, FrontmatterValue};
 pub use graph::{GraphEdge, GraphNode, GraphOrigin, KnowledgeGraph};
 pub use index::{
-    UnresolvedKind, UnresolvedLink, VaultIndexReport, VaultIndexer, PAGE_PROVENANCE,
+    UnresolvedKind, UnresolvedLink, VaultIndexReport, VaultIndexer, VaultSync, PAGE_PROVENANCE,
     SOURCE_PROVENANCE,
 };
 pub use lint::{LintFinding, LintFindingKind, LintOptions, LintSeverity, VaultLintReport};

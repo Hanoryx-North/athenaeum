@@ -3,6 +3,8 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
+use athenaeum_core::store::KnowledgeStore;
+use athenaeum_core::vault::{VaultIndexer, VaultScanOptions};
 use athenaeum_core::wiki::{
     WikiRequest, WikiRequestEnvelope, WikiResponse, WikiResponseEnvelope, WikiService,
     WIKI_PROTOCOL_VERSION,
@@ -81,7 +83,12 @@ fn execute(
         }),
         request => match workspace {
             Some(workspace) => match workspace.open() {
-                Ok(mut store) => WikiService::new(&mut store).handle(request),
+                Ok(mut store) => {
+                    if request.reads_knowledge() {
+                        refresh_vault_index(&mut store, workspace);
+                    }
+                    WikiService::new(&mut store).handle(request)
+                }
                 Err(error) => Err(error),
             },
             None => Err(Error::NoWorkspace {
@@ -108,6 +115,27 @@ fn execute(
             };
             (response, false)
         }
+    }
+}
+
+/// Bring the vault index up to date before a read is answered from it.
+///
+/// An agent changes the vault with ordinary file tools, and a headless session has nothing
+/// watching the vault the way the desktop app does, so without this a question asked just after an
+/// edit is answered from the index as it was before it, with nothing to say so. A metadata-only
+/// comparison decides whether anything moved; an unchanged vault costs one directory walk.
+///
+/// A failure here must never fail the read. The index it falls back on is exactly what the answer
+/// would have been without this step, so the failure is reported on stderr, where the transport's
+/// JSON on stdout is untouched, and the request proceeds.
+fn refresh_vault_index(store: &mut KnowledgeStore, workspace: &Workspace) {
+    let Some(project) = workspace.project_root() else {
+        return;
+    };
+    if let Err(error) = VaultIndexer::sync_if_changed(store, project, VaultScanOptions::default()) {
+        eprintln!(
+            "athenaeum: could not refresh the vault index, answering from the last one: {error}"
+        );
     }
 }
 
