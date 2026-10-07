@@ -87,6 +87,11 @@ pub fn run() {
         // Ark's api/coding/v3, etc.) still work. Requests leave the app
         // from Rust, never the webview.
         .plugin(tauri_plugin_http::init())
+        // In-app updates: the updater verifies a minisign signature against
+        // the public key in tauri.conf.json before installing anything, and
+        // the process plugin restarts the app into the new version.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Let the PDF extractor find the bundled pdfium dynamic
             // library via Tauri's platform-correct resource path.

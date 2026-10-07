@@ -34,6 +34,12 @@
   "updateBanner": {
     "message": "Доступна версия {{version}}",
     "openDownload": "Открыть страницу загрузки",
+    "installNow": "Обновить и перезапустить",
+    "downloading": "Загрузка… {{percent}}%",
+    "downloadingUnknown": "Загрузка…",
+    "installing": "Установка…",
+    "restarting": "Перезапуск…",
+    "fellBack": "Не удалось обновить автоматически — открыта страница загрузки.",
     "dismiss": "Скрыть"
   },
   "welcome": {
