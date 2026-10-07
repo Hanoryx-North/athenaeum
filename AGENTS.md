@@ -130,7 +130,8 @@ npm run build                       # typecheck + bundle
 
 Linux needs the webview headers first:
 `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`, plus
-`protobuf-compiler` for LanceDB.
+`protobuf-compiler` and `libprotobuf-dev` (the well-known `.proto` types) for LanceDB. The
+`athenaeum` CLI and `athenaeum-core` need none of it: `cargo build --release -p athenaeum-cli`.
 
 ## Conventions
 
