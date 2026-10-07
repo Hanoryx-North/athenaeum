@@ -100,6 +100,19 @@ impl KnowledgeStore {
         &self.root
     }
 
+    /// The project this knowledge base belongs to: the directory holding its `.athenaeum/`.
+    ///
+    /// `None` for a store rooted anywhere else — an in-memory store, a scratch directory in a
+    /// test — because the parent of such a root is not a project and anything resolved against
+    /// it would be a path to nowhere. A relative root is made absolute without touching the
+    /// filesystem, so a path built from the result is one another process can open.
+    pub fn project_root(&self) -> Option<PathBuf> {
+        if self.root.file_name()? != crate::workspace::WORKSPACE_DIR {
+            return None;
+        }
+        std::path::absolute(self.root.parent()?).ok()
+    }
+
     /// Where large evidence material is kept.
     pub fn blobs(&self) -> &BlobStore {
         &self.blobs

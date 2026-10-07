@@ -261,3 +261,82 @@ fn bridge_rejects_identifier_style_near_duplicates_with_existing_id() {
         .unwrap()
         .contains(existing));
 }
+
+#[test]
+fn bridge_tells_an_agent_which_file_a_page_node_is() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("wiki/decisions")).unwrap();
+    std::fs::write(
+        dir.path().join("wiki/decisions/validate-state.md"),
+        "---\ntype: decision\ntitle: Validate state first\n---\n\n# Validate state first\n\nCreating the session first opens a login CSRF.\n",
+    )
+    .unwrap();
+    assert!(cli(dir.path(), &["init"]).status.success());
+    assert!(cli(dir.path(), &["index-vault"]).status.success());
+
+    let capabilities = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "capabilities"}}),
+    );
+    assert!(
+        capabilities["response"]["capabilities"]["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|feature| feature == "page_pointers"),
+        "an agent decides whether to offer the affordance from this"
+    );
+
+    let opened = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "open", "node": "Validate state first"}}),
+    );
+    let page = &opened["response"]["detail"]["page"];
+    assert_eq!(page["path"], "wiki/decisions/validate-state.md");
+    let absolute = page["absolutePath"].as_str().unwrap();
+    assert!(Path::new(absolute).is_absolute(), "{absolute}");
+    assert!(
+        std::fs::read_to_string(absolute)
+            .unwrap()
+            .contains("login CSRF"),
+        "the pointer must open the page itself"
+    );
+
+    let context = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "context", "task": "fix the OAuth callback", "seeds": ["Validate state first"]}}),
+    );
+    let brief = &context["response"]["context"];
+    assert_eq!(brief["brief"]["nodes"][0]["page"]["absolutePath"], absolute);
+    assert!(brief["prompt"]
+        .as_str()
+        .unwrap()
+        .contains(&format!("Page: {absolute}")));
+}
+
+#[test]
+fn bridge_omits_the_page_for_a_node_that_is_not_one() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(cli(dir.path(), &["init"]).status.success());
+    assert!(cli(
+        dir.path(),
+        &[
+            "add",
+            "--type",
+            "gotcha",
+            "WAL on network shares",
+            "-s",
+            "Use a local path."
+        ],
+    )
+    .status
+    .success());
+
+    let opened = bridge_ok(
+        dir.path(),
+        json!({"protocolVersion": 1, "request": {"method": "open", "node": "WAL on network shares"}}),
+    );
+
+    // Absent, not null: a consumer that ignores unknown fields never has to tell the two apart.
+    assert!(opened["response"]["detail"].get("page").is_none());
+}

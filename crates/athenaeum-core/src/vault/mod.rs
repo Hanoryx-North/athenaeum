@@ -59,6 +59,7 @@ pub mod graph;
 mod index;
 pub mod lint;
 mod page;
+mod pointer;
 mod scan;
 mod wikilink;
 
@@ -70,6 +71,7 @@ pub use index::{
 };
 pub use lint::{LintFinding, LintFindingKind, LintOptions, LintSeverity, VaultLintReport};
 pub use page::VaultPage;
+pub use pointer::PageRef;
 pub use wikilink::WikiLink;
 
 use std::path::Path;

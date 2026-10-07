@@ -178,6 +178,61 @@ runtime can report utility with:
 }
 ```
 
+## Pages: which file a node is
+
+The vault is the source of truth, and an agent changes it with its ordinary file tools. So a node
+that *is* a page of the vault says which file, in `open` and in a brief:
+
+```json
+{
+  "method": "open",
+  "detail": {
+    "node": { "id": "vault_page_…", "title": "Validate state first", "…": "…" },
+    "page": {
+      "path": "wiki/decisions/validate-state.md",
+      "absolutePath": "/home/x/project/wiki/decisions/validate-state.md",
+      "contentHash": "b8163dbf…"
+    }
+  }
+}
+```
+
+A brief node carries the same `page`, and the brief's prompt states it as a plain line under the
+node (`Page: /home/x/project/wiki/decisions/validate-state.md`), so a task can open with the
+location of what it should change and no round trip per node.
+
+* `path` is the page's identity: vault-relative, forward slashes, the same on every platform.
+* `absolutePath` is what a file tool can open on this host. The library resolves it, because only
+  it knows where the project is, and the runtime must not join paths against a root it guessed. It
+  is omitted when the library cannot say where the project is. It is returned even when the vault
+  is outside what the runtime's sandbox can reach: the sandbox refusing the read is a clearer
+  failure than a pointer that silently vanished.
+* `contentHash` is the SHA-256 of the page as the index last read it. A page edited since then
+  hashes differently on disk, which is how a reader holding a node can tell it is behind the file.
+* The field is **absent** — not `null` — on every node that is not a page: a raw source, a node a
+  model proposed, a symbol from the repository scan. Consumers must not teach a model that every
+  node has a file.
+
+A pointer is an addition to the node and never a substitute for it. The page holds the prose; the
+relationships, evidence, history and utility are in the index and nowhere in the markdown, so
+reading the file in place of opening the node loses exactly what the knowledge base is for.
+
+Nothing is stored for this. The indexer already attaches one `Documentation` record to each page,
+anchored at its file and carrying the hash it read, and the pointer is read back off that record.
+
+**Feature negotiation.** `capabilities.features` lists optional behaviours beyond the operations.
+`page_pointers` means the above. A library that predates the list reports none, so an absent
+`features` and an absent `page` mean "an older library, do not assume", while a present feature and
+an absent `page` mean "this node is not a page".
+
+**Renaming.** A page's node id is a hash of its path. Editing a page keeps its node; moving or
+renaming it is a different page to the indexer, which removes the departed node and creates a new
+one, and the utility history and any model-proposed edges go with the old id. That is deliberate
+for now: carrying identity across a rename by content hash would make the index depend on the
+history of the vault, which breaks the property that the index is a function of it (delete
+`knowledge.db` and you lose nothing but time). Until that trade is revisited, a runtime tells its
+model to edit pages and not move them.
+
 ## Runtime-side adapter
 
 The runtime defines the interface in its own terms and translates it to

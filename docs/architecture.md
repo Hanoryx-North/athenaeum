@@ -103,6 +103,13 @@ about the same markdown. Semantic lint — contradictions, stale claims,
 concepts referenced everywhere and written up nowhere — still needs a model,
 and it reads the same index for the pages and summaries it sends.
 
+**Search finds identifiers by the words in them.** FTS5's tokenizer splits on punctuation but not
+on case, so `OAuthCallback` would be one term and the query `oauth callback` — how a person or a
+model phrases it — could never reach a node named by the identifier. The index text therefore also
+carries the words inside camelCase, PascalCase and digit-joined identifiers (`OAuth`, `Callback`;
+`HTTP`, `Server`), next to the original token. The index is derived, so a database written by an
+older build is rebuilt once on open, tracked by `search_index_version` in the `meta` table.
+
 ## The knowledge model
 
 A node is a **semantic object**, never a chunk of text (§9). `AuthService` is a

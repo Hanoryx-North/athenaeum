@@ -43,6 +43,9 @@ const EDGE_PREFIX: &str = "vault_index:";
 /// evidence table does not carry.
 const EVIDENCE_PREFIX: &str = "ev_vault_";
 
+/// The id prefix of the evidence record a page has for its own file.
+pub(super) const PAGE_EVIDENCE_PREFIX: &str = "ev_vault_page_";
+
 /// Which promise a page failed to keep.
 ///
 /// The two are worth telling apart: a missing page is usually a page the
@@ -322,7 +325,7 @@ fn source_node_id(identity: &str) -> NodeId {
 }
 
 fn page_evidence_id(path: &str) -> EvidenceId {
-    EvidenceId::from_existing(format!("{EVIDENCE_PREFIX}page_{}", hash(path)))
+    EvidenceId::from_existing(format!("{PAGE_EVIDENCE_PREFIX}{}", hash(path)))
 }
 
 fn source_evidence_id(identity: &str) -> EvidenceId {

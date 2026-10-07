@@ -18,6 +18,7 @@ use crate::model::{
     NodeVersion, Provenance, Scope, SourceAnchor,
 };
 use crate::store::{EdgeFilter, KnowledgeStore, SearchHit};
+pub use crate::vault::PageRef as WikiPage;
 
 /// Version of the cross-repository JSON contract.
 ///
@@ -25,6 +26,13 @@ use crate::store::{EdgeFilter, KnowledgeStore, SearchHit};
 /// fields remain compatible because consumers are expected to ignore fields
 /// they do not understand.
 pub const WIKI_PROTOCOL_VERSION: u32 = 1;
+
+/// Optional behaviours advertised in `capabilities.features`.
+///
+/// * `page_pointers` — a node that is a page of the vault carries a `page` with its file path, in
+///   `open` and in a brief. Absence of the feature means an older library; absence of `page` on a
+///   node, with the feature present, means the node is not a page.
+const FEATURES: &[&str] = &["page_pointers"];
 
 const DEFAULT_SEARCH_LIMIT: u32 = 20;
 const MAX_SEARCH_LIMIT: u32 = 100;
@@ -284,6 +292,10 @@ pub struct WikiCapabilities {
     pub authorities: Vec<String>,
     pub scopes: Vec<String>,
     pub evidence_kinds: Vec<String>,
+    /// Optional behaviours this build has, beyond the operations. Additive: a build that predates
+    /// the list reports none, which a consumer reads as "do not assume any of them".
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,6 +316,12 @@ pub struct WikiNodeDetail {
     pub evidence: Vec<Evidence>,
     pub history: Vec<NodeVersion>,
     pub utility: NodeUtility,
+    /// The file behind the node when it is a page of the vault. Absent for every other node.
+    ///
+    /// It is an addition to what a node carries, never a substitute for it: the page holds the
+    /// prose, and the relationships, evidence, history and utility above are not in the markdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<WikiPage>,
 }
 
 /// A neighboring node with its title resolved.
@@ -427,6 +445,7 @@ impl<'a> WikiService<'a> {
             authorities: spellings(Authority::ALL, Authority::as_str),
             scopes: spellings(Scope::ALL, Scope::as_str),
             evidence_kinds: spellings(EvidenceKind::ALL, EvidenceKind::as_str),
+            features: FEATURES.iter().map(|feature| feature.to_string()).collect(),
         }
     }
 
@@ -439,11 +458,14 @@ impl<'a> WikiService<'a> {
 
     pub fn open(&self, reference: &str) -> Result<WikiNodeDetail> {
         let node = self.resolve(reference)?;
+        let evidence = self.store.evidence_for(&node.id)?;
+        let page = WikiPage::of(&node, &evidence, self.store.project_root().as_deref());
         Ok(WikiNodeDetail {
             relationships: related_nodes(self.store, &node.id, &EdgeFilter::all())?,
-            evidence: self.store.evidence_for(&node.id)?,
             history: self.store.history(&node.id)?,
             utility: self.store.utility(&node.id)?,
+            evidence,
+            page,
             node,
         })
     }

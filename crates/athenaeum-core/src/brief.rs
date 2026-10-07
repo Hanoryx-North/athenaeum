@@ -15,6 +15,7 @@ use crate::graph::{navigate, NavigationOptions};
 use crate::id::NodeId;
 use crate::model::{Authority, EdgeType, NodeStatus, NodeType};
 use crate::store::KnowledgeStore;
+use crate::vault::PageRef;
 
 /// A node as it appears in a brief: summary only, never full content.
 ///
@@ -32,6 +33,13 @@ pub struct BriefNode {
     pub authority: Authority,
     pub status: NodeStatus,
     pub depth: u8,
+    /// The file behind this node when it is a page of the vault, so the brief that opens a task
+    /// can point at where to change what the project says without a round trip per node.
+    ///
+    /// Additive: consumers ignore it when they do not know it, and it is absent for every node
+    /// that is not a page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<PageRef>,
 }
 
 /// A relationship worth stating explicitly in the brief.
@@ -87,6 +95,7 @@ impl KnowledgeBrief {
         let truncated = reached.len() > options.max_nodes;
         reached.truncate(options.max_nodes);
 
+        let project_root = store.project_root();
         let mut nodes = Vec::with_capacity(reached.len());
         let mut relationships = Vec::new();
         let mut anchors: Vec<String> = Vec::new();
@@ -148,12 +157,14 @@ impl KnowledgeBrief {
                 }
             }
 
-            for evidence in store.evidence_for(&node.id)? {
-                let citation = evidence.citation();
+            let evidence = store.evidence_for(&node.id)?;
+            for record in &evidence {
+                let citation = record.citation();
                 if !citation.is_empty() && seen_anchors.insert(citation.clone()) {
                     anchors.push(citation);
                 }
             }
+            let page = PageRef::of(node, &evidence, project_root.as_deref());
 
             nodes.push(BriefNode {
                 id: node.id.clone(),
@@ -167,6 +178,7 @@ impl KnowledgeBrief {
                 authority: node.authority,
                 status: node.status,
                 depth: item.depth,
+                page,
             });
         }
 
@@ -246,6 +258,12 @@ impl KnowledgeBrief {
                 node.authority,
                 node.summary
             ));
+            // A fact about where the page is, stated plainly. What to do with it is the
+            // consumer's to say; this text sits inside the trust wrapper, where an
+            // instruction would not belong.
+            if let Some(page) = &node.page {
+                out.push_str(&format!("   Page: {}\n", page.best_path()));
+            }
         }
 
         if !self.relationships.is_empty() {
