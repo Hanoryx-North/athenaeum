@@ -577,6 +577,19 @@ impl<'a> WikiService<'a> {
             validate_nonempty(title, "title")?;
         }
         let mut node = self.resolve(&input.node)?;
+        // A page's text lives in the markdown, and the index follows the vault: an edit made here
+        // would be discarded by the next reconcile, silently, which is worse than being refused.
+        let evidence = self.store.evidence_for(&node.id)?;
+        if let Some(page) = WikiPage::of(&node, &evidence, None) {
+            return Err(Error::Invalid {
+                id: node.id,
+                reason: format!(
+                    "it is a page of the vault, so its text is the file {}: change that file \
+                     instead — the index follows the vault and would discard an edit made here",
+                    page.path
+                ),
+            });
+        }
         if let Some(title) = &input.title {
             self.ensure_distinct_title(title, Some(&node.id))?;
         }

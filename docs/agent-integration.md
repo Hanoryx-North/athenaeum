@@ -225,6 +225,13 @@ anchored at its file and carrying the hash it read, and the pointer is read back
 `features` and an absent `page` mean "an older library, do not assume", while a present feature and
 an absent `page` mean "this node is not a page".
 
+**A page is changed in its file, not through `update`.** The page's text is the markdown, and the
+index follows the vault, so an `update` made to the node would be discarded by the next reconcile.
+The library refuses it with `invalid_request` and a message that names the file, which is clearer
+than accepting an edit that silently vanishes. `link` and `attach_evidence` are unaffected: a
+relationship or evidence a model proposes is not derived from the markdown and survives every
+reconcile.
+
 **Staying current (`vault_sync`).** An agent changes the vault with file tools, and a headless
 session has nothing watching it the way the desktop app does. Left alone, a question asked just
 after an edit would be answered from the index as it was before the edit, with nothing to say so. So

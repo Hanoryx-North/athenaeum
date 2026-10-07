@@ -8,7 +8,7 @@ use std::path::Path;
 
 use athenaeum_core::model::{hash, NodeType, Scope};
 use athenaeum_core::vault::{VaultIndexer, VaultScanOptions};
-use athenaeum_core::wiki::{WikiCaller, WikiNodeCreate, WikiService};
+use athenaeum_core::wiki::{WikiCaller, WikiNodeCreate, WikiNodeUpdate, WikiService};
 use athenaeum_core::workspace::Workspace;
 use athenaeum_core::{id::SessionId, store::KnowledgeStore};
 
@@ -213,4 +213,54 @@ fn a_store_that_is_not_in_a_project_still_names_the_relative_path() {
 
     assert_eq!(page.path, "wiki/concepts/a.md");
     assert_eq!(page.absolute_path, None);
+}
+
+fn update_summary(node: &str) -> WikiNodeUpdate {
+    WikiNodeUpdate {
+        node: node.to_string(),
+        title: None,
+        summary: Some("A model's rewrite.".to_string()),
+        content: None,
+        reason: Some("test".to_string()),
+    }
+}
+
+#[test]
+fn a_page_cannot_be_edited_through_the_index() {
+    // The markdown is the source of truth and the index follows it, so an edit made to the node
+    // would be discarded by the next reconcile. Refusing says so; accepting would lose it silently.
+    let (_project, mut store) = indexed_project();
+
+    let refused = WikiService::new(&mut store).update(update_summary("OAuthCallback"), caller());
+
+    let message = refused.unwrap_err().to_string();
+    assert!(
+        message.contains("wiki/concepts/oauthcallback.md"),
+        "it should name the file to change: {message}"
+    );
+    assert!(message.contains("change that file instead"), "{message}");
+}
+
+#[test]
+fn a_node_that_is_not_a_page_can_still_be_updated() {
+    let (_project, mut store) = indexed_project();
+    let mut service = WikiService::new(&mut store);
+    service
+        .create(
+            WikiNodeCreate {
+                node_type: NodeType::Observation,
+                title: "Callbacks are slow on Mondays".to_string(),
+                summary: "A guess.".to_string(),
+                content: String::new(),
+                scope: Scope::Project,
+            },
+            caller(),
+        )
+        .unwrap();
+
+    let updated = service
+        .update(update_summary("Callbacks are slow on Mondays"), caller())
+        .unwrap();
+
+    assert_eq!(updated.summary, "A model's rewrite.");
 }
