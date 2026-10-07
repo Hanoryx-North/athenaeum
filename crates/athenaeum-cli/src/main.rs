@@ -12,7 +12,6 @@
 //! [`render`]; knowledge-base validation lives in [`check`].
 
 mod bridge;
-mod check;
 mod render;
 
 use std::path::PathBuf;
@@ -67,6 +66,23 @@ enum Command {
     Link(LinkArgs),
     /// Attach evidence to a node.
     Evidence(EvidenceArgs),
+    /// Confirm a claim against its evidence, optionally raising what it
+    /// counts as: `verify <id> --authority project_rule`.
+    ///
+    /// A promotion is refused unless the claim's evidence establishes it —
+    /// a project rule needs configuration, project documentation, a recorded
+    /// decision, or the user saying so.
+    Verify(VerifyArgs),
+    /// Replace one claim with another: `supersede <old> <new>`.
+    ///
+    /// The old claim is kept and stops being offered; §17 is explicit that
+    /// historical knowledge is not deleted.
+    Supersede { old: String, new: String },
+    /// Record that two claims disagree: `contradict <a> <b>`.
+    ///
+    /// Both stop being offered until somebody decides between them. Resolve
+    /// it with `supersede`, or by setting the survivor back to valid.
+    Contradict { a: String, b: String },
     /// Find candidate nodes by text.
     Search {
         query: Vec<String>,
@@ -75,6 +91,11 @@ enum Command {
     },
     /// Walk outward from a node and show what is reachable.
     Navigate(NavigateArgs),
+    /// Show how one node connects to another: `path <from> <to>`.
+    ///
+    /// The answer to "why is this relevant to that", which a list of
+    /// neighbours cannot give.
+    Path(PathArgs),
     /// Assemble a knowledge brief for a task.
     Brief(BriefArgs),
     /// Show every archived revision of a node.
@@ -105,8 +126,30 @@ enum Command {
     Lint(LintArgs),
     /// Search for moved source anchors and update knowledge staleness.
     Relocate(RelocateArgs),
-    /// Check the knowledge base for structural problems.
-    Check,
+    /// Review the knowledge base: contradictions, disputes, stale anchors,
+    /// unsupported rules, proposals awaiting acceptance, unreachable nodes.
+    ///
+    /// Exits non-zero when something found could hand an agent a wrong
+    /// answer. Findings that are only untidy are reported and forgiven,
+    /// unless `--strict` says otherwise.
+    Check(CheckArgs),
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    id: String,
+    /// What the claim should count as once confirmed. Omit to confirm it
+    /// without changing that.
+    #[arg(long)]
+    authority: Option<String>,
+}
+
+#[derive(Args)]
+struct CheckArgs {
+    /// Treat every finding as a failure, not only the ones that could hand
+    /// an agent a wrong answer.
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Args)]
@@ -194,6 +237,17 @@ struct NavigateArgs {
     #[arg(long, short, default_value_t = 2)]
     depth: u8,
     #[arg(long, default_value_t = 25)]
+    max_nodes: usize,
+}
+
+#[derive(Args)]
+struct PathArgs {
+    from: String,
+    to: String,
+    /// How far to look before giving up.
+    #[arg(long, short, default_value_t = 6)]
+    depth: u8,
+    #[arg(long, default_value_t = 2000)]
     max_nodes: usize,
 }
 
@@ -469,6 +523,51 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
+        Command::Verify(args) => {
+            let node = resolve(&store, &args.id)?;
+            let authority = args
+                .authority
+                .as_deref()
+                .map(|value| parse_value::<Authority>(value, "authority"))
+                .transpose()?;
+            let verified = store.verify(&node.id, authority)?;
+            emit(cli.json, &verified, || {
+                println!(
+                    "{:?} verified; it counts as {}",
+                    verified.title, verified.authority
+                );
+                Ok(())
+            })?;
+        }
+
+        Command::Supersede { old, new } => {
+            let old = resolve(&store, old)?;
+            let new = resolve(&store, new)?;
+            store.supersede(&old.id, &new.id)?;
+            let old = store.get_node(&old.id)?;
+            emit(cli.json, &old, || {
+                println!(
+                    "{:?} now supersedes {:?}, which is {} and kept",
+                    new.title, old.title, old.status
+                );
+                Ok(())
+            })?;
+        }
+
+        Command::Contradict { a, b } => {
+            let a = resolve(&store, a)?;
+            let b = resolve(&store, b)?;
+            let edge = store.contradict(&a.id, &b.id)?;
+            emit(cli.json, &edge, || {
+                println!(
+                    "{:?} and {:?} are recorded as contradicting; neither is offered \
+                     until one is resolved",
+                    a.title, b.title
+                );
+                Ok(())
+            })?;
+        }
+
         Command::Link(args) => {
             let from = resolve(&store, &args.from)?;
             let to = resolve(&store, &args.to)?;
@@ -547,6 +646,25 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
+        Command::Path(args) => {
+            let from = resolve(&store, &args.from)?;
+            let to = resolve(&store, &args.to)?;
+            let path = graph::shortest_path(
+                &store,
+                &from.id,
+                &to.id,
+                &NavigationOptions::default()
+                    .depth(args.depth)
+                    .max_nodes(args.max_nodes),
+            )?;
+            emit(cli.json, &path, || {
+                render::path(&store, &from, &to, path.as_deref())
+            })?;
+            if path.is_none() {
+                return Ok(Outcome::ProblemsFound);
+            }
+        }
+
         Command::Brief(args) => {
             let task = args.task.join(" ");
             let seeds = if args.seed.is_empty() {
@@ -617,8 +735,16 @@ fn run(cli: &Cli) -> Result<Outcome> {
             )?;
             emit(cli.json, &report, || {
                 println!(
-                    "indexed {} files, {} symbols, {} imports and {} commits",
-                    report.files, report.symbols, report.resolved_imports, report.commits
+                    "indexed {} files, {} symbols ({} exported), {} imports and {} commits",
+                    report.files,
+                    report.symbols,
+                    report.exported_symbols,
+                    report.resolved_imports,
+                    report.commits
+                );
+                println!(
+                    "code graph: {} call(s), {} implementation(s), {} test reference(s)",
+                    report.resolved_calls, report.implementations, report.test_links
                 );
                 println!(
                     "{} nodes created, {} updated, {} stale; {} edges created, {} removed",
@@ -729,13 +855,17 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
-        Command::Check => {
-            let problems = check::run(&store)?;
-            emit(cli.json, &problems, || {
-                render::problems(&problems);
+        Command::Check(args) => {
+            let report = athenaeum_core::review::sweep(&store)?;
+            let blocking = report.has_blocking();
+            emit(cli.json, &report, || {
+                render::review(&report);
                 Ok(())
             })?;
-            if !problems.is_empty() {
+            // Being untidy is not a build failure; being wrong is. Only the
+            // findings that mean an agent may be handed something incorrect
+            // set the exit code, unless the caller asks for all of them.
+            if blocking || (args.strict && !report.findings.is_empty()) {
                 return Ok(Outcome::ProblemsFound);
             }
         }

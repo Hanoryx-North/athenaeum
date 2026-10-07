@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::authority;
 use crate::error::Result;
 use crate::graph::{navigate, NavigationOptions};
 use crate::id::NodeId;
@@ -171,6 +172,22 @@ impl KnowledgeBrief {
 
         anchors.truncate(MAX_ANCHORS);
 
+        // §13: generated text is never automatically authoritative. Each node
+        // already carries its authority, but a reader scanning a numbered
+        // list can miss that one line of it was a model's guess and another
+        // was the user's instruction. Say it once, plainly, with a count.
+        let unverified = nodes
+            .iter()
+            .filter(|node| !authority::is_trustworthy_parts(node.status, node.authority))
+            .count();
+        if unverified > 0 {
+            warnings.push(format!(
+                "{unverified} of these {} claim(s) are unverified: nothing has checked them \
+                 against evidence, and their authority line says which",
+                nodes.len()
+            ));
+        }
+
         let ids: Vec<NodeId> = nodes.iter().map(|n| n.id.clone()).collect();
         store.record_retrieval(&ids)?;
 
@@ -270,6 +287,81 @@ fn first_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_brief_says_how_much_of_itself_nobody_has_checked() {
+        use crate::model::KnowledgeNode;
+        use crate::store::KnowledgeStore;
+
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let checked = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Rule, "Use SQLite")
+                    .with_summary("Decided.")
+                    .with_authority(Authority::ProjectRule),
+            )
+            .unwrap();
+        let guessed = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Observation, "Probably caches")
+                    .with_summary("Looked like it."),
+            )
+            .unwrap();
+        store
+            .connect(crate::model::KnowledgeEdge::deterministic(
+                checked.id.clone(),
+                EdgeType::RelatedTo,
+                guessed.id,
+                "test fixture",
+            ))
+            .unwrap();
+
+        let brief = KnowledgeBrief::assemble(
+            &mut store,
+            "what database",
+            &[checked.id],
+            &NavigationOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(brief.nodes.len(), 2);
+        let warning = brief
+            .warnings
+            .iter()
+            .find(|warning| warning.contains("unverified"))
+            .unwrap_or_else(|| panic!("no unverified warning in {:#?}", brief.warnings));
+        // One of the two: the decided rule is not counted, the guess is.
+        assert!(warning.starts_with("1 of these 2 claim(s)"), "{warning}");
+        assert!(brief.to_prompt().contains("unverified"));
+    }
+
+    #[test]
+    fn a_brief_of_established_knowledge_carries_no_such_warning() {
+        use crate::model::KnowledgeNode;
+        use crate::store::KnowledgeStore;
+
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Rule, "Use SQLite")
+                    .with_summary("Decided.")
+                    .with_authority(Authority::ProjectRule),
+            )
+            .unwrap();
+
+        let brief = KnowledgeBrief::assemble(
+            &mut store,
+            "what database",
+            &[node.id],
+            &NavigationOptions::default(),
+        )
+        .unwrap();
+        assert!(
+            !brief.warnings.iter().any(|w| w.contains("unverified")),
+            "{:#?}",
+            brief.warnings
+        );
+    }
 
     #[test]
     fn an_empty_brief_says_so_rather_than_inventing() {

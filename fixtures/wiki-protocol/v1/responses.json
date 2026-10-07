@@ -28,7 +28,8 @@
           "related_to", "requires", "verifies", "verified_by", "derived_from",
           "contradicts", "supersedes", "superseded_by", "caused_by", "tests",
           "tested_by", "references", "constrained_by", "constrains",
-          "has_gotcha", "gotcha_of", "evidenced_by", "modified_by"
+          "has_gotcha", "gotcha_of", "evidenced_by", "modified_by", "calls",
+          "called_by"
         ],
         "authorities": [
           "user_instruction", "project_rule", "project_decision",

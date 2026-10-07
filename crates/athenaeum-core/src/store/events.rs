@@ -1,5 +1,7 @@
 //! Writing to and reading from the append-only journal.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 
@@ -141,6 +143,49 @@ impl KnowledgeStore {
         Ok(events)
     }
 
+    /// Utility for every node the journal has ever recorded a use of, in one
+    /// query.
+    ///
+    /// The whole-base counterpart of [`KnowledgeStore::utility`], for a sweep
+    /// that would otherwise ask about every node in turn. Nodes with no usage
+    /// at all are absent rather than present-and-zero: a node nobody has read
+    /// yet has not failed to be useful.
+    pub fn utilities(&self) -> Result<HashMap<NodeId, NodeUtility>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT subject, kind, COUNT(*) FROM journal
+             WHERE subject IS NOT NULL GROUP BY subject, kind",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? as u32,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut utilities: HashMap<NodeId, NodeUtility> = HashMap::new();
+        for (subject, kind, count) in rows {
+            let Ok(kind) = kind.parse::<EventKind>() else {
+                continue;
+            };
+            if !matches!(
+                kind,
+                EventKind::NodeRetrieved
+                    | EventKind::NodeUsed
+                    | EventKind::NodeCited
+                    | EventKind::NodeVerified
+                    | EventKind::NodeRejected
+            ) {
+                continue;
+            }
+            let entry = utilities.entry(NodeId::from_existing(subject)).or_default();
+            apply(entry, kind, count);
+        }
+        Ok(utilities)
+    }
+
     /// How useful a node has actually been, counted from the journal.
     ///
     /// Derived on demand rather than cached on the node, so that reading
@@ -157,16 +202,24 @@ impl KnowledgeStore {
 
         let mut utility = NodeUtility::default();
         for (kind, count) in counts {
-            match kind.parse::<EventKind>() {
-                Ok(EventKind::NodeRetrieved) => utility.retrievals = count,
-                Ok(EventKind::NodeUsed) => utility.uses = count,
-                Ok(EventKind::NodeCited) => utility.citations = count,
-                Ok(EventKind::NodeVerified) => utility.verifications = count,
-                Ok(EventKind::NodeRejected) => utility.rejections = count,
-                _ => {}
+            if let Ok(kind) = kind.parse::<EventKind>() {
+                apply(&mut utility, kind, count);
             }
         }
         Ok(utility)
+    }
+}
+
+/// Add one counted event kind to a tally. Shared so the per-node and
+/// whole-base readings cannot come to different answers.
+fn apply(utility: &mut NodeUtility, kind: EventKind, count: u32) {
+    match kind {
+        EventKind::NodeRetrieved => utility.retrievals += count,
+        EventKind::NodeUsed => utility.uses += count,
+        EventKind::NodeCited => utility.citations += count,
+        EventKind::NodeVerified => utility.verifications += count,
+        EventKind::NodeRejected => utility.rejections += count,
+        _ => {}
     }
 }
 

@@ -8,14 +8,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use athenaeum_core::graph::Reached;
+use athenaeum_core::graph::{Reached, Step};
 use athenaeum_core::journal::Event;
 use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
 use athenaeum_core::vault::{LintSeverity, VaultLintReport};
 use serde::Serialize;
-
-use crate::check::Problem;
 
 /// Emit `value` as JSON, or run `text` to render it for a human.
 pub fn emit<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -265,13 +263,77 @@ pub fn vault_lint(report: &VaultLintReport) {
     }
 }
 
-pub fn problems(problems: &[Problem]) {
-    if problems.is_empty() {
-        println!("no problems found");
+/// The chain of relationships that connects two nodes, as a reader would
+/// explain it: each line names the relationship and where it led.
+pub fn path(
+    store: &KnowledgeStore,
+    from: &KnowledgeNode,
+    to: &KnowledgeNode,
+    steps: Option<&[Step]>,
+) -> Result<()> {
+    let Some(steps) = steps else {
+        println!(
+            "no path from {:?} to {:?} within the search depth",
+            from.title, to.title
+        );
+        return Ok(());
+    };
+    if steps.is_empty() {
+        println!("{:?} is {:?}", from.title, to.title);
+        return Ok(());
+    }
+
+    println!("{} hop(s):", steps.len());
+    println!("{}", from.title);
+    // A step records the edge and the node it was traversed *from*, so the
+    // node each one arrived at is named by the next step's origin — and for
+    // the last one, by the destination itself.
+    for (index, step) in steps.iter().enumerate() {
+        let arrived = match steps.get(index + 1) {
+            Some(next) => store.get_node(&next.from)?.title,
+            None => to.title.clone(),
+        };
+        println!("  --{}-> {}", step.edge_type, arrived);
+    }
+    Ok(())
+}
+
+pub fn review(report: &ReviewReport) {
+    if report.findings.is_empty() {
+        println!("{} node(s) reviewed, nothing to report", report.nodes);
         return;
     }
-    for problem in problems {
-        println!("{problem}");
+    println!(
+        "{} node(s) reviewed, {} finding(s)",
+        report.nodes,
+        report.findings.len()
+    );
+    let counts = report.counts();
+    println!(
+        "  {}",
+        counts
+            .iter()
+            .map(|(kind, count)| format!("{kind} {count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let mut current = None;
+    for finding in &report.findings {
+        if current != Some(finding.kind) {
+            println!();
+            println!(
+                "{} {}",
+                if finding.kind.is_blocking() { "!" } else { "-" },
+                finding.kind
+            );
+            current = Some(finding.kind);
+        }
+        if finding.title.is_empty() {
+            println!("    {} — {}", finding.node, finding.problem);
+        } else {
+            println!("    {} — {}", finding.title, finding.problem);
+        }
     }
 }
 

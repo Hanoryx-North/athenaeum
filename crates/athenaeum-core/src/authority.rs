@@ -54,12 +54,38 @@ pub fn rank(candidates: &[KnowledgeNode]) -> Vec<&KnowledgeNode> {
     ordered
 }
 
-/// True when two claims are in genuine conflict rather than simply differing.
+/// What two claims must agree on to be talking about the same thing.
 ///
 /// Deliberately narrow: claims at different scopes are usually both correct
 /// in their own domain ("React state is immutable" and "this file mutates a
 /// cache deliberately" do not contradict each other), so only same-scope
 /// disagreement is treated as a conflict worth surfacing.
+///
+/// It is ordered, and the vocabularies it is built from are not, on purpose:
+/// sorting `Authority` by declaration order would quietly disagree with
+/// [`Authority::rank`], so the enums stay unordered and this carries their
+/// written spellings instead.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Subject {
+    pub scope: &'static str,
+    pub node_type: &'static str,
+    /// The title, trimmed and lowercased.
+    pub title: String,
+}
+
+/// The subject a claim is about.
+///
+/// Grouping by this is how a review sweep finds a whole cluster of rival
+/// claims in one pass instead of comparing every node with every other.
+pub fn subject_key(node: &KnowledgeNode) -> Subject {
+    Subject {
+        scope: node.scope.as_str(),
+        node_type: node.node_type.as_str(),
+        title: node.title.trim().to_lowercase(),
+    }
+}
+
+/// True when two claims are in genuine conflict rather than simply differing.
 pub fn conflicts(a: &KnowledgeNode, b: &KnowledgeNode) -> bool {
     if a.id == b.id {
         return false;
@@ -67,7 +93,7 @@ pub fn conflicts(a: &KnowledgeNode, b: &KnowledgeNode) -> bool {
     if a.status == NodeStatus::Contradicted || b.status == NodeStatus::Contradicted {
         return true;
     }
-    a.scope == b.scope && a.node_type == b.node_type && a.title.eq_ignore_ascii_case(&b.title)
+    subject_key(a) == subject_key(b)
 }
 
 /// Whether a claim is solid enough to state without hedging.
@@ -75,7 +101,14 @@ pub fn conflicts(a: &KnowledgeNode, b: &KnowledgeNode) -> bool {
 /// Anything a model merely proposed is not, no matter how confident the
 /// wording (§13).
 pub fn is_trustworthy(node: &KnowledgeNode) -> bool {
-    node.status == NodeStatus::Valid && node.authority.rank() <= Authority::VerifiedKnowledge.rank()
+    is_trustworthy_parts(node.status, node.authority)
+}
+
+/// [`is_trustworthy`] for callers holding the two fields rather than the
+/// node — a brief carries a summary of a node, not the node itself, and two
+/// copies of this rule would eventually disagree.
+pub fn is_trustworthy_parts(status: NodeStatus, authority: Authority) -> bool {
+    status == NodeStatus::Valid && authority.rank() <= Authority::VerifiedKnowledge.rank()
 }
 
 #[cfg(test)]

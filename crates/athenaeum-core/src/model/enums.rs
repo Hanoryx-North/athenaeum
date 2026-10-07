@@ -115,6 +115,31 @@ str_enum! {
     }
 }
 
+impl NodeType {
+    /// True when the node describes something that *exists* and is identified
+    /// by where it is — a file, a declaration, a commit — rather than
+    /// something somebody *asserted* about the project.
+    ///
+    /// The distinction matters wherever two nodes describing one subject would
+    /// be a conflict. Two rules titled "Database" are rival claims and one of
+    /// them governs; the `Error` enum and the `error` module are simply two
+    /// different things whose names happen to collide. Structure cannot
+    /// contradict structure, because it was read rather than judged.
+    pub fn is_structural(&self) -> bool {
+        matches!(
+            self,
+            NodeType::Project
+                | NodeType::Repository
+                | NodeType::Module
+                | NodeType::File
+                | NodeType::Symbol
+                | NodeType::Test
+                | NodeType::Source
+                | NodeType::Dependency
+        )
+    }
+}
+
 str_enum! {
     /// How two nodes relate (buildplan §8).
     pub enum EdgeType {
@@ -143,6 +168,9 @@ str_enum! {
         GotchaOf => "gotcha_of",
         EvidencedBy => "evidenced_by",
         ModifiedBy => "modified_by",
+        /// A declaration invokes another declaration (§30).
+        Calls => "calls",
+        CalledBy => "called_by",
     }
 }
 
@@ -173,6 +201,8 @@ impl EdgeType {
             Constrains => ConstrainedBy,
             HasGotcha => GotchaOf,
             GotchaOf => HasGotcha,
+            Calls => CalledBy,
+            CalledBy => Calls,
             // Symmetric, or with no meaningful named inverse.
             RelatedTo => RelatedTo,
             Contradicts => Contradicts,
@@ -206,7 +236,45 @@ str_enum! {
     }
 }
 
+/// What a claim must be able to show before it may be raised to a given
+/// authority (§13, §47).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EvidenceRequirement {
+    /// Nothing. The claim is offered for what it is.
+    None,
+    /// Something was actually checked, so anything except a source we did not
+    /// check ourselves.
+    Verified,
+    /// The project decided it. §47's list: configuration, project
+    /// documentation such as `AGENTS.md`, a recorded architectural decision,
+    /// or the user saying so.
+    Authoritative,
+    /// Not grantable by verification at all.
+    Never,
+}
+
 impl Authority {
+    /// What evidence a claim must carry before it may be *raised* to this
+    /// level.
+    ///
+    /// §47's worked example is a model proposing "never modify generated
+    /// files" as a RULE. The system's answer is to ask why, and to promote it
+    /// only on authoritative evidence. Without this, a model could assert a
+    /// rule and then verify its own assertion into one.
+    pub fn evidence_required(&self) -> EvidenceRequirement {
+        use Authority::*;
+        match self {
+            // Only the user states a user instruction. That is a fact about
+            // who said it, not a conclusion anything can check its way into.
+            UserInstruction => EvidenceRequirement::Never,
+            ProjectRule | ProjectDecision => EvidenceRequirement::Authoritative,
+            VerifiedEvidence | VerifiedKnowledge => EvidenceRequirement::Verified,
+            UserPreference | ImportedKnowledge | ExternalKnowledge | UnverifiedObservation => {
+                EvidenceRequirement::None
+            }
+        }
+    }
+
     /// Lower rank wins. `0` is the most authoritative.
     pub fn rank(&self) -> u8 {
         use Authority::*;
@@ -339,6 +407,23 @@ str_enum! {
     }
 }
 
+impl EvidenceKind {
+    /// Whether resting on this kind of evidence satisfies `requirement`.
+    pub fn establishes(&self, requirement: EvidenceRequirement) -> bool {
+        use EvidenceKind::*;
+        match requirement {
+            EvidenceRequirement::None => true,
+            // Someone else's blog post is not something we checked.
+            EvidenceRequirement::Verified => !matches!(self, ExternalSource),
+            EvidenceRequirement::Authoritative => matches!(
+                self,
+                UserStatement | Configuration | Documentation | ArchitecturalDecision
+            ),
+            EvidenceRequirement::Never => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +439,17 @@ mod tests {
         for a in Authority::ALL {
             assert_eq!(a.as_str().parse::<Authority>(), Ok(*a));
         }
+    }
+
+    #[test]
+    fn every_node_type_is_either_structure_or_a_claim() {
+        // Adding a type without deciding which it is would silently put it
+        // on the claim side and start reporting disputes about it.
+        let structural = NodeType::ALL.iter().filter(|t| t.is_structural()).count();
+        assert_eq!(structural, 8, "a node type changed side");
+        assert!(NodeType::Symbol.is_structural());
+        assert!(!NodeType::Rule.is_structural());
+        assert!(!NodeType::Concept.is_structural());
     }
 
     #[test]
@@ -383,6 +479,33 @@ mod tests {
         assert!(Authority::UserInstruction.outranks(&Authority::ProjectRule));
         assert!(Authority::ProjectRule.outranks(&Authority::UnverifiedObservation));
         assert!(!Authority::ExternalKnowledge.outranks(&Authority::UserInstruction));
+    }
+
+    #[test]
+    fn a_rule_cannot_be_promoted_by_a_model_reading_its_own_output() {
+        // §47: only authoritative evidence promotes a rule.
+        let bar = Authority::ProjectRule.evidence_required();
+        assert_eq!(bar, EvidenceRequirement::Authoritative);
+        assert!(EvidenceKind::Documentation.establishes(bar));
+        assert!(EvidenceKind::Configuration.establishes(bar));
+        assert!(EvidenceKind::UserStatement.establishes(bar));
+        assert!(!EvidenceKind::ExternalSource.establishes(bar));
+        // A file containing generated code shows what *is*, not what should
+        // be, so it does not establish a rule about what to do with it.
+        assert!(!EvidenceKind::SourceFile.establishes(bar));
+
+        // A fact about behaviour is a different question, and the code is
+        // exactly the right evidence for it.
+        let checked = Authority::VerifiedEvidence.evidence_required();
+        assert!(EvidenceKind::SourceFile.establishes(checked));
+        assert!(EvidenceKind::Test.establishes(checked));
+        assert!(!EvidenceKind::ExternalSource.establishes(checked));
+
+        // Nothing verifies its way into being something the user said.
+        let never = Authority::UserInstruction.evidence_required();
+        assert!(EvidenceKind::ALL
+            .iter()
+            .all(|kind| !kind.establishes(never)));
     }
 
     #[test]

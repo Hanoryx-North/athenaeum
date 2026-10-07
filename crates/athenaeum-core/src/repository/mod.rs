@@ -97,7 +97,62 @@ pub struct RepositorySymbol {
     pub qualified_name: String,
     pub kind: SymbolKind,
     pub line_start: u32,
+    /// The last line of the declaration's body, not of its signature. This is
+    /// the region a symbol's evidence anchor covers, so it is also what an
+    /// anchor fingerprint has to match after a refactor (§16).
     pub line_end: u32,
+    /// Whether the declaration is visible outside the file that declares it
+    /// (§29 exports). Deliberately coarse: `pub(crate)` counts, because the
+    /// question being answered is "can anything else name this".
+    #[serde(default)]
+    pub exported: bool,
+    /// Names invoked inside the body, exactly as written at the call site
+    /// (§30). Unresolved at this stage — the indexer decides which of them
+    /// name something this repository actually declares.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<RepositoryCall>,
+    /// Whether the declaration is test code although its file is not a test
+    /// file — a Rust `#[cfg(test)] mod tests` and everything inside it.
+    ///
+    /// Languages that keep tests in their own files are covered by
+    /// [`RepositoryFile::is_test`]; Rust conventionally does not, so without
+    /// this a Rust project's tests reference nothing (§19, §29).
+    #[serde(default)]
+    pub test_scoped: bool,
+}
+
+/// One call site, and how it was written.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryCall {
+    pub name: String,
+    /// True when the name was reached through something else —
+    /// `value.name(…)` or `Type::name(…)`.
+    ///
+    /// It matters because the two forms can be trusted differently. A bare
+    /// name had to be in lexical scope, so if the repository declares exactly
+    /// one thing by that name, that is the thing. A name on a receiver is
+    /// dispatched on the receiver's type, which a line-oriented reader cannot
+    /// see — `values.push(x)` and a project's own `push` are written
+    /// identically.
+    #[serde(default)]
+    pub on_receiver: bool,
+}
+
+/// A supertype named at a declaration: a trait implemented, an interface
+/// implemented, a class extended, a base class (§19).
+///
+/// Kept beside the file rather than on the symbol because Rust announces the
+/// relationship from an `impl` block, which need not sit in the file that
+/// declares the type it is about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryRelation {
+    /// The declaration that gains the supertype, as written.
+    pub subject: String,
+    /// The supertype, as written.
+    pub object: String,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +178,8 @@ pub struct RepositoryFile {
     pub is_configuration: bool,
     pub symbols: Vec<RepositorySymbol>,
     pub imports: Vec<RepositoryImport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub implements: Vec<RepositoryRelation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
