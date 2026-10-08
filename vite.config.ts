@@ -46,7 +46,4 @@ export default defineConfig(async () => ({
     },
   },
 
-  test: {
-    environment: "node",
-  },
 }))

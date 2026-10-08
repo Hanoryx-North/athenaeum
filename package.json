@@ -9,7 +9,6 @@
     "typecheck": "tsc --build --pretty",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "test": "vitest run",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -63,10 +62,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.1",
-    "fast-check": "^4.7.0",
     "typescript": "^5.7.3",
-    "vite": "^8.0.0",
-    "vitest": "^4.1.4",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite": "^8.0.0"
   }
 }

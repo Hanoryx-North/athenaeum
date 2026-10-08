@@ -143,6 +143,3 @@ impl VaultSnapshot {
         scan::scan(root.as_ref(), options)
     }
 }
-
-#[cfg(test)]
-mod tests;

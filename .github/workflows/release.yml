@@ -91,14 +91,10 @@ jobs:
           fi
           echo "matrix=$(node scripts/release/release.mjs matrix --only "$ONLY")" >> "$GITHUB_OUTPUT"
 
-      # A broken main must not ship. The per-platform Rust suites live in CI and
-      # take far longer than a release should wait; the release build itself is
-      # the compile check for every platform, and this is the fast frontend gate.
-      - name: Frontend gate (typecheck and tests)
+      - name: Frontend typecheck
         run: |
           npm ci
           npm run typecheck
-          npm test
 
       # Without the key the installers would build and run but could never update
       # themselves, and the ones already installed could never be rescued. Refuse

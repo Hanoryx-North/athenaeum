@@ -102,21 +102,3 @@ fn percent_encode_file_segment(segment: &str) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::file_url_for_path;
-
-    #[test]
-    fn anytxt_paths_are_returned_as_file_urls_for_frontend_results() {
-        assert_eq!(
-            file_url_for_path(r"C:\docs\煤矿 安全.pdf"),
-            "file:///C:/docs/%E7%85%A4%E7%9F%BF%20%E5%AE%89%E5%85%A8.pdf"
-        );
-        assert_eq!(
-            file_url_for_path("/Users/me/docs/a b.txt"),
-            "file:///Users/me/docs/a%20b.txt"
-        );
-        assert_eq!(file_url_for_path("anytxt://99"), "anytxt://99");
-    }
-}

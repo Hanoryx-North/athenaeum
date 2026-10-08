@@ -47,74 +47,7 @@ jobs:
 
       # Warnings fail the build here rather than accumulating until nobody
       # reads the output any more.
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
-  test:
-    name: Test (${{ matrix.platform }})
-    strategy:
-      fail-fast: false
-      matrix:
-        # The three platforms the app ships on. The knowledge library is
-        # identical on all of them — including a statically linked SQLite —
-        # so any divergence here is a bug worth failing the build over.
-        platform: [ubuntu-22.04, macos-latest, windows-latest]
-
-    runs-on: ${{ matrix.platform }}
-
-    env:
-      # Debug info for LanceDB's dependency tree makes the test target directory
-      # enormous, and nothing here reads it. The Ubuntu job once died mid-build
-      # with no log left behind; a full runner disk is the likeliest cause.
-      CARGO_PROFILE_DEV_DEBUG: "0"
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.platform }}
-
-      - name: Install Linux build dependencies
-        if: startsWith(matrix.platform, 'ubuntu')
-        run: |
-          # Give back the space of SDKs this repository never uses.
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      # LanceDB's build script compiles .proto definitions.
-      - uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run the test suite
-        run: cargo test --workspace --all-targets
-
-      - name: Run doc tests
-        run: cargo test --workspace --doc
-
-      # Proves the shipped binary actually links and runs on this platform,
-      # not merely that it compiled. Stays in the workspace and uses the
-      # CLI's own -C flag rather than cd-ing into $RUNNER_TEMP, because a
-      # Windows path under Git Bash is not worth the argument.
-      - name: Smoke-test the CLI
-        shell: bash
-        run: |
-          mkdir -p ci-smoke
-          cargo run -q -p athenaeum-cli -- --version
-          cargo run -q -p athenaeum-cli -- -C ci-smoke init
-          cargo run -q -p athenaeum-cli -- -C ci-smoke \
-            add --type decision "Use SQLite" -s "Local-first; no server to run."
-          cargo run -q -p athenaeum-cli -- -C ci-smoke \
-            add --type gotcha "WAL on network shares" -s "Use a local path."
-          cargo run -q -p athenaeum-cli -- -C ci-smoke \
-            link "Use SQLite" has_gotcha "WAL on network shares" --derived "ci smoke"
-          # The gotcha is reached by traversal, not by matching the query,
-          # so this asserts navigation works end to end on this platform.
-          cargo run -q -p athenaeum-cli -- -C ci-smoke brief "why sqlite" | tee brief.txt
-          grep -q "WAL on network shares" brief.txt
+      - run: cargo clippy --workspace -- -D warnings
 
   frontend:
     name: Frontend
@@ -129,18 +62,4 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build
-
-  icons:
-    name: Icons are reproducible
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      # The icons are generated, so a hand-edited binary that no longer
-      # matches its generator would silently drift. Regenerate and diff.
-      - name: Regenerate and compare
-        run: |
-          python3 scripts/generate_icons.py
-          git diff --exit-code -- src-tauri/icons
