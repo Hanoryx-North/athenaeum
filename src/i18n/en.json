@@ -34,6 +34,12 @@
   "updateBanner": {
     "message": "Version {{version}} is available",
     "openDownload": "Open download page",
+    "installNow": "Update and restart",
+    "downloading": "Downloading… {{percent}}%",
+    "downloadingUnknown": "Downloading…",
+    "installing": "Installing…",
+    "restarting": "Restarting…",
+    "fellBack": "Couldn't update automatically — the download page is open.",
     "dismiss": "Dismiss"
   },
   "welcome": {

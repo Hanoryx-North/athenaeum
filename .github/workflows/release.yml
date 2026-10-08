@@ -1,72 +1,173 @@
 name: Release
 
+# Every push to main that changes anything but documentation becomes a release:
+# installers for Windows, macOS and Linux, the signed update bundles the app
+# installs from, and the `athenaeum` CLI. Installed copies find it on their own.
+#
+# A manual run from any branch is a dry run: it builds and signs everything with
+# a throwaway key and keeps the bundles as workflow artifacts, but publishes
+# nothing. Tick "publish" on a manual run from main to release without a push.
+#
+# One-time setup: node scripts/release/setup-updater-key.mjs  (docs/releasing.md)
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a release from this run (only honoured on main)"
+        type: boolean
+        default: false
+      only:
+        description: "Dry runs only: comma-separated target triples to build, e.g. aarch64-unknown-linux-gnu. Empty builds all five."
+        type: string
+        default: ""
+
+# One release at a time, in order. A run queued behind another is replaced by a
+# newer one, so a burst of pushes releases the newest rather than every one.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
 
 env:
+  CARGO_TERM_COLOR: always
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "5"
 
 jobs:
+  plan:
+    name: Plan the release
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      publish: ${{ steps.v.outputs.publish }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Work out the version and whether this run publishes
+        id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PUBLISH_INPUT: ${{ inputs.publish }}
+        run: |
+          version=$(node scripts/release/release.mjs version)
+          publish=false
+          if [ "$REF" = "refs/heads/main" ] && { [ "$EVENT" = "push" ] || [ "$PUBLISH_INPUT" = "true" ]; }; then
+            publish=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Version $version, publish=$publish"
+
+      - name: Choose the builds
+        id: matrix
+        env:
+          ONLY: ${{ inputs.only }}
+          PUBLISH: ${{ steps.v.outputs.publish }}
+        run: |
+          # A release missing a platform would leave those users without an update.
+          if [ "$PUBLISH" = "true" ] && [ -n "$ONLY" ]; then
+            echo "::error::A published release must build every platform; 'only' is for dry runs."
+            exit 1
+          fi
+          echo "matrix=$(node scripts/release/release.mjs matrix --only "$ONLY")" >> "$GITHUB_OUTPUT"
+
+      # A broken main must not ship. The per-platform Rust suites live in CI and
+      # take far longer than a release should wait; the release build itself is
+      # the compile check for every platform, and this is the fast frontend gate.
+      - name: Frontend gate (typecheck and tests)
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+      # Without the key the installers would build and run but could never update
+      # themselves, and the ones already installed could never be rescued. Refuse
+      # to publish that, loudly, rather than discover it from a user.
+      - name: Refuse to publish without working auto-update
+        if: steps.v.outputs.publish == 'true'
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error title=Updater signing key missing::The TAURI_SIGNING_PRIVATE_KEY secret is not set. Run 'node scripts/release/setup-updater-key.mjs' once on your machine (see docs/releasing.md)."
+            exit 1
+          fi
+          node scripts/release/release.mjs check-signing
+
+      - name: Create the draft release the builds attach to
+        if: steps.v.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          # Created once, here, so the parallel builds below never race to create it.
+          if gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -qx "$TAG"; then
+            echo "$TAG already exists (a re-run); the builds will replace its assets."
+          else
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+              --title "Athenaeum $VERSION" --notes "Build in progress."
+          fi
+
   build:
-    name: ${{ matrix.label }}
+    name: Build ${{ matrix.label }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Windows x86_64 — the primary download.
-          - platform: windows-latest
-            label: Windows (x86_64)
-            args: "--target x86_64-pc-windows-msvc"
-            rust_target: x86_64-pc-windows-msvc
-
-          # Apple silicon and Intel are separate bundles rather than a
-          # universal binary, so each download stays half the size.
-          - platform: macos-latest
-            label: macOS (Apple silicon)
-            args: "--target aarch64-apple-darwin"
-            rust_target: aarch64-apple-darwin
-          - platform: macos-latest
-            label: macOS (Intel)
-            args: "--target x86_64-apple-darwin"
-            rust_target: x86_64-apple-darwin
-
-          # Native ARM Linux runner — no cross-compiling webkit2gtk.
-          - platform: ubuntu-22.04
-            label: Linux (x86_64)
-            args: ""
-            rust_target: ""
-          - platform: ubuntu-22.04-arm
-            label: Linux (arm64)
-            args: ""
-            rust_target: ""
-
-    runs-on: ${{ matrix.platform }}
+      # The platforms live in scripts/release/lib.mjs so they can be tested and selected.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      TARGET: ${{ matrix.target }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust_target }}
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.label }}
+          key: release-${{ matrix.target }}
 
       - name: Install Linux build dependencies
-        if: startsWith(matrix.platform, 'ubuntu')
+        if: runner.os == 'Linux'
         run: |
+          # LanceDB and the webview toolchain fill a stock runner; the
+          # preinstalled SDKs we do not use are the cheapest space to give back.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
           sudo apt-get update
-          # xdg-utils is pre-installed on the x86_64 image but not the ARM
-          # one, and the AppImage bundler embeds it. Name it explicitly so
-          # both architectures bundle identically.
+          # xdg-utils is on the x64 image but not the ARM one, and the AppImage
+          # bundler embeds it. Naming it makes both architectures bundle alike.
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf xdg-utils
 
@@ -82,41 +183,190 @@ jobs:
 
       - run: npm ci
 
-      - name: Build and bundle
-        uses: tauri-apps/tauri-action@v0
+      - name: Updater signing key
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signing is optional: unset secrets simply produce unsigned
-          # bundles rather than failing the build.
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ "$PUBLISH" = "true" ]; then
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<END_OF_KEY"
+              echo "$KEY"
+              echo "END_OF_KEY"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+          else
+            # A dry run signs with a key made for this run and tells the build to
+            # trust it, so the whole updater path is exercised without the real key.
+            npx tauri signer generate --ci -p "" -w "$RUNNER_TEMP/dry.key"
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<END_OF_KEY"
+              cat "$RUNNER_TEMP/dry.key"
+              echo
+              echo "END_OF_KEY"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD="
+              echo "PUBKEY_FILE=$RUNNER_TEMP/dry.key.pub"
+            } >> "$GITHUB_ENV"
+          fi
+
+      # Both are optional. Without them the macOS app is ad-hoc signed (so it
+      # runs on Apple silicon) but not notarized, and people approve it once.
+      - name: Apple signing and notarization (optional)
+        if: runner.os == 'macOS'
+        env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        with:
-          # A tag push publishes a real release. A manual run leaves these
-          # empty, so tauri-action skips the upload and just leaves bundles
-          # behind for testing a branch.
-          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
-          releaseName: ${{ github.event_name == 'push' && format('Athenaeum {0}', github.ref_name) || '' }}
-          releaseBody: "See the assets below for downloads."
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+        run: |
+          # An unset secret arrives as an empty string, which Tauri would read as
+          # "configured", so export only what is really there.
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
+            done
+            echo "Signing with the configured Developer ID."
+          else
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+            echo "::warning title=macOS app is not notarized::No Apple Developer ID secrets are set, so the app is ad-hoc signed. People must approve it once in System Settings > Privacy & Security. See docs/releasing.md."
+          fi
 
-      - name: Upload bundles (manual runs only)
-        if: github.event_name == 'workflow_dispatch'
+      # The Linux arm64 runner was killed twice, at the same point, in the app crate's fat-LTO
+      # link (about 35 minutes in). Thin LTO with more codegen units needs far less memory.
+      - name: Lighten the link step on a constrained runner
+        if: matrix.thin_lto
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=thin" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
+
+      - name: Stamp the version, fetch PDFium, write the release config
+        run: |
+          node scripts/release/release.mjs prepare \
+            --version "$VERSION" --target "$TARGET" --updater \
+            ${PUBKEY_FILE:+--pubkey-file "$PUBKEY_FILE"}
+
+      - name: Build the installers
+        run: npm run tauri -- build --target "$TARGET" --config src-tauri/tauri.release.conf.json
+
+      - name: Collect the release assets and check their signatures
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          B="target/$TARGET/release/bundle"
+          OUT=dist-release
+          mkdir -p "$OUT"
+          find "$B" -maxdepth 2 -type f | sort
+          case "$RUNNER_OS" in
+            Windows)
+              cp "$B"/nsis/*-setup.exe "$B"/nsis/*-setup.exe.sig "$OUT"/
+              ;;
+            macOS)
+              cp "$B"/dmg/*.dmg "$OUT"/
+              # Both Mac builds produce Athenaeum.app.tar.gz; the architecture
+              # in the name keeps them apart in one release.
+              cp "$B/macos/Athenaeum.app.tar.gz" "$OUT/Athenaeum_${ARCH}.app.tar.gz"
+              cp "$B/macos/Athenaeum.app.tar.gz.sig" "$OUT/Athenaeum_${ARCH}.app.tar.gz.sig"
+              ;;
+            Linux)
+              cp "$B"/appimage/*.AppImage "$B"/appimage/*.AppImage.sig "$B"/deb/*.deb "$OUT"/
+              ;;
+          esac
+          # Every update bundle must verify under the public key the app ships
+          # with. A mismatch means installed copies would refuse the update.
+          for sig in "$OUT"/*.sig; do
+            node scripts/release/release.mjs verify-signature --file "${sig%.sig}" \
+              ${PUBKEY_FILE:+--pubkey-file "$PUBKEY_FILE"}
+          done
+
+      - name: Build and package the athenaeum CLI
+        run: |
+          cargo build --release -p athenaeum-cli --target "$TARGET"
+          BIN="target/$TARGET/release/athenaeum"
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="$BIN.exe"; fi
+          # An Intel Mac binary cannot be assumed runnable on the ARM runner.
+          if [ "$TARGET" != "x86_64-apple-darwin" ]; then "$BIN" --version; fi
+          mkdir cli-stage
+          cp "$BIN" LICENSE cli-stage/
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            (cd cli-stage && tar -a -cf "../dist-release/athenaeum-cli-$TARGET.zip" *)
+          else
+            tar -czf "dist-release/athenaeum-cli-$TARGET.tar.gz" -C cli-stage .
+          fi
+          ls -la dist-release
+
+      - name: Attach to the draft release
+        if: env.PUBLISH == 'true'
+        run: gh release upload "$TAG" dist-release/* --clobber
+
+      - name: Keep the bundles (dry run)
+        if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: bundle-${{ matrix.rust_target || matrix.platform }}
-          # Covers both targeted (target/<triple>/release/…) and default
-          # (target/release/…) output paths.
-          path: |
-            target/**/release/bundle/msi/*.msi
-            target/**/release/bundle/nsis/*.exe
-            target/**/release/bundle/dmg/*.dmg
-            target/**/release/bundle/deb/*.deb
-            target/**/release/bundle/appimage/*.AppImage
-          if-no-files-found: warn
-          retention-days: 14
+          name: bundles-${{ matrix.target }}
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check every platform's CLI archive arrived
+        run: |
+          n=$(gh release view "$TAG" --json assets --jq '[.assets[].name | select(startswith("athenaeum-cli-"))] | length')
+          if [ "$n" != "5" ]; then
+            echo "::error::Expected 5 CLI archives on $TAG, found $n."
+            exit 1
+          fi
+
+      - name: Write the release notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA^" 2>/dev/null || true)
+          {
+            echo "## Install"
+            echo
+            echo "- **Windows:** run \`Athenaeum_${VERSION}_x64-setup.exe\`. It installs for your user (no administrator prompt) and sets up WebView2 if your PC lacks it."
+            echo "- **macOS:** open the \`.dmg\` for your Mac (\`aarch64\` is Apple silicon, \`x64\` is Intel) and drag Athenaeum to Applications. The first launch needs a one-time approval; see [docs/releasing.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/releasing.md#first-launch-on-macos-and-windows)."
+            echo "- **Linux:** \`chmod +x\` the \`.AppImage\` and run it, or install the \`.deb\`."
+            echo
+            echo "Athenaeum updates itself: when a newer release appears, the app offers **Update and restart**."
+            echo
+            echo "The \`athenaeum-cli-*\` archives are the command line tool the agent layer talks to."
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$prev" ]; then git log "$prev..$GITHUB_SHA" --no-merges --pretty='- %s'; else git log -n 20 --no-merges --pretty='- %s' "$GITHUB_SHA"; fi
+          } > notes.md
+          cat notes.md
+
+      - name: Build the updater manifest from the signed bundles
+        run: |
+          mkdir sigs
+          gh release download "$TAG" --pattern '*.sig' --dir sigs
+          node scripts/release/release.mjs latest-json \
+            --version "$VERSION" --tag "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --sigs sigs --notes notes.md --out latest.json
+          cat latest.json
+          gh release upload "$TAG" latest.json --clobber
+
+      # Publishing last is what makes the update atomic: the app reads
+      # releases/latest/download/latest.json, which exists only for a published
+      # release, and by now every bundle it points at is already uploaded.
+      - name: Publish
+        run: gh release edit "$TAG" --draft=false --latest --title "Athenaeum $VERSION" --notes-file notes.md

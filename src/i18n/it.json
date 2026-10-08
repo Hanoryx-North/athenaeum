@@ -34,6 +34,12 @@
   "updateBanner": {
     "message": "La versione {{version}} è disponibile",
     "openDownload": "Apri la pagina di download",
+    "installNow": "Aggiorna e riavvia",
+    "downloading": "Download in corso… {{percent}}%",
+    "downloadingUnknown": "Download in corso…",
+    "installing": "Installazione in corso…",
+    "restarting": "Riavvio in corso…",
+    "fellBack": "Impossibile aggiornare automaticamente: la pagina di download è aperta.",
     "dismiss": "Nascondi"
   },
   "welcome": {

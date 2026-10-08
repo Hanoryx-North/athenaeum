@@ -37,6 +37,10 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-http = { version = "2", features = ["unsafe-headers"] }
 tauri-plugin-opener = "2"
+# In-app updates. The minor versions track the @tauri-apps/plugin-* packages in
+# package.json: the Tauri CLI refuses to build when crate and npm minors differ.
+tauri-plugin-process = "~2.3"
+tauri-plugin-updater = "~2.12"
 tauri-plugin-store = "2.4.2"
 
 # Rust-side HTTP so providers that reject browser-origin headers via CORS

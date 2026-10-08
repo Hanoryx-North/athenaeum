@@ -34,6 +34,12 @@
   "updateBanner": {
     "message": "新版本 {{version}} 已发布",
     "openDownload": "打开下载页",
+    "installNow": "更新并重启",
+    "downloading": "正在下载… {{percent}}%",
+    "downloadingUnknown": "正在下载…",
+    "installing": "正在安装…",
+    "restarting": "正在重启…",
+    "fellBack": "无法自动更新——已打开下载页面。",
     "dismiss": "关闭"
   },
   "welcome": {

@@ -1,10 +1,9 @@
 import { useCallback } from "react"
-import { Sparkles, X, Download } from "lucide-react"
+import { Sparkles, X, Download, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { openUrl } from "@tauri-apps/plugin-opener"
 import { useUpdateStore, shouldShowUpdateBanner } from "@/stores/update-store"
 import { saveUpdateCheckState } from "@/lib/project-store"
-import { toLatestReleaseUrl } from "@/lib/update-check"
+import { progressPercent, useSelfUpdate } from "@/lib/use-self-update"
 
 /**
  * App-wide update-available banner.
@@ -32,20 +31,12 @@ export function UpdateBanner() {
   const visible = useUpdateStore((s) => shouldShowUpdateBanner(s))
   const result = useUpdateStore((s) => s.lastResult)
 
-  const handleOpen = useCallback(async () => {
-    if (!result || result.kind !== "available") return
-    // Send the user to `/releases/latest`, NOT the tag-specific
-    // page from `release.html_url`. /latest always follows GitHub's
-    // redirect to whatever is currently the most recent release —
-    // robust to (a) a newer release shipping between notification
-    // and click, and (b) the bare `/releases` listing's default
-    // sort not putting newest at the top.
-    try {
-      await openUrl(toLatestReleaseUrl(result.release.html_url))
-    } catch (err) {
-      console.error("[update-banner] openUrl failed:", err)
-    }
-  }, [result])
+  // Installs in place and restarts; falls back to the release page when the
+  // updater can't (see useSelfUpdate).
+  const { install, progress, busy, fellBack } = useSelfUpdate(
+    result?.kind === "available" ? result.release.html_url : "",
+  )
+  const percent = progressPercent(progress)
 
   const handleDismiss = useCallback(async () => {
     if (!result || result.kind !== "available") return
@@ -87,15 +78,33 @@ export function UpdateBanner() {
             version: result.remote.replace(/^v/, ""),
             defaultValue: `Version ${result.remote.replace(/^v/, "")} is available`,
           })}
+          {fellBack && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              {t("updateBanner.fellBack", {
+                defaultValue: "Couldn't update automatically — the download page is open.",
+              })}
+            </span>
+          )}
         </span>
       </div>
       <button
         type="button"
-        onClick={handleOpen}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+        onClick={install}
+        disabled={busy}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-80"
       >
-        <Download className="h-3.5 w-3.5" />
-        {t("updateBanner.openDownload", { defaultValue: "Open download page" })}
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        {progress?.phase === "installing"
+          ? t("updateBanner.installing", { defaultValue: "Installing…" })
+          : progress?.phase === "restarting"
+            ? t("updateBanner.restarting", { defaultValue: "Restarting…" })
+            : busy
+              ? percent === null
+                ? t("updateBanner.downloadingUnknown", { defaultValue: "Downloading…" })
+                : t("updateBanner.downloading", { percent, defaultValue: `Downloading… ${percent}%` })
+              : fellBack
+                ? t("updateBanner.openDownload", { defaultValue: "Open download page" })
+                : t("updateBanner.installNow", { defaultValue: "Update and restart" })}
       </button>
       <button
         type="button"

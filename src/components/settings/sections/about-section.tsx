@@ -1,14 +1,14 @@
 import { useEffect, useState, useCallback } from "react"
-import { Download, RefreshCw, CheckCircle2, Sparkles } from "lucide-react"
+import { Download, RefreshCw, CheckCircle2, Sparkles, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import { apiServerStatus, clipServerStatus } from "@/commands/fs"
 import { Button } from "@/components/ui/button"
 import { API_SERVER_HEALTH_URL, API_SERVER_PORT } from "@/lib/api-server-constants"
 import { useUpdateStore, hasAvailableUpdate } from "@/stores/update-store"
-import { checkForUpdates, toLatestReleaseUrl } from "@/lib/update-check"
+import { checkForUpdates } from "@/lib/update-check"
+import { progressPercent, useSelfUpdate } from "@/lib/use-self-update"
 import { saveUpdateCheckState } from "@/lib/project-store"
-import { useAppDialog } from "@/stores/app-dialog-store"
 
 interface ApiHealth {
   enabled?: boolean
@@ -268,37 +268,10 @@ function UpdateAvailableBanner({
   onDismiss,
 }: UpdateAvailableBannerProps) {
   const { t } = useTranslation()
-  const appDialog = useAppDialog()
-  // Use `/releases/latest` (canonical GitHub redirect to the newest
-  // release) rather than the tag-specific URL from the release
-  // payload. Same rationale as in the top banner — see
-  // `toLatestReleaseUrl` for details.
-  const targetUrl = toLatestReleaseUrl(releaseUrl)
-  const handleOpen = async () => {
-    // Tauri 2's webview does NOT auto-delegate `window.open()` to the
-    // system browser — `tauri-plugin-opener` is the official way to
-    // launch the user's default browser. The Rust plugin is
-    // registered in `src-tauri/src/lib.rs` and `opener:default`
-    // permission is granted in capabilities/default.json.
-    //
-    // Fail-soft: if the plugin call rejects (e.g. URL blocked by a
-    // future capability tightening), fall back to copying the URL
-    // to the clipboard so the user can paste it into a browser
-    // manually instead of seeing a silently broken button.
-    try {
-      await openUrl(targetUrl)
-    } catch (err) {
-      console.error("[update-banner] openUrl failed:", err)
-      try {
-        await navigator.clipboard.writeText(targetUrl)
-        await appDialog.alert({
-          message: `Could not open browser. URL copied to clipboard:\n${targetUrl}`,
-        })
-      } catch {
-        await appDialog.alert({ message: `Could not open browser. Visit:\n${targetUrl}` })
-      }
-    }
-  }
+  // Installs in place and restarts; falls back to the release page when the
+  // updater can't (see useSelfUpdate).
+  const { install, progress, busy, fellBack } = useSelfUpdate(releaseUrl)
+  const percent = progressPercent(progress)
 
   const preview = releaseBody.slice(0, 400)
   const truncated = releaseBody.length > preview.length
@@ -319,9 +292,19 @@ function UpdateAvailableBanner({
         </pre>
       )}
       <div className="mt-3 flex items-center gap-2">
-        <Button size="sm" onClick={handleOpen} className="gap-1.5">
-          <Download className="h-3.5 w-3.5" />
-          {t("settings.sections.about.openDownload")}
+        <Button size="sm" onClick={install} disabled={busy} className="gap-1.5">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          {progress?.phase === "installing"
+            ? t("updateBanner.installing")
+            : progress?.phase === "restarting"
+              ? t("updateBanner.restarting")
+              : busy
+                ? percent === null
+                  ? t("updateBanner.downloadingUnknown")
+                  : t("updateBanner.downloading", { percent })
+                : fellBack
+                  ? t("settings.sections.about.openDownload")
+                  : t("updateBanner.installNow")}
         </Button>
         <Button size="sm" variant="ghost" onClick={onDismiss}>
           {t("settings.sections.about.later")}

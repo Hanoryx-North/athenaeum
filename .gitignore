@@ -12,6 +12,11 @@ node_modules/
 # Tauri generated
 /src-tauri/gen/
 
+# Written by scripts/release/release.mjs during a release build
+/src-tauri/pdfium/
+/src-tauri/tauri.release.conf.json
+/dist-release/
+
 # A knowledge base created while testing in the repo itself
 .athenaeum/
 

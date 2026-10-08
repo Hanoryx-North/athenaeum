@@ -221,7 +221,7 @@ function App() {
   // lets the user retry manually.
   useEffect(() => {
     let cancelled = false
-    const timer = setTimeout(async () => {
+    const runCheck = async () => {
       if (cancelled) return
       try {
         const { loadUpdateCheckState, saveUpdateCheckState } = await import(
@@ -295,10 +295,17 @@ function App() {
       } catch {
         // Silent — Settings → About lets the user retry manually.
       }
-    }, 1500)
+    }
+    const timer = setTimeout(runCheck, 1500)
+    // Keep checking while the app stays open: a desktop knowledge app is
+    // often left running for days, and a startup-only check would never see
+    // a release published after launch. One minute past the cache window so
+    // the cache never swallows a scheduled run.
+    const interval = setInterval(runCheck, 61 * 60 * 1000)
     return () => {
       cancelled = true
       clearTimeout(timer)
+      clearInterval(interval)
     }
   }, [])
 
