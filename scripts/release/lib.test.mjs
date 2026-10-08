@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  BUILDS,
   PDFIUM_BY_TARGET,
   buildLatestJson,
   buildReleaseConfig,
   computeVersion,
   isValidUpdaterPubkey,
   pdfiumUrl,
+  selectBuilds,
   stampPackageJson,
   stampWorkspaceCargo,
   verifyUpdaterSignature,
@@ -215,5 +217,31 @@ describe("verifyUpdaterSignature", () => {
   it("rejects garbage instead of throwing", () => {
     expect(verifyUpdaterSignature({ pubkey: "UNSET", sig: "x", data: payload })).toBe(false)
     expect(verifyUpdaterSignature({ pubkey, sig: "", data: payload })).toBe(false)
+  })
+})
+
+describe('selectBuilds', () => {
+  it('builds every platform by default', () => {
+    expect(selectBuilds().include).toHaveLength(5)
+    expect(selectBuilds('').include).toEqual(BUILDS)
+    expect(selectBuilds(' , ').include).toEqual(BUILDS)
+  })
+
+  it('builds exactly the platforms a dry run names', () => {
+    const picked = selectBuilds('aarch64-unknown-linux-gnu, x86_64-apple-darwin').include.map(b => b.target)
+    expect(picked.sort()).toEqual(['aarch64-unknown-linux-gnu', 'x86_64-apple-darwin'])
+  })
+
+  it('refuses a typo rather than silently building nothing', () => {
+    expect(() => selectBuilds('aarch64-linux')).toThrow(/Unknown target/)
+  })
+
+  it('has a PDFium build and a distinct target for every platform', () => {
+    for (const b of BUILDS) expect(PDFIUM_BY_TARGET[b.target]).toBeDefined()
+    expect(new Set(BUILDS.map(b => b.target)).size).toBe(BUILDS.length)
+  })
+
+  it('relaxes link-time optimisation only where the runner could not finish it', () => {
+    expect(BUILDS.filter(b => b.thin_lto).map(b => b.target)).toEqual(['aarch64-unknown-linux-gnu'])
   })
 })

@@ -23,6 +23,10 @@ on:
         description: "Publish a release from this run (only honoured on main)"
         type: boolean
         default: false
+      only:
+        description: "Dry runs only: comma-separated target triples to build, e.g. aarch64-unknown-linux-gnu. Empty builds all five."
+        type: string
+        default: ""
 
 # One release at a time, in order. A run queued behind another is replaced by a
 # newer one, so a burst of pushes releases the newest rather than every one.
@@ -46,6 +50,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
       publish: ${{ steps.v.outputs.publish }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +77,19 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Version $version, publish=$publish"
+
+      - name: Choose the builds
+        id: matrix
+        env:
+          ONLY: ${{ inputs.only }}
+          PUBLISH: ${{ steps.v.outputs.publish }}
+        run: |
+          # A release missing a platform would leave those users without an update.
+          if [ "$PUBLISH" = "true" ] && [ -n "$ONLY" ]; then
+            echo "::error::A published release must build every platform; 'only' is for dry runs."
+            exit 1
+          fi
+          echo "matrix=$(node scripts/release/release.mjs matrix --only "$ONLY")" >> "$GITHUB_OUTPUT"
 
       # A broken main must not ship. The per-platform Rust suites live in CI and
       # take far longer than a release should wait; the release build itself is
@@ -118,31 +136,8 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: Windows (x64)
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            arch: x64
-          # Apple silicon and Intel are separate bundles rather than a universal
-          # binary, so each download stays half the size.
-          - label: macOS (Apple silicon)
-            os: macos-latest
-            target: aarch64-apple-darwin
-            arch: aarch64
-          - label: macOS (Intel)
-            os: macos-latest
-            target: x86_64-apple-darwin
-            arch: x64
-          - label: Linux (x64)
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            arch: amd64
-          # A native ARM runner: no cross-compiling webkit2gtk.
-          - label: Linux (arm64)
-            os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            arch: aarch64
+      # The platforms live in scripts/release/lib.mjs so they can be tested and selected.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       TAG: ${{ needs.plan.outputs.tag }}
@@ -237,6 +232,14 @@ jobs:
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
             echo "::warning title=macOS app is not notarized::No Apple Developer ID secrets are set, so the app is ad-hoc signed. People must approve it once in System Settings > Privacy & Security. See docs/releasing.md."
           fi
+
+      # The Linux arm64 runner was killed twice, at the same point, in the app crate's fat-LTO
+      # link (about 35 minutes in). Thin LTO with more codegen units needs far less memory.
+      - name: Lighten the link step on a constrained runner
+        if: matrix.thin_lto
+        run: |
+          echo "CARGO_PROFILE_RELEASE_LTO=thin" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16" >> "$GITHUB_ENV"
 
       - name: Stamp the version, fetch PDFium, write the release config
         run: |

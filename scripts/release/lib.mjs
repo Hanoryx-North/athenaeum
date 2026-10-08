@@ -198,3 +198,32 @@ export function verifyUpdaterSignature({ pubkey, sig, data }) {
   const publicKey = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, key]), format: "der", type: "spki" })
   return verify(null, message, publicKey, raw)
 }
+
+/**
+ * Every platform a release builds. `thinLto` marks a runner that cannot finish the app
+ * crate's fat-LTO link: the Linux arm64 build died twice, at the same step, about 35
+ * minutes in, with "the runner has received a shutdown signal".
+ */
+export const BUILDS = [
+  { label: 'Windows (x64)', os: 'windows-latest', target: 'x86_64-pc-windows-msvc', arch: 'x64', thin_lto: false },
+  { label: 'macOS (Apple silicon)', os: 'macos-latest', target: 'aarch64-apple-darwin', arch: 'aarch64', thin_lto: false },
+  { label: 'macOS (Intel)', os: 'macos-latest', target: 'x86_64-apple-darwin', arch: 'x64', thin_lto: false },
+  { label: 'Linux (x64)', os: 'ubuntu-22.04', target: 'x86_64-unknown-linux-gnu', arch: 'amd64', thin_lto: false },
+  // A native ARM runner: no cross-compiling webkit2gtk.
+  { label: 'Linux (arm64)', os: 'ubuntu-22.04-arm', target: 'aarch64-unknown-linux-gnu', arch: 'aarch64', thin_lto: true },
+]
+
+/**
+ * The GitHub Actions matrix for a run. `only` is a comma-separated list of target triples; empty
+ * means every build. A dry run can name one platform instead of paying for all five, which
+ * matters in a private repository where macOS minutes bill at ten times the rate.
+ */
+export function selectBuilds(only = '') {
+  const wanted = only.split(',').map(t => t.trim()).filter(Boolean)
+  if (wanted.length === 0) return { include: BUILDS }
+  const unknown = wanted.filter(t => !BUILDS.some(b => b.target === t))
+  if (unknown.length > 0) {
+    throw new Error(`Unknown target(s): ${unknown.join(', ')}. Known: ${BUILDS.map(b => b.target).join(', ')}`)
+  }
+  return { include: BUILDS.filter(b => wanted.includes(b.target)) }
+}

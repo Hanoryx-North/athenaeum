@@ -4,6 +4,9 @@
 //   node scripts/release/release.mjs version
 //       Print the version this commit would release as.
 //
+//   node scripts/release/release.mjs matrix [--only TARGET,TARGET]
+//       Print the build matrix as JSON for the workflow (all platforms, or just those named).
+//
 //   node scripts/release/release.mjs check-signing
 //       Fail unless the committed updater public key is real. Run before a
 //       publishing build so a release without working auto-update never ships.
@@ -35,6 +38,7 @@ import {
   computeVersion,
   isValidUpdaterPubkey,
   pdfiumUrl,
+  selectBuilds,
   stampPackageJson,
   stampWorkspaceCargo,
   verifyUpdaterSignature,
@@ -107,6 +111,10 @@ const commands = {
     const base = readJson(path("package.json")).version
     const count = Number(execFileSync("git", ["rev-list", "--count", "HEAD"], { cwd: root, encoding: "utf8" }).trim())
     console.log(computeVersion(base, count))
+  },
+
+  matrix(args) {
+    console.log(JSON.stringify(selectBuilds(typeof args.only === "string" ? args.only : "")))
   },
 
   "check-signing"() {
