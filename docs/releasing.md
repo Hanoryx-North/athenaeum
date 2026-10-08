@@ -81,6 +81,18 @@ throwaway key and keeps the bundles as workflow artifacts. It publishes nothing,
 to check a change to the installers before it reaches `main`. Ticking **publish** on a run
 from `main` releases without a push.
 
+To try one platform rather than all five, give **only** a target triple (for example
+`aarch64-unknown-linux-gnu`). A run that publishes always builds everything.
+
+### What a release costs
+
+A full release is five builds, the Windows one taking over an hour. **In a private repository
+Actions minutes are billed, and macOS minutes count ten times**, so one release is on the order of
+five hundred billable minutes against a free allowance of two thousand a month. In a public
+repository they are free. If this repository stays private, expect a few releases a month to use the
+allowance, and consider releasing less often (change the trigger to tags, or to a schedule) or
+adding a paid plan.
+
 ## First launch on macOS and Windows
 
 The installers are not yet signed with a paid code-signing identity, so each operating
@@ -112,6 +124,7 @@ Both are optional secrets; the workflow uses them when present and never fails w
 | Run fails in *Plan* with "Updater signing key missing" | The one-time setup above has not been done. |
 | Build fails with "does not verify against the updater public key" | `TAURI_SIGNING_PRIVATE_KEY` is not the private half of the key in `tauri.conf.json`. Re-run `setup-updater-key.mjs`. |
 | Build fails with "no unique signed bundle for …" | A platform's update bundle was not produced or was renamed. The *Collect the release assets* step lists what was built. |
+| Linux arm64 stops with "the runner has received a shutdown signal" | The runner ran out of memory in the final link. That leg builds with thin LTO for this reason (`thin_lto` in `scripts/release/lib.mjs`). If it still fails, drop the platform from `BUILDS` rather than ship without it silently: the update manifest refuses to build with a platform missing. |
 | A run fails after the draft was created | The draft stays, unpublished and invisible to the app. Fixing and re-running the same commit reuses it. |
 | An installed copy never offers the update | It was installed from a build made before the key was set up, or from a `.deb`. Reinstall from the latest release once. |
 
