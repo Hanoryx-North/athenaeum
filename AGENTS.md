@@ -111,6 +111,7 @@ the repository split; providers belong to `deepseek-harness`.
 | `docs/porting-llm-wiki.md` | The upstream port: what to copy, adapt, and refuse. Current. |
 | `docs/agent-integration.md` | The seam contract, Athenaeum's half. Current. |
 | `docs/releasing.md` | How a push to `main` becomes installers and an auto-update. Current. |
+| `docs/portable-format.md` | The portable repository format and the Library sync protocol. **A contract being built:** declared page ids (section 4) are implemented; the rest is not. |
 | `docs/vision/build-plan.md` | **Cross-repo product vision. NOT this repository's backlog.** |
 
 `docs/vision/build-plan.md` describes the whole product across all three repositories —

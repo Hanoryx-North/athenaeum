@@ -19,9 +19,15 @@ const SUMMARY_LIMIT: usize = 240;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultPage {
     /// Vault-relative path with forward slashes, e.g. `wiki/concepts/x.md`.
-    /// This is the page's identity: the file is the source of truth, so the
-    /// index keys off where the file is, not what it currently calls itself.
+    /// This is the page's identity unless it declares one: the file is the
+    /// source of truth, so the index keys off where the file is, not what it
+    /// currently calls itself.
     pub path: String,
+    /// An `id:` the page declared, when it is a valid one (see
+    /// [`is_valid_declared_id`]). A declared id outlives moving the file;
+    /// whether it is *honoured* is the indexer's call, because that depends
+    /// on every other page and on what the store already holds.
+    pub declared_id: Option<String>,
     /// The file stem, which is what `[[wikilinks]]` normally name.
     pub slug: String,
     pub title: String,
@@ -67,6 +73,10 @@ impl VaultPage {
         VaultPage {
             title: title_of(&fm, body, &slug),
             summary: summary_of(&fm, body),
+            declared_id: fm
+                .text("id")
+                .filter(|raw| is_valid_declared_id(raw))
+                .map(str::to_string),
             authority: fm.text("authority").and_then(|raw| raw.trim().parse().ok()),
             origin: fm
                 .text("origin")
@@ -94,6 +104,23 @@ impl VaultPage {
             path: path.to_string(),
         }
     }
+}
+
+/// Whether `id` may be declared in a page's frontmatter.
+///
+/// `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, and never starting with `vault_`,
+/// which is the prefix of ids the indexer derives from paths. Keeping the
+/// two spaces apart is what guarantees a declared id cannot collide with a
+/// derived one.
+pub fn is_valid_declared_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    id.len() <= 128
+        && first.is_ascii_alphanumeric()
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && !id.starts_with("vault_")
 }
 
 /// The file stem of a vault-relative path.

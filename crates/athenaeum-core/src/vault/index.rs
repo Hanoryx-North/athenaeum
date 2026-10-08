@@ -210,9 +210,11 @@ impl VaultIndexer {
             ..VaultIndexReport::default()
         };
 
+        let ids = assign_ids(store, snapshot, &mut report)?;
+
         let mut owned = HashSet::new();
         for page in &snapshot.pages {
-            let node = page_node(page);
+            let node = page_node(page, ids.of(&page.path));
             owned.insert(node.id.clone());
             ensure_node(store, node, &mut report)?;
         }
@@ -227,12 +229,13 @@ impl VaultIndexer {
             remove_departed(store, &owned, &mut report)?;
         }
 
-        let resolver = Resolver::build(snapshot);
+        let resolver = Resolver::build(snapshot, &ids);
         let mut unresolved = Vec::new();
 
         for page in &snapshot.pages {
-            let node = page_node_id(&page.path);
-            let (edges, evidence) = desired_for_page(page, &resolver, &mut report, &mut unresolved);
+            let node = ids.of(&page.path);
+            let (edges, evidence) =
+                desired_for_page(page, &node, &resolver, &mut report, &mut unresolved);
             reconcile_edges(store, &node, &edges, &mut report)?;
             reconcile_evidence(store, &node, &evidence, &mut report)?;
         }
@@ -320,9 +323,9 @@ fn authority_for(page: &VaultPage) -> Authority {
     }
 }
 
-fn page_node(page: &VaultPage) -> KnowledgeNode {
+fn page_node(page: &VaultPage, id: NodeId) -> KnowledgeNode {
     KnowledgeNode::new(node_type_for(&page.page_type), page.title.clone())
-        .with_id(page_node_id(&page.path))
+        .with_id(id)
         .with_summary(page.summary.clone())
         .with_content(page.body.trim().to_string())
         .with_scope(Scope::Project)
@@ -367,6 +370,75 @@ fn source_node(source: &VaultSource) -> KnowledgeNode {
 /// follow.
 fn page_node_id(path: &str) -> NodeId {
     NodeId::from_existing(format!("vault_page_{}", hash(path)))
+}
+
+/// The node id each page ends up with, keyed by vault-relative path.
+struct PageIds(HashMap<String, NodeId>);
+
+impl PageIds {
+    fn of(&self, path: &str) -> NodeId {
+        self.0
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| page_node_id(path))
+    }
+}
+
+/// Decide which pages keep an `id:` they declared.
+///
+/// A page without a valid declared id takes the id derived from its path, as
+/// it always has, so a vault that declares nothing indexes exactly as before.
+/// A declared id is honoured unless doing so would be wrong:
+///
+/// * **Another page declared it first.** Pages arrive in sorted path order,
+///   so the first keeps it and the outcome depends only on the vault's
+///   contents, never on filesystem ordering.
+/// * **A node the vault does not own already has it.** Page text can arrive
+///   from a pull, a fork or an import, and a page must not be able to
+///   overwrite a node somebody typed or an agent proposed by naming its id.
+///   Ownership moves to the vault only through an explicit accept.
+///
+/// The page that loses falls back to its path id and the report says why.
+fn assign_ids(
+    store: &KnowledgeStore,
+    snapshot: &VaultSnapshot,
+    report: &mut VaultIndexReport,
+) -> Result<PageIds> {
+    let mut ids = HashMap::with_capacity(snapshot.pages.len());
+    let mut claimed: HashSet<&str> = HashSet::new();
+
+    for page in &snapshot.pages {
+        let id = match page.declared_id.as_deref() {
+            None => page_node_id(&page.path),
+            Some(declared) if claimed.contains(declared) => {
+                report.warnings.push(format!(
+                    "{}: id `{declared}` is already declared by an earlier page; \
+                     using the id derived from the path",
+                    page.path
+                ));
+                page_node_id(&page.path)
+            }
+            Some(declared) => {
+                let candidate = NodeId::from_existing(declared.to_string());
+                match store.find_node(&candidate)? {
+                    Some(existing) if !is_vault_owned(&existing) => {
+                        report.warnings.push(format!(
+                            "{}: id `{declared}` belongs to a node the vault does not own; \
+                             using the id derived from the path",
+                            page.path
+                        ));
+                        page_node_id(&page.path)
+                    }
+                    _ => {
+                        claimed.insert(declared);
+                        candidate
+                    }
+                }
+            }
+        };
+        ids.insert(page.path.clone(), id);
+    }
+    Ok(PageIds(ids))
 }
 
 fn source_node_id(identity: &str) -> NodeId {
@@ -420,14 +492,14 @@ struct Resolver {
 }
 
 impl Resolver {
-    fn build(snapshot: &VaultSnapshot) -> Self {
+    fn build(snapshot: &VaultSnapshot, ids: &PageIds) -> Self {
         let mut resolver = Resolver::default();
 
         // Tiers, most exact first. Within a tier the first page to claim a
         // key keeps it, and pages arrive in sorted path order, so the
         // outcome does not depend on filesystem ordering.
         for page in &snapshot.pages {
-            let id = page_node_id(&page.path);
+            let id = ids.of(&page.path);
             resolver.claim(page.slug.clone(), &id);
             resolver.claim(page.path.trim_end_matches(".md").to_string(), &id);
             if let Some(rest) = page.path.strip_prefix("wiki/") {
@@ -435,10 +507,10 @@ impl Resolver {
             }
         }
         for page in &snapshot.pages {
-            resolver.claim(page.title.clone(), &page_node_id(&page.path));
+            resolver.claim(page.title.clone(), &ids.of(&page.path));
         }
         for page in &snapshot.pages {
-            let id = page_node_id(&page.path);
+            let id = ids.of(&page.path);
             for variant in fold(&page.slug) {
                 resolver.claim(variant, &id);
             }
@@ -552,11 +624,12 @@ type DesiredEvidence = BTreeMap<EvidenceId, Evidence>;
 
 fn desired_for_page(
     page: &VaultPage,
+    from: &NodeId,
     resolver: &Resolver,
     report: &mut VaultIndexReport,
     unresolved: &mut Vec<UnresolvedLink>,
 ) -> (DesiredEdges, DesiredEvidence) {
-    let from = page_node_id(&page.path);
+    let from = from.clone();
     let mut edges = DesiredEdges::new();
     let mut evidence = DesiredEvidence::new();
 
