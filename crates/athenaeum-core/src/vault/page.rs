@@ -5,7 +5,7 @@
 //! claims to be, what it links to, what it rests on — is testable without
 //! touching a filesystem.
 
-use crate::model::{hash, Authority};
+use crate::model::{hash, Authority, EdgeType, EvidenceKind, Scope};
 
 use super::frontmatter::{self, Frontmatter};
 use super::wikilink;
@@ -55,6 +55,35 @@ pub struct VaultPage {
     /// Distinct `sources:` identities from the frontmatter, each relative to
     /// `raw/sources/`.
     pub sources: Vec<String>,
+    /// A `scope:` the page declared, when it declared a valid one. Pages that say nothing are
+    /// project scope, as they always were.
+    pub scope: Option<Scope>,
+    /// Typed relationships the page states: `relations: ["depends_on [[retry-policy]]"]`. A
+    /// `related:` entry says two pages are related; this says how.
+    pub relations: Vec<(EdgeType, String)>,
+    /// Evidence the page carries with it, so an accepted claim keeps its justification when it
+    /// moves to another machine.
+    pub evidence: Vec<DeclaredEvidence>,
+}
+
+/// One `evidence:` entry: a JSON object on one line.
+///
+/// ```yaml
+/// evidence:
+///   - '{"kind":"source_file","file":"src/auth.rs","symbol":"validate","excerpt":"…"}'
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeclaredEvidence {
+    #[serde(default)]
+    pub kind: EvidenceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl VaultPage {
@@ -96,6 +125,14 @@ impl VaultPage {
                     .map(source_identity)
                     .filter(|value| !value.is_empty()),
             ),
+            scope: fm.text("scope").and_then(|raw| raw.trim().parse().ok()),
+            relations: relations_of(&fm),
+            evidence: fm
+                .list("evidence")
+                .into_iter()
+                .filter_map(|raw| serde_json::from_str::<DeclaredEvidence>(raw).ok())
+                .take(MAX_DECLARED_EVIDENCE)
+                .collect(),
             content_hash: hash(content),
             body: body.to_string(),
             page_type,
@@ -104,6 +141,25 @@ impl VaultPage {
             path: path.to_string(),
         }
     }
+}
+
+/// More than this many `evidence:` entries on one page is a page trying to flood the index.
+const MAX_DECLARED_EVIDENCE: usize = 50;
+
+/// `relations:` entries, each `<edge_type> <target>` where the target is written like a `related:`
+/// entry. Entries naming an edge type the model does not have are ignored.
+fn relations_of(fm: &Frontmatter) -> Vec<(EdgeType, String)> {
+    let mut seen = std::collections::HashSet::new();
+    fm.list("relations")
+        .into_iter()
+        .filter_map(|raw| {
+            let (kind, target) = raw.trim().split_once(char::is_whitespace)?;
+            let edge_type = kind.trim().parse::<EdgeType>().ok()?;
+            let target = link_target(target)?;
+            Some((edge_type, target))
+        })
+        .filter(|(edge_type, target)| seen.insert((edge_type.as_str(), target.clone())))
+        .collect()
 }
 
 /// Whether `id` may be declared in a page's frontmatter.

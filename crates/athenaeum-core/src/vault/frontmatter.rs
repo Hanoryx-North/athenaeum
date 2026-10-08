@@ -401,6 +401,131 @@ fn unquote(raw: &str) -> String {
     trimmed.to_string()
 }
 
+/// A value to write into a page's frontmatter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldValue {
+    Scalar(String),
+    List(Vec<String>),
+}
+
+/// Set top-level frontmatter fields, leaving every other byte of the page exactly as it was.
+///
+/// This is how accept, verify and materialize edit a page: they own a few keys, and a person's own
+/// keys, ordering, comments and body are not theirs to reformat. A key that exists is replaced in
+/// place (its whole block, including any list under it); a key that does not is appended before the
+/// closing fence. A page with no frontmatter gets a new block at the top.
+pub fn set_fields(content: &str, fields: &[(&str, FieldValue)]) -> String {
+    let newline = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let Some((head, payload, tail)) = split_strict(content) else {
+        let mut out = String::from("---");
+        out.push_str(newline);
+        for (key, value) in fields {
+            for line in render_field(key, value) {
+                out.push_str(&line);
+                out.push_str(newline);
+            }
+        }
+        out.push_str("---");
+        out.push_str(newline);
+        out.push_str(content);
+        return out;
+    };
+
+    let mut lines: Vec<String> = payload.lines().map(str::to_string).collect();
+    for (key, value) in fields {
+        let rendered = render_field(key, value);
+        match find_block(&lines, key) {
+            Some((start, end)) => {
+                lines.splice(start..end, rendered);
+            }
+            None => lines.extend(rendered),
+        }
+    }
+    let mut out = String::with_capacity(content.len() + 64);
+    out.push_str(head);
+    for line in &lines {
+        out.push_str(line);
+        out.push_str(newline);
+    }
+    out.push_str(tail);
+    out
+}
+
+/// `(everything through the opening fence line, the payload, the closing fence line onward)`.
+fn split_strict(content: &str) -> Option<(&str, &str, &str)> {
+    let first_end = content.find('\n')? + 1;
+    if content[..first_end].trim_end_matches(['\r', '\n']) != "---" {
+        return None;
+    }
+    let mut cursor = first_end;
+    while cursor < content.len() {
+        let rest = &content[cursor..];
+        let line_end = rest.find('\n').map(|i| i + 1).unwrap_or(rest.len());
+        if rest[..line_end].trim_end_matches(['\r', '\n']).trim() == "---" {
+            return Some((&content[..first_end], &content[first_end..cursor], &content[cursor..]));
+        }
+        cursor += line_end;
+    }
+    None
+}
+
+/// The line range of a top-level key and everything that belongs to it.
+fn find_block(lines: &[String], key: &str) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| {
+        !line.starts_with([' ', '\t'])
+            && line
+                .strip_prefix(key)
+                .is_some_and(|rest| rest.starts_with(':'))
+    })?;
+    let mut end = start + 1;
+    while end < lines.len() {
+        let line = &lines[end];
+        let continuation = line.starts_with([' ', '\t']) || line.trim_start().starts_with("- ");
+        if continuation || line.trim().is_empty() && lines[end + 1..].first().is_some_and(|n| n.starts_with([' ', '\t'])) {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    Some((start, end))
+}
+
+fn render_field(key: &str, value: &FieldValue) -> Vec<String> {
+    match value {
+        FieldValue::Scalar(text) => vec![format!("{key}: {}", yaml_scalar(text))],
+        FieldValue::List(items) if items.is_empty() => vec![format!("{key}: []")],
+        FieldValue::List(items) => std::iter::once(format!("{key}:"))
+            .chain(items.iter().map(|item| format!("  - {}", quote(item))))
+            .collect(),
+    }
+}
+
+/// A scalar the frontmatter reader will read back as written: bare when that is unambiguous,
+/// single-quoted otherwise. Never double-quoted, because the reader's double-quote unescaping is
+/// not a full inverse of any escaping.
+pub fn yaml_scalar(text: &str) -> String {
+    let flat = text.replace(['\r', '\n'], " ");
+    let bare = !flat.is_empty()
+        && flat == flat.trim()
+        && flat.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && flat
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '.' | '/' | '-'))
+        && !matches!(
+            flat.to_ascii_lowercase().as_str(),
+            "true" | "false" | "null" | "yes" | "no" | "on" | "off"
+        );
+    if bare {
+        flat
+    } else {
+        quote(&flat)
+    }
+}
+
+fn quote(text: &str) -> String {
+    format!("'{}'", text.replace(['\r', '\n'], " ").replace('\'', "''"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

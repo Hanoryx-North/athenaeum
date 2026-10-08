@@ -169,6 +169,26 @@ impl KnowledgeStore {
         Ok(evidence)
     }
 
+    /// Change what kind of evidence a record is, leaving everything else about it alone.
+    ///
+    /// Used by the vault indexer when a page stops (or starts) being text that arrived from
+    /// elsewhere: the page's own file counts as documentation only on the machine whose owner wrote
+    /// or reviewed it.
+    pub fn update_evidence_kind(
+        &mut self,
+        id: &EvidenceId,
+        kind: crate::model::EvidenceKind,
+    ) -> Result<()> {
+        let changed = self.conn.execute(
+            "UPDATE evidence SET kind = ?2 WHERE id = ?1",
+            params![id, kind.as_str()],
+        )?;
+        if changed == 0 {
+            return Err(Error::EvidenceNotFound(id.clone()));
+        }
+        Ok(())
+    }
+
     /// The nodes whose evidence touches a given file.
     pub fn nodes_citing_file(&self, path: &str) -> Result<Vec<NodeId>> {
         let normalized = path.replace('\\', "/");

@@ -12,6 +12,8 @@
 //! [`render`]; knowledge-base validation lives in [`check`].
 
 mod bridge;
+mod library;
+mod portable_cmd;
 mod render;
 
 use std::path::PathBuf;
@@ -19,9 +21,10 @@ use std::process::ExitCode;
 
 use athenaeum_core::graph;
 use athenaeum_core::prelude::*;
-use athenaeum_core::vault::{lint, LintOptions, LintSeverity};
+use athenaeum_core::vault::{lint, LintOptions, LintSeverity, PageRef};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use portable_cmd::{LibraryCommand, RepoCommand, SyncCommand, TrustCommand, VaultCommand};
 use render::emit;
 
 #[derive(Parser)]
@@ -133,6 +136,60 @@ enum Command {
     /// answer. Findings that are only untidy are reported and forgiven,
     /// unless `--strict` says otherwise.
     Check(CheckArgs),
+    /// The repository's identity: `repo init`, `repo info`.
+    Repo {
+        #[command(subcommand)]
+        command: RepoCommand,
+    },
+    /// Model proposals awaiting a decision.
+    Proposals {
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+    },
+    /// Accept a proposal: write it to the vault as a page, so it is permanent and portable.
+    ///
+    /// Accepting is not verifying. The page records the authority the claim already had.
+    Accept {
+        id: String,
+        /// Who is deciding, recorded in the page.
+        #[arg(long = "as", default_value = "user")]
+        by: String,
+    },
+    /// Reject a proposal so it is not offered again. Writes no file.
+    Reject {
+        id: String,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long = "as", default_value = "user")]
+        by: String,
+    },
+    /// Operations on the vault itself: `vault materialize`.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+    /// Write the repository to a zip: text, sources and a manifest of hashes, never the index.
+    Export { output: PathBuf },
+    /// Create a repository from an export. Never overwrites; indexes when done.
+    Import { archive: PathBuf, destination: PathBuf },
+    /// Pages that arrived from outside and have not been reviewed.
+    Trust {
+        #[command(subcommand)]
+        command: TrustCommand,
+    },
+    /// Connect to an Athenaeum Library server.
+    Library {
+        #[command(subcommand)]
+        command: LibraryCommand,
+    },
+    /// Synchronise with a Library. On its own: pull, then push what is left.
+    Sync {
+        #[command(subcommand)]
+        command: Option<SyncCommand>,
+        /// The revision message for the push.
+        #[arg(long, short, global = true)]
+        message: Option<String>,
+    },
 }
 
 #[derive(Args)]
@@ -367,6 +424,19 @@ fn main() -> ExitCode {
     match run(&cli) {
         Ok(outcome) => outcome.into(),
         Err(err) => {
+            if cli.json {
+                // A script asked for JSON, so a failure is JSON too, with a code it can branch on.
+                let code = match &err {
+                    Error::Portable { code, .. } => code.clone(),
+                    Error::NoWorkspace { .. } => "workspace_not_found".to_string(),
+                    Error::NodeNotFound(_) => "not_found".to_string(),
+                    _ => "error".to_string(),
+                };
+                println!(
+                    "{}",
+                    serde_json::json!({ "error": { "code": code, "message": err.to_string() } })
+                );
+            }
             eprintln!("athenaeum: {err}");
             ExitCode::FAILURE
         }
@@ -417,6 +487,24 @@ fn run(cli: &Cli) -> Result<Outcome> {
         return Ok(Outcome::Ok);
     }
 
+    // These work on a directory that has no workspace yet, or create the one they work in.
+    match &cli.command {
+        Command::Repo { command: RepoCommand::Init { name } } => {
+            return portable_cmd::repo_init(cli.json, &cwd, name.as_deref());
+        }
+        Command::Repo { command: RepoCommand::Info } => {
+            return portable_cmd::repo_info(cli.json, &cwd);
+        }
+        Command::Import { archive, destination } => {
+            return portable_cmd::import(cli.json, archive, destination);
+        }
+        Command::Library { command } => return portable_cmd::library(cli.json, command),
+        Command::Sync { command, message } => {
+            return portable_cmd::sync(cli.json, &cwd, command.as_ref(), message.as_deref());
+        }
+        _ => {}
+    }
+
     // The bridge owns its error envelope, including workspace discovery and
     // schema compatibility failures. Handling it before the ordinary CLI
     // open path guarantees an external runtime always receives JSON.
@@ -460,6 +548,19 @@ fn run(cli: &Cli) -> Result<Outcome> {
             }
 
             let created = store.create_node(node)?;
+            // A node the user stated is accepted by being stated, so it becomes a page now. It
+            // would otherwise exist only in the database and be lost with it.
+            if args.stated {
+                if let Err(error) = athenaeum_core::portable::memory::materialize_stated(
+                    &mut store,
+                    &created.id,
+                ) {
+                    eprintln!(
+                        "warning: {} was stored, but could not be written to the vault: {error}",
+                        created.id
+                    );
+                }
+            }
             emit(cli.json, &created, || {
                 println!("{}  {}", created.id, created.title);
                 Ok(())
@@ -531,6 +632,32 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 .map(|value| parse_value::<Authority>(value, "authority"))
                 .transpose()?;
             let verified = store.verify(&node.id, authority)?;
+            // A page's authority is what the page says, and the index follows the vault: without
+            // writing it there, the next reconcile would put the old value back.
+            if verified.authority != node.authority {
+                if let Some(project) = workspace.project_root() {
+                    let evidence = store.evidence_for(&node.id)?;
+                    if let Some(page) = PageRef::of(&node, &evidence, Some(project)) {
+                        let target = project.join(&page.path);
+                        let text = std::fs::read_to_string(&target)?;
+                        let updated = athenaeum_core::vault::set_fields(
+                            &text,
+                            &[(
+                                "authority",
+                                athenaeum_core::vault::FieldValue::Scalar(
+                                    verified.authority.as_str().to_string(),
+                                ),
+                            )],
+                        );
+                        athenaeum_core::portable::write_atomic(&target, updated.as_bytes())?;
+                        VaultIndexer::scan_and_index(
+                            &mut store,
+                            project,
+                            VaultScanOptions::default(),
+                        )?;
+                    }
+                }
+            }
             emit(cli.json, &verified, || {
                 println!(
                     "{:?} verified; it counts as {}",
@@ -715,6 +842,23 @@ fn run(cli: &Cli) -> Result<Outcome> {
         }
 
         Command::Bridge => unreachable!("handled before the workspace is opened"),
+
+        Command::Repo { .. } | Command::Import { .. } | Command::Library { .. } | Command::Sync { .. } => {
+            unreachable!("handled before the workspace is opened")
+        }
+
+        Command::Proposals { limit } => return portable_cmd::proposals(cli.json, &mut store, *limit),
+        Command::Accept { id, by } => return portable_cmd::accept(cli.json, &mut store, id, by),
+        Command::Reject { id, reason, by } => {
+            return portable_cmd::reject(cli.json, &mut store, id, reason.as_deref(), by)
+        }
+        Command::Vault { command: VaultCommand::Materialize { apply } } => {
+            return portable_cmd::materialize(cli.json, &mut store, *apply)
+        }
+        Command::Export { output } => return portable_cmd::export(cli.json, &workspace, output),
+        Command::Trust { command } => {
+            return portable_cmd::trust(cli.json, &mut store, &workspace, command)
+        }
 
         Command::Index(args) => {
             let project_root = workspace

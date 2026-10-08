@@ -605,6 +605,7 @@ version = "0.1.0"
 dependencies = [
  "athenaeum-core",
  "clap",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",
@@ -624,6 +625,7 @@ dependencies = [
  "thiserror 2.0.20",
  "uuid",
  "walkdir",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -6702,6 +6704,7 @@ dependencies = [
  "cookie",
  "cookie_store",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

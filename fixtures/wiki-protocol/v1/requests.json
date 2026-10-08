@@ -2,37 +2,61 @@
   "capabilities": {
     "protocolVersion": 1,
     "requestId": "capabilities-1",
-    "request": { "method": "capabilities" }
+    "request": {
+      "method": "capabilities"
+    }
   },
   "search": {
     "protocolVersion": 1,
     "requestId": "search-1",
-    "request": { "method": "search", "query": "OAuth callback", "limit": 20 }
+    "request": {
+      "method": "search",
+      "query": "OAuth callback",
+      "limit": 20
+    }
   },
   "open": {
     "protocolVersion": 1,
     "requestId": "open-1",
-    "request": { "method": "open", "node": "AuthService" }
+    "request": {
+      "method": "open",
+      "node": "AuthService"
+    }
   },
   "navigate": {
     "protocolVersion": 1,
     "requestId": "navigate-1",
-    "request": { "method": "navigate", "node": "AuthService", "depth": 2, "maxNodes": 25 }
+    "request": {
+      "method": "navigate",
+      "node": "AuthService",
+      "depth": 2,
+      "maxNodes": 25
+    }
   },
   "related": {
     "protocolVersion": 1,
     "requestId": "related-1",
-    "request": { "method": "related", "node": "AuthService", "includeProposed": true }
+    "request": {
+      "method": "related",
+      "node": "AuthService",
+      "includeProposed": true
+    }
   },
   "evidence": {
     "protocolVersion": 1,
     "requestId": "evidence-1",
-    "request": { "method": "evidence", "node": "AuthService" }
+    "request": {
+      "method": "evidence",
+      "node": "AuthService"
+    }
   },
   "history": {
     "protocolVersion": 1,
     "requestId": "history-1",
-    "request": { "method": "history", "node": "Decision_042" }
+    "request": {
+      "method": "history",
+      "node": "Decision_042"
+    }
   },
   "context": {
     "protocolVersion": 1,
@@ -40,7 +64,9 @@
     "request": {
       "method": "context",
       "task": "fix the OAuth callback",
-      "seeds": ["OAuth"],
+      "seeds": [
+        "OAuth"
+      ],
       "depth": 2,
       "maxNodes": 25
     }
@@ -57,7 +83,10 @@
         "content": "",
         "scope": "project"
       },
-      "caller": { "model": "curator-model", "session": "sess_123" }
+      "caller": {
+        "model": "curator-model",
+        "session": "sess_123"
+      }
     }
   },
   "update": {
@@ -72,7 +101,10 @@
         "content": null,
         "reason": "Confirmed against ADR-042."
       },
-      "caller": { "model": "curator-model", "session": "sess_123" }
+      "caller": {
+        "model": "curator-model",
+        "session": "sess_123"
+      }
     }
   },
   "link": {
@@ -87,7 +119,10 @@
         "note": "ADR requires PKCE.",
         "confidence": 0.5
       },
-      "caller": { "model": "curator-model", "session": "sess_123" }
+      "caller": {
+        "model": "curator-model",
+        "session": "sess_123"
+      }
     }
   },
   "attach_evidence": {
@@ -110,7 +145,10 @@
         "excerpt": "validateState(request.state)",
         "note": "The state check precedes session creation."
       },
-      "caller": { "model": "curator-model", "session": "sess_123" }
+      "caller": {
+        "model": "curator-model",
+        "session": "sess_123"
+      }
     }
   },
   "record_use": {
@@ -118,8 +156,44 @@
     "requestId": "use-1",
     "request": {
       "method": "record_use",
-      "nodes": ["Decision_042", "OAuthCallback"],
+      "nodes": [
+        "Decision_042",
+        "OAuthCallback"
+      ],
       "session": "sess_123"
+    }
+  },
+  "proposals": {
+    "protocolVersion": 1,
+    "requestId": "proposals-1",
+    "request": {
+      "method": "proposals",
+      "limit": 20
+    }
+  },
+  "accept": {
+    "protocolVersion": 1,
+    "requestId": "accept-1",
+    "request": {
+      "method": "accept",
+      "node": "node_observation",
+      "caller": {
+        "model": "athenaeum-agent",
+        "session": "sess_123"
+      }
+    }
+  },
+  "reject": {
+    "protocolVersion": 1,
+    "requestId": "reject-1",
+    "request": {
+      "method": "reject",
+      "node": "node_observation",
+      "reason": "already covered by the OAuth page",
+      "caller": {
+        "model": "athenaeum-agent",
+        "session": "sess_123"
+      }
     }
   }
 }

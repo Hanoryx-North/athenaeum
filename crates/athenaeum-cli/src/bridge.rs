@@ -153,8 +153,11 @@ fn wiki_error_details(error: &Error) -> Option<serde_json::Value> {
     }
 }
 
-fn wiki_error_code(error: &Error) -> &'static str {
-    match error {
+fn wiki_error_code(error: &Error) -> String {
+    if let Error::Portable { code, .. } = error {
+        return code.clone();
+    }
+    let code: &'static str = match error {
         Error::NodeNotFound(_) | Error::EdgeNotFound(_) | Error::EvidenceNotFound(_) => "not_found",
         Error::DuplicateId(_)
         | Error::DuplicateTitle { .. }
@@ -171,5 +174,7 @@ fn wiki_error_code(error: &Error) -> &'static str {
         | Error::RepositoryParser { .. }
         | Error::IncompleteRepositoryScan { .. } => "knowledge_error",
         Error::NoWorkspace { .. } => "workspace_not_found",
-    }
+        Error::Portable { .. } => unreachable!("handled above"),
+    };
+    code.to_string()
 }

@@ -17,6 +17,7 @@ use crate::model::{
     Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, Neighbor, NodeType,
     NodeVersion, Provenance, Scope, SourceAnchor,
 };
+use crate::portable::memory::{self, Accepted};
 use crate::store::{EdgeFilter, KnowledgeStore, SearchHit};
 pub use crate::vault::PageRef as WikiPage;
 
@@ -32,10 +33,12 @@ pub const WIKI_PROTOCOL_VERSION: u32 = 1;
 /// * `page_pointers` — a node that is a page of the vault carries a `page` with its file path, in
 ///   `open` and in a brief. Absence of the feature means an older library; absence of `page` on a
 ///   node, with the feature present, means the node is not a page.
+/// * `memory_lifecycle` — `proposals`, `accept` and `reject`: a model's proposal becomes durable
+///   only when accepted, and accepting writes it to the vault as a page.
 /// * `vault_sync` — the bridge compares the vault with the index before it answers a read and
 ///   reconciles when they differ, so a page an agent just edited is what the next question sees.
 ///   It keeps an index that was built; it does not build the first one.
-const FEATURES: &[&str] = &["page_pointers", "vault_sync"];
+const FEATURES: &[&str] = &["page_pointers", "vault_sync", "memory_lifecycle"];
 
 const DEFAULT_SEARCH_LIMIT: u32 = 20;
 const MAX_SEARCH_LIMIT: u32 = 100;
@@ -125,6 +128,24 @@ pub enum WikiRequest {
         #[serde(default)]
         session: Option<SessionId>,
     },
+    /// Model proposals nobody has accepted or rejected.
+    Proposals {
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// Make a proposal permanent by writing it to the vault as a page. The caller is whoever
+    /// decided: the person, or the policy acting for them.
+    Accept {
+        node: String,
+        caller: WikiCaller,
+    },
+    /// Decline a proposal so it is not offered again. Writes no file.
+    Reject {
+        node: String,
+        #[serde(default)]
+        reason: Option<String>,
+        caller: WikiCaller,
+    },
 }
 
 impl WikiRequest {
@@ -142,6 +163,7 @@ impl WikiRequest {
                 | Self::Evidence { .. }
                 | Self::History { .. }
                 | Self::Context { .. }
+                | Self::Proposals { .. }
         )
     }
 }
@@ -230,6 +252,18 @@ pub enum WikiResponse {
     Link { edge: KnowledgeEdge },
     AttachEvidence { evidence: Evidence },
     RecordUse { nodes: Vec<NodeId> },
+    Proposals { proposals: Vec<WikiProposal> },
+    Accept { accepted: Box<Accepted> },
+    Reject { node: KnowledgeNode },
+}
+
+/// A proposal awaiting a decision, with what a reviewer needs to make it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiProposal {
+    pub node: KnowledgeNode,
+    pub relationships: Vec<WikiRelatedNode>,
+    pub evidence: Vec<Evidence>,
 }
 
 /// Successful or failed response envelope used by the process bridge.
@@ -432,6 +466,19 @@ impl<'a> WikiService<'a> {
             WikiRequest::RecordUse { nodes, session } => Ok(WikiResponse::RecordUse {
                 nodes: self.record_use(&nodes, session)?,
             }),
+            WikiRequest::Proposals { limit } => Ok(WikiResponse::Proposals {
+                proposals: self.proposals(limit)?,
+            }),
+            WikiRequest::Accept { node, caller } => Ok(WikiResponse::Accept {
+                accepted: Box::new(self.accept(&node, caller)?),
+            }),
+            WikiRequest::Reject {
+                node,
+                reason,
+                caller,
+            } => Ok(WikiResponse::Reject {
+                node: self.reject(&node, reason.as_deref(), caller)?,
+            }),
         }
     }
 
@@ -452,6 +499,9 @@ impl<'a> WikiService<'a> {
                 "link",
                 "attach_evidence",
                 "record_use",
+                "proposals",
+                "accept",
+                "reject",
             ]
             .into_iter()
             .map(str::to_string)
@@ -651,6 +701,39 @@ impl<'a> WikiService<'a> {
             .collect::<Result<Vec<_>>>()?;
         self.store.record_use(&nodes, session.as_ref())?;
         Ok(nodes)
+    }
+
+    pub fn proposals(&self, limit: Option<u32>) -> Result<Vec<WikiProposal>> {
+        memory::proposals(
+            self.store,
+            Some(limit.unwrap_or(DEFAULT_SEARCH_LIMIT).min(MAX_SEARCH_LIMIT)),
+        )?
+        .into_iter()
+        .map(|node| {
+            Ok(WikiProposal {
+                relationships: related_nodes(self.store, &node.id, &EdgeFilter::all())?,
+                evidence: self.store.evidence_for(&node.id)?,
+                node,
+            })
+        })
+        .collect()
+    }
+
+    pub fn accept(&mut self, reference: &str, caller: WikiCaller) -> Result<Accepted> {
+        validate_nonempty(&caller.model, "model")?;
+        let node = self.resolve(reference)?;
+        memory::accept(self.store, &node.id, &caller.model)
+    }
+
+    pub fn reject(
+        &mut self,
+        reference: &str,
+        reason: Option<&str>,
+        caller: WikiCaller,
+    ) -> Result<KnowledgeNode> {
+        validate_nonempty(&caller.model, "model")?;
+        let node = self.resolve(reference)?;
+        memory::reject(self.store, &node.id, reason, &caller.model)
     }
 
     fn resolve(&self, reference: &str) -> Result<KnowledgeNode> {

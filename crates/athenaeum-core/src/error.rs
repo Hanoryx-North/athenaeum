@@ -94,6 +94,11 @@ pub enum Error {
     )]
     IncompleteRepositoryScan { operation: &'static str },
 
+    /// The portable format or a sync refused something. The code is the protocol's, so a front end
+    /// can report `invalid_path` or `conflict` without parsing the message.
+    #[error("{message}")]
+    Portable { code: String, message: String },
+
     /// The database on disk was written by a newer build than this one.
     /// Refusing is the correct move: a downgrade that silently drops columns
     /// destroys the user's knowledge (§61).

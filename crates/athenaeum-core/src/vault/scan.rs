@@ -48,16 +48,42 @@ pub(super) fn scan(root: &Path, options: VaultScanOptions) -> Result<VaultSnapsh
         sources: Vec::new(),
         warnings: Vec::new(),
         complete: true,
+        arrived: Default::default(),
     };
 
     scan_pages(root, &options, &mut snapshot)?;
     scan_sources(root, &options, &mut snapshot)?;
+    mark_arrivals(root, &mut snapshot);
 
     // Sorted so two scans of the same vault produce the same snapshot
     // whatever order the filesystem hands entries back in.
     snapshot.pages.sort_by(|a, b| a.path.cmp(&b.path));
     snapshot.sources.sort_by(|a, b| a.identity.cmp(&b.identity));
     Ok(snapshot)
+}
+
+/// Record which pages still hold exactly what was pulled or imported into this repository.
+///
+/// A ledger that cannot be read is reported and treated as empty: the failure must not hide the
+/// vault, and an empty ledger is the state of every repository nothing was ever pulled into.
+fn mark_arrivals(root: &Path, snapshot: &mut VaultSnapshot) {
+    let ledger = match crate::portable::ledger::TrustLedger::load(root) {
+        Ok(ledger) => ledger,
+        Err(error) => {
+            snapshot
+                .warnings
+                .push(format!("Could not read the trust ledger: {error}"));
+            return;
+        }
+    };
+    if ledger.is_empty() {
+        return;
+    }
+    for page in &snapshot.pages {
+        if ledger.caps(&page.path, &page.content_hash) {
+            snapshot.arrived.insert(page.path.clone());
+        }
+    }
 }
 
 /// A hash of how the vault's files look from the outside: which exist, how long each is and when
@@ -89,6 +115,12 @@ pub(super) fn fingerprint(root: &Path) -> Result<String> {
                 feed(name, &metadata);
             }
         }
+    }
+
+    // The trust ledger decides pages' effective authority, so a change to it is a change to the
+    // index even when no page was touched.
+    if let Ok(metadata) = std::fs::metadata(crate::portable::ledger::ledger_path(root)) {
+        feed("\0trust-ledger", &metadata);
     }
 
     let wiki = root.join(WIKI_DIR);

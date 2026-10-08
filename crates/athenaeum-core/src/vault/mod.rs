@@ -63,14 +63,15 @@ mod pointer;
 mod scan;
 mod wikilink;
 
-pub use frontmatter::{Frontmatter, FrontmatterValue};
+pub use frontmatter::{set_fields, FieldValue, Frontmatter, FrontmatterValue};
 pub use graph::{GraphEdge, GraphNode, GraphOrigin, KnowledgeGraph};
 pub use index::{
     UnresolvedKind, UnresolvedLink, VaultIndexReport, VaultIndexer, VaultSync, PAGE_PROVENANCE,
     SOURCE_PROVENANCE,
 };
+pub(crate) use index::is_vault_owned;
 pub use lint::{LintFinding, LintFindingKind, LintOptions, LintSeverity, VaultLintReport};
-pub use page::VaultPage;
+pub use page::{is_valid_declared_id, DeclaredEvidence, VaultPage};
 pub use pointer::PageRef;
 pub use wikilink::WikiLink;
 
@@ -129,6 +130,10 @@ pub struct VaultSnapshot {
     pub warnings: Vec<String>,
     /// False when a budget stopped the walk before the vault ended.
     pub complete: bool,
+    /// Paths of pages that still hold exactly what arrived from a pull, a fork or an import. The
+    /// indexer caps their authority: a claim of authority in text that came from elsewhere is a
+    /// claim, not a fact. See [`crate::portable::ledger`].
+    pub arrived: std::collections::BTreeSet<String>,
 }
 
 impl VaultSnapshot {

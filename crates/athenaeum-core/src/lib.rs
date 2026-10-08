@@ -74,6 +74,7 @@ pub mod graph;
 pub mod id;
 pub mod journal;
 pub mod model;
+pub mod portable;
 pub mod repository;
 pub mod review;
 pub mod store;

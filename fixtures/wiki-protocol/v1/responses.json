@@ -8,9 +8,22 @@
       "capabilities": {
         "protocolVersion": 1,
         "operations": [
-          "capabilities", "search", "open", "navigate", "related", "evidence",
-          "history", "context", "create", "update", "link", "attach_evidence",
-          "record_use"
+          "capabilities",
+          "search",
+          "open",
+          "navigate",
+          "related",
+          "evidence",
+          "history",
+          "context",
+          "create",
+          "update",
+          "link",
+          "attach_evidence",
+          "record_use",
+          "proposals",
+          "accept",
+          "reject"
         ],
         "limits": {
           "maxSearchResults": 100,
@@ -19,31 +32,87 @@
           "maxContextNodes": 100
         },
         "nodeTypes": [
-          "project", "repository", "module", "file", "symbol", "concept",
-          "fact", "rule", "decision", "procedure", "gotcha", "observation",
-          "preference", "entity", "api", "test", "source", "dependency"
+          "project",
+          "repository",
+          "module",
+          "file",
+          "symbol",
+          "concept",
+          "fact",
+          "rule",
+          "decision",
+          "procedure",
+          "gotcha",
+          "observation",
+          "preference",
+          "entity",
+          "api",
+          "test",
+          "source",
+          "dependency"
         ],
         "edgeTypes": [
-          "depends_on", "implements", "implemented_by", "contains", "part_of",
-          "related_to", "requires", "verifies", "verified_by", "derived_from",
-          "contradicts", "supersedes", "superseded_by", "caused_by", "tests",
-          "tested_by", "references", "constrained_by", "constrains",
-          "has_gotcha", "gotcha_of", "evidenced_by", "modified_by", "calls",
+          "depends_on",
+          "implements",
+          "implemented_by",
+          "contains",
+          "part_of",
+          "related_to",
+          "requires",
+          "verifies",
+          "verified_by",
+          "derived_from",
+          "contradicts",
+          "supersedes",
+          "superseded_by",
+          "caused_by",
+          "tests",
+          "tested_by",
+          "references",
+          "constrained_by",
+          "constrains",
+          "has_gotcha",
+          "gotcha_of",
+          "evidenced_by",
+          "modified_by",
+          "calls",
           "called_by"
         ],
         "authorities": [
-          "user_instruction", "project_rule", "project_decision",
-          "verified_evidence", "verified_knowledge", "user_preference",
-          "imported_knowledge", "external_knowledge", "unverified_observation"
+          "user_instruction",
+          "project_rule",
+          "project_decision",
+          "verified_evidence",
+          "verified_knowledge",
+          "user_preference",
+          "imported_knowledge",
+          "external_knowledge",
+          "unverified_observation"
         ],
         "scopes": [
-          "universal", "technology", "organization", "project", "repository", "file"
+          "universal",
+          "technology",
+          "organization",
+          "project",
+          "repository",
+          "file"
         ],
         "evidenceKinds": [
-          "source_file", "symbol", "test", "git_commit", "documentation",
-          "configuration", "user_statement", "architectural_decision", "external_source"
+          "source_file",
+          "symbol",
+          "test",
+          "git_commit",
+          "documentation",
+          "configuration",
+          "user_statement",
+          "architectural_decision",
+          "external_source"
         ],
-        "features": ["page_pointers", "vault_sync"]
+        "features": [
+          "page_pointers",
+          "vault_sync",
+          "memory_lifecycle"
+        ]
       }
     }
   },
@@ -64,7 +133,9 @@
             "scope": "project",
             "authority": "verified_knowledge",
             "status": "valid",
-            "provenance": { "source": "user" },
+            "provenance": {
+              "source": "user"
+            },
             "createdAt": "2026-08-21T00:00:00Z",
             "updatedAt": "2026-08-21T00:00:00Z",
             "version": 1
@@ -217,7 +288,9 @@
       "message": "the title \"auth_service\" is a near-duplicate of existing node(s) [node_auth]; attach evidence to an existing node or choose a clearly distinct title",
       "details": {
         "title": "auth_service",
-        "existingNodes": ["node_auth"]
+        "existingNodes": [
+          "node_auth"
+        ]
       }
     }
   },
@@ -228,6 +301,99 @@
     "error": {
       "code": "workspace_not_found",
       "message": "no knowledge base found from /project; run `athenaeum init` first"
+    }
+  },
+  "proposals_ok": {
+    "protocolVersion": 1,
+    "requestId": "proposals-1",
+    "status": "ok",
+    "response": {
+      "method": "proposals",
+      "proposals": [
+        {
+          "node": {
+            "id": "node_observation",
+            "type": "observation",
+            "title": "OAuthCallback validates state first",
+            "summary": "State is checked before session creation.",
+            "content": "",
+            "scope": "project",
+            "authority": "unverified_observation",
+            "status": "valid",
+            "provenance": {
+              "source": "model",
+              "detail": "curator-model",
+              "session": "sess_123"
+            },
+            "createdAt": "2026-08-21T00:00:00Z",
+            "updatedAt": "2026-08-21T00:00:00Z",
+            "version": 1
+          },
+          "relationships": [],
+          "evidence": []
+        }
+      ]
+    }
+  },
+  "accept_ok": {
+    "protocolVersion": 1,
+    "requestId": "accept-1",
+    "status": "ok",
+    "response": {
+      "method": "accept",
+      "accepted": {
+        "node": {
+          "id": "node_observation",
+          "type": "observation",
+          "title": "OAuthCallback validates state first",
+          "summary": "State is checked before session creation.",
+          "content": "",
+          "scope": "project",
+          "authority": "unverified_observation",
+          "status": "valid",
+          "provenance": {
+            "source": "deterministic",
+            "detail": "vault_index:page:observation:agent-proposal"
+          },
+          "createdAt": "2026-08-21T00:00:00Z",
+          "updatedAt": "2026-08-21T00:00:00Z",
+          "version": 1
+        },
+        "page": {
+          "path": "wiki/observations/oauthcallback-validates-state-first.md",
+          "absolutePath": "/work/project/wiki/observations/oauthcallback-validates-state-first.md",
+          "contentHash": "b8163dbf00000000000000000000000000000000000000000000000000000000"
+        },
+        "alreadyAccepted": false,
+        "relationshipsWritten": 0,
+        "relationshipsLeftLocal": []
+      }
+    }
+  },
+  "reject_ok": {
+    "protocolVersion": 1,
+    "requestId": "reject-1",
+    "status": "ok",
+    "response": {
+      "method": "reject",
+      "node": {
+        "id": "node_observation",
+        "type": "observation",
+        "title": "OAuthCallback validates state first",
+        "summary": "State is checked before session creation.",
+        "content": "",
+        "scope": "project",
+        "authority": "unverified_observation",
+        "status": "archived",
+        "provenance": {
+          "source": "model",
+          "detail": "curator-model",
+          "session": "sess_123"
+        },
+        "createdAt": "2026-08-21T00:00:00Z",
+        "updatedAt": "2026-08-21T00:00:00Z",
+        "version": 1
+      }
     }
   }
 }

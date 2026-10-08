@@ -1,0 +1,83 @@
+{
+  "cases": [
+    {
+      "name": "empty",
+      "entries": [],
+      "canonical": "[]",
+      "treeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "one file",
+      "entries": [
+        {
+          "path": "wiki/a.md",
+          "sha256": "aa1237b773c38dbddef583c4868aaea7a44c5237ea7923aecca5513764b42d80",
+          "size": 4
+        }
+      ],
+      "canonical": "[{\"path\":\"wiki/a.md\",\"sha256\":\"aa1237b773c38dbddef583c4868aaea7a44c5237ea7923aecca5513764b42d80\",\"size\":4}]",
+      "treeHash": "b65104db33f09f64f25a6710310977a034003051c1ab1e284b6bfddc5df541e2"
+    },
+    {
+      "name": "unsorted input",
+      "entries": [
+        {
+          "path": "wiki/b.md",
+          "sha256": "0263829989b6fd954f72baaf2fc64bc2e2f01d692d4de72986ea808f6e99813f",
+          "size": 2
+        },
+        {
+          "path": "README.md",
+          "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4",
+          "size": 3
+        },
+        {
+          "path": "wiki/a.md",
+          "sha256": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7",
+          "size": 2
+        }
+      ],
+      "canonical": "[{\"path\":\"README.md\",\"sha256\":\"98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4\",\"size\":3},{\"path\":\"wiki/a.md\",\"sha256\":\"87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7\",\"size\":2},{\"path\":\"wiki/b.md\",\"sha256\":\"0263829989b6fd954f72baaf2fc64bc2e2f01d692d4de72986ea808f6e99813f\",\"size\":2}]",
+      "treeHash": "a0240223cff0c51339a9150a04a22337e21190618c164d62bf04ae5ca81d2966"
+    },
+    {
+      "name": "byte order is not UTF-16 order",
+      "entries": [
+        {
+          "path": "wiki/ｚ.md",
+          "sha256": "1f0ba0958b0d3967e56b86e46ee2c1683e57db3929df53f902148cb08ed98b48",
+          "size": 12
+        },
+        {
+          "path": "wiki/😀.md",
+          "sha256": "9fa3b972fae961494200c65981880d6d89af24fc169d99c6d5bed59c7a54d26e",
+          "size": 5
+        },
+        {
+          "path": "wiki/z.md",
+          "sha256": "c865f6c5ab8d1b0bcd383a5e1e3879d22681c96bf462c269b7581d523fbe70ab",
+          "size": 2
+        },
+        {
+          "path": "wiki/é.md",
+          "sha256": "cb67755626a74ecf60edf94a66d4f093d016a3546bf9290aad2d5bc3796e6d1e",
+          "size": 8
+        }
+      ],
+      "canonical": "[{\"path\":\"wiki/z.md\",\"sha256\":\"c865f6c5ab8d1b0bcd383a5e1e3879d22681c96bf462c269b7581d523fbe70ab\",\"size\":2},{\"path\":\"wiki/é.md\",\"sha256\":\"cb67755626a74ecf60edf94a66d4f093d016a3546bf9290aad2d5bc3796e6d1e\",\"size\":8},{\"path\":\"wiki/ｚ.md\",\"sha256\":\"1f0ba0958b0d3967e56b86e46ee2c1683e57db3929df53f902148cb08ed98b48\",\"size\":12},{\"path\":\"wiki/😀.md\",\"sha256\":\"9fa3b972fae961494200c65981880d6d89af24fc169d99c6d5bed59c7a54d26e\",\"size\":5}]",
+      "treeHash": "98577625a47f30204b49f013d3e7cac9b97c362f99b03a0931b4973bc0886aa8"
+    },
+    {
+      "name": "unicode content sizes are bytes",
+      "entries": [
+        {
+          "path": "wiki/ü.md",
+          "sha256": "583de0934b8686c9d61b594d0a56fcca76d679a0e95d76fd0df196b8060aad8f",
+          "size": 23
+        }
+      ],
+      "canonical": "[{\"path\":\"wiki/ü.md\",\"sha256\":\"583de0934b8686c9d61b594d0a56fcca76d679a0e95d76fd0df196b8060aad8f\",\"size\":23}]",
+      "treeHash": "458298f99720bd636acc45fef2ac6008e51543c3321f23302ea8025f35358d7a"
+    }
+  ]
+}

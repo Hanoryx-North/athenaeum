@@ -339,7 +339,7 @@ pub fn review(report: &ReviewReport) {
 
 /// Shorten to `max` characters, counting characters rather than bytes so a
 /// multi-byte title is not cut mid-glyph.
-fn truncate(text: &str, max: usize) -> String {
+pub fn truncate(text: &str, max: usize) -> String {
     let mut chars = text.chars();
     // Take one more than the budget allows: whether a further character
     // exists is what distinguishes "fits exactly" from "was cut short",

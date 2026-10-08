@@ -26,6 +26,8 @@ pub enum EventKind {
     NodeCited,
     NodeVerified,
     NodeRejected,
+    /// A proposal became a page of the vault, or a user-stated claim was written to one.
+    NodeAccepted,
     EdgeCreated,
     /// A proposed edge was accepted and became traversable.
     EdgePromoted,
@@ -52,6 +54,7 @@ impl EventKind {
         EventKind::NodeCited,
         EventKind::NodeVerified,
         EventKind::NodeRejected,
+        EventKind::NodeAccepted,
         EventKind::EdgeCreated,
         EventKind::EdgePromoted,
         EventKind::EdgeRemoved,
@@ -73,6 +76,7 @@ impl EventKind {
             NodeCited => "node_cited",
             NodeVerified => "node_verified",
             NodeRejected => "node_rejected",
+            NodeAccepted => "node_accepted",
             EdgeCreated => "edge_created",
             EdgePromoted => "edge_promoted",
             EdgeRemoved => "edge_removed",

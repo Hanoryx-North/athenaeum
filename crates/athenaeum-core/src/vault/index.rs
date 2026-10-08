@@ -37,11 +37,15 @@ pub const SOURCE_PROVENANCE: &str = "vault_index:source";
 
 const EDGE_LINK: &str = "vault_index:wikilink";
 const EDGE_RELATED: &str = "vault_index:related";
+const EDGE_RELATION: &str = "vault_index:relation";
 const EDGE_SOURCE: &str = "vault_index:sources";
 const EDGE_PREFIX: &str = "vault_index:";
 /// Evidence rows are identified by id rather than provenance, which the
 /// evidence table does not carry.
 const EVIDENCE_PREFIX: &str = "ev_vault_";
+
+/// Evidence a page declares in its own frontmatter, as opposed to the pointers the indexer derives.
+const DECLARED_EVIDENCE_PREFIX: &str = "ev_vault_decl_";
 
 /// The id prefix of the evidence record a page has for its own file.
 pub(super) const PAGE_EVIDENCE_PREFIX: &str = "ev_vault_page_";
@@ -196,6 +200,22 @@ impl VaultIndexer {
         Self::scan_and_index(store, root, options).map(VaultSync::Reconciled)
     }
 
+    /// Make `page` the owner of the node it declares, as accepting a proposal does.
+    ///
+    /// The node already exists in the store, proposed by a model or stated by a person, and the
+    /// page has just been written for it. Ownership moves to the vault by giving the node the
+    /// provenance the indexer would have given it, so the next reconcile sees a node it already
+    /// agrees with instead of a clash over an id.
+    pub fn adopt_page(store: &mut KnowledgeStore, page: &VaultPage) -> Result<NodeId> {
+        let id = match page.declared_id.as_deref() {
+            Some(declared) => NodeId::from_existing(declared.to_string()),
+            None => page_node_id(&page.path),
+        };
+        let mut report = VaultIndexReport::default();
+        ensure_node(store, page_node(page, id.clone(), false), &mut report)?;
+        Ok(id)
+    }
+
     /// Reconcile the store against an already-scanned vault.
     ///
     /// Writes only differences. Re-running this against an unchanged
@@ -214,7 +234,7 @@ impl VaultIndexer {
 
         let mut owned = HashSet::new();
         for page in &snapshot.pages {
-            let node = page_node(page, ids.of(&page.path));
+            let node = page_node(page, ids.of(&page.path), snapshot.arrived.contains(&page.path));
             owned.insert(node.id.clone());
             ensure_node(store, node, &mut report)?;
         }
@@ -234,8 +254,14 @@ impl VaultIndexer {
 
         for page in &snapshot.pages {
             let node = ids.of(&page.path);
-            let (edges, evidence) =
-                desired_for_page(page, &node, &resolver, &mut report, &mut unresolved);
+            let (edges, evidence) = desired_for_page(
+                page,
+                &node,
+                snapshot.arrived.contains(&page.path),
+                &resolver,
+                &mut report,
+                &mut unresolved,
+            );
             reconcile_edges(store, &node, &edges, &mut report)?;
             reconcile_evidence(store, &node, &evidence, &mut report)?;
         }
@@ -300,11 +326,24 @@ fn node_type_for(page_type: &str) -> NodeType {
 
 /// Where a page sits in the authority hierarchy.
 ///
-/// A declared `authority:` always wins — the frontmatter is part of the
-/// vault, so a person or the agent writing one there is stating it in the
-/// layer that owns it. The fallbacks exist so a page that predates the
-/// convention still gets something better than the floor value.
-fn authority_for(page: &VaultPage) -> Authority {
+/// A declared `authority:` wins — the frontmatter is part of the vault, so a person or the agent
+/// writing one there is stating it in the layer that owns it. The fallbacks exist so a page that
+/// predates the convention still gets something better than the floor value.
+///
+/// **Except for text that arrived from elsewhere.** A page that still holds exactly what a pull,
+/// a fork or an import wrote is somebody else's claim, and it is capped at
+/// [`Authority::ImportedKnowledge`] whatever it declares. The cap lifts the moment the file is
+/// edited locally, because that is when a person took responsibility for it.
+fn authority_for(page: &VaultPage, arrived: bool) -> Authority {
+    let effective = declared_authority(page);
+    if arrived && effective.outranks(&Authority::ImportedKnowledge) {
+        Authority::ImportedKnowledge
+    } else {
+        effective
+    }
+}
+
+fn declared_authority(page: &VaultPage) -> Authority {
     if let Some(declared) = page.authority {
         return declared;
     }
@@ -323,13 +362,13 @@ fn authority_for(page: &VaultPage) -> Authority {
     }
 }
 
-fn page_node(page: &VaultPage, id: NodeId) -> KnowledgeNode {
+fn page_node(page: &VaultPage, id: NodeId, arrived: bool) -> KnowledgeNode {
     KnowledgeNode::new(node_type_for(&page.page_type), page.title.clone())
         .with_id(id)
         .with_summary(page.summary.clone())
         .with_content(page.body.trim().to_string())
-        .with_scope(Scope::Project)
-        .with_authority(authority_for(page))
+        .with_scope(page.scope.unwrap_or(Scope::Project))
+        .with_authority(authority_for(page, arrived))
         .with_status(NodeStatus::Valid)
         .with_provenance(Provenance::deterministic(page_provenance(page)))
 }
@@ -502,6 +541,11 @@ impl Resolver {
             let id = ids.of(&page.path);
             resolver.claim(page.slug.clone(), &id);
             resolver.claim(page.path.trim_end_matches(".md").to_string(), &id);
+            // A declared id names the page whatever directory it moves to. Only claimed when it was
+            // honoured, so a loser of a duplicate cannot be reached through a name it never held.
+            if page.declared_id.as_deref() == Some(id.as_str()) {
+                resolver.claim(id.as_str().to_string(), &id);
+            }
             if let Some(rest) = page.path.strip_prefix("wiki/") {
                 resolver.claim(rest.trim_end_matches(".md").to_string(), &id);
             }
@@ -625,6 +669,7 @@ type DesiredEvidence = BTreeMap<EvidenceId, Evidence>;
 fn desired_for_page(
     page: &VaultPage,
     from: &NodeId,
+    arrived: bool,
     resolver: &Resolver,
     report: &mut VaultIndexReport,
     unresolved: &mut Vec<UnresolvedLink>,
@@ -636,9 +681,16 @@ fn desired_for_page(
     // The page's own file, so "which knowledge touches this file?" answers
     // with the page itself as well as with everything citing it.
     let id = page_evidence_id(&page.path);
+    // A page that arrived from elsewhere is not documentation *this* project wrote or reviewed, so
+    // its own file cannot be what promotes it into a rule or a decision.
+    let own_kind = if arrived {
+        EvidenceKind::ExternalSource
+    } else {
+        EvidenceKind::Documentation
+    };
     evidence.insert(
         id.clone(),
-        Evidence::new(from.clone(), EvidenceKind::Documentation)
+        Evidence::new(from.clone(), own_kind)
             .with_id(id)
             .with_anchor(SourceAnchor {
                 content_hash: Some(page.content_hash.clone()),
@@ -673,6 +725,60 @@ fn desired_for_page(
                 }),
             }
         }
+    }
+
+    for (edge_type, target) in &page.relations {
+        match resolver.page(target) {
+            Some(to) if *to != from => {
+                let key = (to.clone(), edge_type.as_str());
+                if edges
+                    .insert(
+                        key,
+                        DesiredEdge {
+                            edge_type: *edge_type,
+                            detail: EDGE_RELATION,
+                        },
+                    )
+                    .is_none()
+                {
+                    report.links_resolved += 1;
+                }
+            }
+            Some(_) => {}
+            None => unresolved.push(UnresolvedLink {
+                from: page.path.clone(),
+                target: target.clone(),
+                kind: UnresolvedKind::Link,
+            }),
+        }
+    }
+
+    for declared in &page.evidence {
+        let key = serde_json::to_string(declared).unwrap_or_default();
+        let id = EvidenceId::from_existing(format!(
+            "{DECLARED_EVIDENCE_PREFIX}{}",
+            hash(&format!("{}\u{0}{key}", page.path))
+        ));
+        // Evidence a page brought with it from elsewhere is not evidence this machine checked, so
+        // it never counts as the kind of evidence that can promote a claim.
+        let kind = if arrived {
+            EvidenceKind::ExternalSource
+        } else {
+            declared.kind
+        };
+        let mut record = Evidence::new(from.clone(), kind).with_id(id.clone());
+        if let Some(file) = &declared.file {
+            let mut anchor = SourceAnchor::file(file);
+            anchor.symbol = declared.symbol.clone();
+            record = record.with_anchor(anchor);
+        }
+        if let Some(excerpt) = &declared.excerpt {
+            record = record.with_excerpt(excerpt.clone());
+        }
+        if let Some(note) = &declared.note {
+            record = record.with_note(note.clone());
+        }
+        evidence.insert(id, record);
     }
 
     for identity in &page.sources {
@@ -792,7 +898,7 @@ fn remove_departed(
     Ok(())
 }
 
-fn is_vault_owned(node: &KnowledgeNode) -> bool {
+pub(crate) fn is_vault_owned(node: &KnowledgeNode) -> bool {
     node.provenance.source == ProvenanceSource::Deterministic
         && node.provenance.detail.as_deref().is_some_and(|detail| {
             detail.starts_with(PAGE_PROVENANCE) || detail.starts_with(SOURCE_PROVENANCE)
@@ -843,6 +949,15 @@ fn is_vault_edge(edge: &KnowledgeEdge) -> bool {
             .is_some_and(|detail| detail.starts_with(EDGE_PREFIX))
 }
 
+fn same_citation(a: &Evidence, b: &Evidence) -> bool {
+    let place = |e: &Evidence| {
+        e.anchor
+            .as_ref()
+            .map(|anchor| (anchor.file.clone(), anchor.symbol.clone()))
+    };
+    place(a) == place(b) && a.excerpt == b.excerpt && a.note == b.note
+}
+
 fn reconcile_evidence(
     store: &mut KnowledgeStore,
     node: &NodeId,
@@ -860,13 +975,18 @@ fn reconcile_evidence(
                 store.remove_evidence(&evidence.id)?;
                 report.evidence_removed += 1;
             }
-            Some(want) if want.anchor != evidence.anchor => {
-                if let Some(anchor) = want.anchor.clone() {
-                    store.update_evidence_anchor(&evidence.id, anchor)?;
+            Some(want) => {
+                if want.anchor != evidence.anchor {
+                    if let Some(anchor) = want.anchor.clone() {
+                        store.update_evidence_anchor(&evidence.id, anchor)?;
+                        report.evidence_updated += 1;
+                    }
+                }
+                if want.kind != evidence.kind {
+                    store.update_evidence_kind(&evidence.id, want.kind)?;
                     report.evidence_updated += 1;
                 }
             }
-            Some(_) => {}
         }
     }
 
@@ -876,6 +996,15 @@ fn reconcile_evidence(
         .collect::<HashSet<_>>();
     for (id, evidence) in desired {
         if !present.contains(id) {
+            // A claim accepted from a proposal already has the evidence the model attached; the
+            // page repeats it so it can travel. Adding it again would show every citation twice.
+            if id.as_str().starts_with(DECLARED_EVIDENCE_PREFIX)
+                && existing
+                    .iter()
+                    .any(|have| !have.id.as_str().starts_with(EVIDENCE_PREFIX) && same_citation(have, evidence))
+            {
+                continue;
+            }
             store.attach_evidence_attributed(
                 evidence.clone(),
                 Provenance::deterministic(PAGE_PROVENANCE),
