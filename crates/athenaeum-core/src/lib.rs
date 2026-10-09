@@ -69,6 +69,7 @@ pub mod anchors;
 pub mod authority;
 pub mod blobs;
 pub mod brief;
+pub mod bridge;
 pub mod error;
 pub mod graph;
 pub mod id;

@@ -74,8 +74,6 @@ export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; o
     }
   }
 
-  const coreMissing = proposalError.includes("not installed")
-
   return <section className="mb-2 border-b pb-2" aria-label="Local memory">
     <button className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent/50" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
       {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -100,8 +98,7 @@ export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; o
         {brief.anchors.length > 0 && <div className="text-xs text-muted-foreground"><strong>Evidence</strong><ul className="mt-1 list-inside list-disc break-all">{brief.anchors.map(anchor => <li key={anchor}>{anchor}</li>)}</ul></div>}
         {brief.warnings.length > 0 && <div className="text-xs text-amber-700"><strong>Review</strong><ul className="mt-1 list-inside list-disc">{brief.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
       </div>}
-      {coreMissing && <p className="mt-3 text-xs text-muted-foreground">Install the local core (athenaeum-core) to review what agents propose.</p>}
-      {proposalError && !coreMissing && <p role="alert" className="mt-3 text-xs text-destructive">{proposalError}</p>}
+      {proposalError && <p role="alert" className="mt-3 text-xs text-destructive">{proposalError}</p>}
       {saved && <p role="status" className="mt-3 text-xs text-muted-foreground">Saved as <button className="text-primary underline-offset-2 hover:underline" onClick={() => openPage(`${workspace.replace(/\/+$/, "")}/${saved}`)}>{saved}</button>. It stays unverified until a source confirms it.</p>}
       {proposals.length > 0 && <div className="mt-3 space-y-2" aria-label="Proposed by agents">
         <div className="text-xs font-medium">Proposed by agents</div>

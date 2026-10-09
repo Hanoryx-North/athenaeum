@@ -1,7 +1,7 @@
 # Athenaeum
 
-A local, persistent knowledge graph for a codebase — and the coding agent that
-navigates it.
+A local knowledge app: a Markdown wiki, its one rebuildable knowledge engine,
+and desktop and CLI clients.
 
 > **Building on Athenaeum?** Read [`AGENTS.md`](AGENTS.md) first. It defines what this
 > repository owns and — just as importantly — what belongs to
@@ -18,8 +18,8 @@ back to it later.
 
 Knowledge lives as **markdown files on disk** — an Obsidian-compatible vault,
 `[[wikilink]]`-connected — with a SQLite index over it that can be rebuilt at any
-time (delete `.athenaeum/knowledge.db` and you lose nothing but time). No server,
-no vector database, no local model.
+time (delete `.athenaeum/knowledge.db` and rebuild from the vault). Local use
+needs no server or model.
 
 ---
 
@@ -45,9 +45,9 @@ one-time key setup it needs, is in [docs/releasing.md](docs/releasing.md).
 
 ## Status
 
-Athenaeum is the **visible layer**: a desktop application a person opens, and the
-knowledge library behind it. The agent that maintains the wiki is not in this
-repository — see below.
+Athenaeum is the **canonical local app and engine**: the desktop, CLI, vault,
+versioned knowledge bridge, and explicit Library sync client live here. The
+agent runtime and its Athenaeum adapter live in separate repositories — see below.
 
 What works:
 
@@ -88,6 +88,9 @@ providers, streaming, tools, permissions and sessions, with
 [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the bundle
 that plugs this library into it. Athenaeum exposes a versioned, storage-independent
 Wiki contract for that, and the agent reaches the library through nothing else.
+The desktop chat client still needs a Harness SDK connection; the current Tauri build does
+not register agent turn commands. Use the [`athenaeum_agent` setup](https://github.com/Hanoryx-North/athenaeum_agent#installing)
+for agent sessions until that client is wired and verified.
 
 ---
 
@@ -95,7 +98,7 @@ Wiki contract for that, and the agent reaches the library through nothing else.
 
 ```bash
 npm install
-cargo build --release
+cargo build --release -p athenaeum-cli
 
 # The CLI needs no window and no API key.
 ./target/release/athenaeum --help

@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 use crate::id::NodeId;
 use crate::journal::{EventKind, NewEvent};
 use crate::model::{
-    EdgeType, Evidence, KnowledgeNode, NodeStatus, ProvenanceSource, KnowledgeEdge,
+    EdgeType, Evidence, EvidenceKind, KnowledgeNode, NodeStatus, ProvenanceSource, KnowledgeEdge,
 };
 use crate::store::{KnowledgeStore, NodeFilter};
 use crate::vault::{
@@ -483,4 +483,304 @@ fn slugify(text: &str) -> String {
         }
     }
     slug
+}
+
+// ---------------------------------------------------------------------------
+// Drafting from a source
+// ---------------------------------------------------------------------------
+
+/// The most of a source file a draft will read. A draft quotes one line; this bounds the I/O.
+const DRAFT_SOURCE_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Who a deterministic draft is attributed to. A draft is a proposal like any other: it waits for a
+/// person, and `proposals` lists it.
+pub const DRAFT_PROPOSER: &str = "athenaeum-draft-source";
+
+/// What drafting a proposal from a source produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Drafted {
+    pub node: KnowledgeNode,
+    pub evidence: Evidence,
+}
+
+/// Propose an observation drawn from one file under `raw/sources/`, without a model.
+///
+/// The draft quotes the source's first non-empty line and cites the file with its content hash, so
+/// a later edit to the source makes the evidence stale and visible. It is a proposal: nothing is
+/// written to the vault until it is accepted.
+pub fn draft_from_source(
+    store: &mut KnowledgeStore,
+    source: &str,
+    title: &str,
+) -> Result<Drafted> {
+    use crate::model::{NodeType, Scope, SourceAnchor};
+    use crate::wiki::{WikiCaller, WikiEvidenceCreate, WikiNodeCreate, WikiService};
+
+    let project = require_project(store)?;
+    let source = source.trim().replace('\\', "/");
+    if !source.starts_with("raw/sources/") || super::syncset::validate_path(&source).is_err() {
+        return Err(portable_error(
+            "invalid_request",
+            format!("{source:?} is not a vault-relative path under raw/sources/"),
+        ));
+    }
+    // Refuse a symlink anywhere on the way, so a link inside the vault cannot pull in a file from
+    // outside it.
+    let mut walked = project.clone();
+    for segment in source.split('/') {
+        walked.push(segment);
+        let metadata = std::fs::symlink_metadata(&walked)
+            .map_err(|_| Error::Invalid { id: NodeId::from_existing(&source), reason: "the source does not exist".into() })?;
+        if metadata.file_type().is_symlink() {
+            return Err(portable_error(
+                "invalid_request",
+                format!("{source} passes through a symbolic link, which a draft will not follow"),
+            ));
+        }
+    }
+    let metadata = std::fs::metadata(&walked)?;
+    if !metadata.is_file() || metadata.len() > DRAFT_SOURCE_MAX_BYTES {
+        return Err(portable_error(
+            "invalid_request",
+            format!("{source} is not a regular text file of at most {DRAFT_SOURCE_MAX_BYTES} bytes"),
+        ));
+    }
+    let bytes = std::fs::read(&walked)?;
+    let text = String::from_utf8(bytes).map_err(|_| {
+        portable_error(
+            "invalid_request",
+            "the source is not UTF-8 text; extract it to text first",
+        )
+    })?;
+    let excerpt = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+
+    let caller = WikiCaller { model: DRAFT_PROPOSER.into(), session: None };
+    let mut service = WikiService::new(store);
+    let node = service.create(
+        WikiNodeCreate {
+            node_type: NodeType::Observation,
+            title: title.trim().into(),
+            summary: excerpt.chars().take(300).collect(),
+            content: format!(
+                "# {}\n\nSource: `{source}`\n\n> {}\n",
+                title.trim(),
+                excerpt.chars().take(500).collect::<String>()
+            ),
+            scope: Scope::default(),
+        },
+        caller.clone(),
+    )?;
+    let evidence = service.attach_evidence(
+        WikiEvidenceCreate {
+            node: node.id.as_str().into(),
+            kind: EvidenceKind::SourceFile,
+            anchor: Some(SourceAnchor::file(source.clone()).fingerprint(excerpt, &text)),
+            excerpt: Some(excerpt.chars().take(500).collect()),
+            note: None,
+        },
+        caller,
+    )?;
+    Ok(Drafted { node, evidence })
+}
+
+// ---------------------------------------------------------------------------
+// Leaving the retired `athenaeum-core` index
+// ---------------------------------------------------------------------------
+
+/// The index the retired second engine kept inside `.athenaeum/`.
+pub const LEGACY_CORE_DATABASE: &str = "local-core.db";
+
+/// One proposal carried over from the retired index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyImported {
+    pub legacy_id: String,
+    pub node: Option<NodeId>,
+    pub title: String,
+    pub evidence: usize,
+    pub relationships: usize,
+}
+
+/// What importing the retired index did, or in a dry run would do.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyImportReport {
+    /// Whether a retired index exists in this workspace at all.
+    pub found: bool,
+    pub dry_run: bool,
+    pub imported: Vec<LegacyImported>,
+    pub left_alone: Vec<String>,
+}
+
+/// Carry the pending proposals of a retired `athenaeum-core` index into this knowledge base.
+///
+/// Everything the old engine had *accepted* is already Markdown in the vault and needs nothing: the
+/// index here is rebuilt from it. What the old index alone holds is the proposals nobody has
+/// reviewed yet, with their evidence and relationships, and that is all this moves. The old
+/// database is opened read-only and is never changed or deleted. Running it twice is safe: a
+/// proposal whose title is already known is reported and skipped rather than duplicated.
+pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<LegacyImportReport> {
+    use crate::model::{NodeType, Scope, SourceAnchor};
+    use crate::wiki::{
+        WikiCaller, WikiEvidenceCreate, WikiLinkCreate, WikiNodeCreate, WikiService,
+    };
+    use rusqlite::{Connection, OpenFlags};
+    use std::collections::HashMap;
+
+    let project = require_project(store)?;
+    let path = project.join(".athenaeum").join(LEGACY_CORE_DATABASE);
+    let mut report = LegacyImportReport { dry_run: !apply, ..Default::default() };
+    if !path.is_file() {
+        return Ok(report);
+    }
+    report.found = true;
+    let old = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| portable_error("io", format!("cannot open {}: {error}", path.display())))?;
+
+    let bodies = |sql: &str| -> Vec<(String, serde_json::Value)> {
+        // A table the old engine never created is simply empty.
+        let Ok(mut statement) = old.prepare(sql) else { return Vec::new() };
+        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)));
+        let Ok(rows) = rows else { return Vec::new() };
+        rows.filter_map(|row| row.ok())
+            .filter_map(|(state, body)| serde_json::from_str(&body).ok().map(|value| (state, value)))
+            .collect()
+    };
+    let text = |value: &serde_json::Value, key: &str| -> String {
+        value.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+    };
+
+    let proposals = bodies("SELECT state, body FROM proposals ORDER BY created_at, id");
+    let evidence = bodies("SELECT 'evidence', body FROM proposal_evidence ORDER BY id");
+    let edges = bodies("SELECT 'edge', body FROM proposal_edges ORDER BY id");
+
+    let mut mapped: HashMap<String, NodeId> = HashMap::new();
+    let mut staged: Vec<(String, String, usize, usize)> = Vec::new();
+    for (state, node) in &proposals {
+        let legacy_id = text(node, "id");
+        let title = text(node, "title");
+        if state != "pending" {
+            report.left_alone.push(format!(
+                "{legacy_id} ({title}): {state} in the old index; accepted knowledge is already in the vault, rejected knowledge stays rejected"
+            ));
+            continue;
+        }
+        let Some(node_type) = NodeType::parse_opt(&text(node, "type")) else {
+            report.left_alone.push(format!("{legacy_id} ({title}): unknown type {:?}", text(node, "type")));
+            continue;
+        };
+        let scope = Scope::parse_opt(&text(node, "scope")).unwrap_or_default();
+        let provenance = text(node, "provenance");
+        let proposer = provenance
+            .strip_prefix("model:")
+            .filter(|name| !name.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| "athenaeum-core-import".to_string());
+        let own_evidence = evidence.iter().filter(|(_, e)| text(e, "node") == legacy_id).count();
+        let own_edges = edges
+            .iter()
+            .filter(|(_, e)| text(e, "from") == legacy_id || text(e, "to") == legacy_id)
+            .count();
+
+        if !apply {
+            staged.push((legacy_id, title, own_evidence, own_edges));
+            continue;
+        }
+        let created = WikiService::new(store).create(
+            WikiNodeCreate {
+                node_type,
+                title: title.clone(),
+                summary: text(node, "summary"),
+                content: text(node, "content"),
+                scope,
+            },
+            WikiCaller { model: proposer.clone(), session: None },
+        );
+        match created {
+            Ok(created) => {
+                mapped.insert(legacy_id.clone(), created.id.clone());
+                staged.push((legacy_id, title, own_evidence, own_edges));
+            }
+            Err(error) => report.left_alone.push(format!("{legacy_id} ({title}): {error}")),
+        }
+    }
+
+    if apply {
+        for (_, item) in &evidence {
+            let Some(new_id) = mapped.get(&text(item, "node")) else { continue };
+            let file = item
+                .get("anchor")
+                .and_then(|anchor| anchor.get("file"))
+                .and_then(|file| file.as_str())
+                .map(str::to_string)
+                .filter(|file| !file.is_empty())
+                .or_else(|| Some(text(item, "path")).filter(|file| !file.is_empty()));
+            let anchor = file.map(|file| {
+                let mut anchor = SourceAnchor::file(file);
+                anchor.content_hash = item
+                    .get("sha256")
+                    .and_then(|h| h.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        item.get("anchor")
+                            .and_then(|a| a.get("contentHash"))
+                            .and_then(|h| h.as_str())
+                            .map(str::to_string)
+                    });
+                anchor
+            });
+            let result = WikiService::new(store).attach_evidence(
+                WikiEvidenceCreate {
+                    node: new_id.as_str().to_string(),
+                    kind: EvidenceKind::parse_opt(&text(item, "kind")).unwrap_or_default(),
+                    anchor,
+                    excerpt: item.get("excerpt").and_then(|v| v.as_str()).map(str::to_string),
+                    note: item.get("note").and_then(|v| v.as_str()).map(str::to_string),
+                },
+                WikiCaller { model: "athenaeum-core-import".into(), session: None },
+            );
+            if let Err(error) = result {
+                report.left_alone.push(format!("evidence {}: {error}", text(item, "id")));
+            }
+        }
+        for (_, edge) in &edges {
+            let (from, to) = (text(edge, "from"), text(edge, "to"));
+            // An endpoint is either another imported proposal or knowledge the new index already
+            // holds under the same id (a page that declared its id).
+            let resolve = |old: &str| mapped.get(old).map(|id| id.as_str().to_string()).or_else(|| {
+                store.find_node(&NodeId::from_existing(old)).ok().flatten().map(|node| node.id.as_str().to_string())
+            });
+            let (Some(from_id), Some(to_id)) = (resolve(&from), resolve(&to)) else {
+                report.left_alone.push(format!("relationship {from} → {to}: an end is not known to this index"));
+                continue;
+            };
+            let Some(edge_type) = EdgeType::parse_opt(&text(edge, "type")) else {
+                report.left_alone.push(format!("relationship {from} → {to}: unknown type {:?}", text(edge, "type")));
+                continue;
+            };
+            let result = WikiService::new(store).link(
+                WikiLinkCreate { from: from_id, edge_type, to: to_id, note: None, confidence: None },
+                WikiCaller { model: "athenaeum-core-import".into(), session: None },
+            );
+            if let Err(error) = result {
+                report.left_alone.push(format!("relationship {from} → {to}: {error}"));
+            }
+        }
+    }
+
+    for (legacy_id, title, evidence, relationships) in staged {
+        report.imported.push(LegacyImported {
+            node: mapped.get(&legacy_id).cloned(),
+            legacy_id,
+            title,
+            evidence,
+            relationships,
+        });
+    }
+    Ok(report)
 }

@@ -36,7 +36,10 @@ use render::emit;
 struct Cli {
     /// Project directory. Defaults to the nearest ancestor containing
     /// `.athenaeum/`, or the current directory.
-    #[arg(long, short = 'C', global = true)]
+    ///
+    /// `--workspace` is the spelling the separate `athenaeum-core` command used, kept so a
+    /// client written for it (`bridge --workspace DIR`) reaches this engine unchanged.
+    #[arg(long, short = 'C', global = true, visible_alias = "workspace")]
     project: Option<PathBuf>,
 
     /// Emit JSON instead of text, for scripting. Honoured by every command.
@@ -162,6 +165,25 @@ enum Command {
         reason: Option<String>,
         #[arg(long = "as", default_value = "user")]
         by: String,
+    },
+    /// Propose an observation drawn from a file under `raw/sources/`, without a model.
+    ///
+    /// The draft quotes the file's first line and cites it with its content hash. It is a
+    /// proposal: review it with `proposals`, then `accept` or `reject` it.
+    DraftSource {
+        /// A vault-relative path under `raw/sources/`.
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        title: String,
+    },
+    /// Import proposals left in the retired `athenaeum-core` index (`.athenaeum/local-core.db`).
+    ///
+    /// Defaults to a dry run. Reads the old database and never changes or deletes it.
+    ImportLegacyCore {
+        /// Actually propose them.
+        #[arg(long)]
+        apply: bool,
     },
     /// Operations on the vault itself: `vault materialize`.
     Vault {
@@ -847,6 +869,12 @@ fn run(cli: &Cli) -> Result<Outcome> {
             unreachable!("handled before the workspace is opened")
         }
 
+        Command::DraftSource { source, title } => {
+            return portable_cmd::draft_source(cli.json, &mut store, source, title)
+        }
+        Command::ImportLegacyCore { apply } => {
+            return portable_cmd::import_legacy_core(cli.json, &mut store, *apply)
+        }
         Command::Proposals { limit } => return portable_cmd::proposals(cli.json, &mut store, *limit),
         Command::Accept { id, by } => return portable_cmd::accept(cli.json, &mut store, id, by),
         Command::Reject { id, reason, by } => {

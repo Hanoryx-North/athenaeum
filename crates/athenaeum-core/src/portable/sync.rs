@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ledger::{sync_dir, Origin, TrustLedger};
 use super::lock::RepoLock;
-use super::manifest::{RepositoryManifest, MANIFEST_FILE};
+use super::manifest::{RepositoryManifest, FORMAT_VERSION, MANIFEST_FILE};
 use super::merge::{self, Merged};
 use super::syncset::{self, sha256_hex, ManifestEntry, Skipped, SyncLimits};
 use super::{portable_error, write_atomic};
@@ -196,7 +196,6 @@ impl SyncState {
 
 /// Link a repository to a remote one. Creates `athenaeum.json` when the vault has none.
 pub fn link(root: &Path, server: &str, repository: &RemoteRepository) -> Result<SyncState> {
-    RepositoryManifest::read_or_init(root, &super::manifest::default_name(root))?;
     let mut state = SyncState::load(root)?.unwrap_or_default();
     if !state.remote_id.is_empty() && state.remote_id != repository.id {
         return Err(portable_error(
@@ -206,6 +205,23 @@ pub fn link(root: &Path, server: &str, repository: &RemoteRepository) -> Result<
                 state.remote_id
             ),
         ));
+    }
+    match RepositoryManifest::read(root)? {
+        Some(manifest) if manifest.repository_id != repository.id => {
+            return Err(portable_error(
+                "conflict",
+                format!(
+                    "this vault is {} but the Library repository is {}; clone it into a new directory instead",
+                    manifest.repository_id, repository.id
+                ),
+            ));
+        }
+        None => {
+            let mut manifest = RepositoryManifest::new(repository.name.as_str());
+            manifest.repository_id = repository.id.clone();
+            manifest.write(root)?;
+        }
+        Some(_) => {}
     }
     state.server = server.to_string();
     state.remote_id = repository.id.clone();
@@ -738,9 +754,6 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
     pub fn clone_into(&self, repository: &RemoteRepository, server: &str) -> Result<PullOutcome> {
         self.check_compatibility()?;
         let Some(head) = repository.head.clone() else {
-            let (manifest, _) =
-                RepositoryManifest::read_or_init(self.root, &repository.name)?;
-            let _ = manifest;
             link(self.root, server, repository)?;
             return Ok(PullOutcome {
                 up_to_date: true,
@@ -774,7 +787,9 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
         };
         let had_manifest = plan.writes.iter().any(|w| w.path == MANIFEST_FILE);
         if !had_manifest {
-            RepositoryManifest::read_or_init(self.root, &repository.name)?;
+            let mut manifest = RepositoryManifest::new(repository.name.as_str());
+            manifest.repository_id = repository.id.clone();
+            manifest.write(self.root)?;
         }
         self.commit_with_manifest(plan, staged_state)?;
         Ok(PullOutcome {
@@ -804,6 +819,20 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
         }
         syncset::validate_content(&bytes, &self.limits)
             .map_err(|reason| portable_error("invalid_content", format!("{path}: {reason}")))?;
+        if path == MANIFEST_FILE {
+            let manifest: RepositoryManifest = serde_json::from_slice(&bytes).map_err(|error| {
+                portable_error("invalid_content", format!("{MANIFEST_FILE}: {error}"))
+            })?;
+            if manifest.repository_id != remote_id
+                || manifest.format_version != FORMAT_VERSION
+                || !manifest.extra.is_empty()
+            {
+                return Err(portable_error(
+                    "invalid_content",
+                    format!("{MANIFEST_FILE} contains an unexpected identity, format, or extra fields"),
+                ));
+            }
+        }
         Ok(bytes)
     }
 
@@ -999,6 +1028,15 @@ fn verify_revision(revision: &RemoteRevision) -> Result<()> {
                 format!("revision {} names an unsafe path {:?}: {reason}", revision.id, entry.path),
             )
         })?;
+        if !syncset::has_sync_extension(&entry.path) {
+            return Err(portable_error(
+                "invalid_path",
+                format!(
+                    "revision {} names {:?}, which is not accepted wiki Markdown or repository identity",
+                    revision.id, entry.path
+                ),
+            ));
+        }
     }
     if syncset::tree_hash(&revision.manifest) != revision.tree_hash {
         return Err(portable_error(

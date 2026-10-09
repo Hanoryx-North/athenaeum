@@ -26,7 +26,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 athenaeum-core = { path = "../crates/athenaeum-core" }
-athenaeum-protocol = { git = "https://github.com/Hanoryx-North/athenaeum_protocol.git", rev = "b48966943e111cb0859329eb224dd8f9e1c7409f" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

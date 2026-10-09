@@ -14,29 +14,56 @@ it simply described three repositories at once while sitting inside each of them
 The fix is that each repository states its own scope in a file the session reads first,
 and the shared specification is filed as vision rather than backlog.
 
-## The three repositories
+## The repositories
 
-The product is one application assembled from three independently useful pieces.
+The product is one application assembled from independently useful pieces. [`AGENTS.md`](../AGENTS.md)
+has the table; the reasoning is this.
 
-**`deepseek-harness`** is a general coding agent. It knows nothing about Athenaeum and
-never will. It is consumed **unmodified upstream** — never forked, never patched in place.
-Everything Athenaeum-specific reaches it as a bundle.
+**`athenaeum`** is the application a person opens, **and** the one local engine behind it. The
+desktop app, the `athenaeum` CLI, the agent bundle, the MCP server and every future connector are
+clients of that single engine, so there is one knowledge graph, one index and one answer to "what
+does this project know". It was once described as only the "visible layer", with a second engine in
+a separate `athenaeum_core` repository. The product owner reversed that: two engines meant two
+indexes that could disagree, which is the failure this scope exists to prevent. `athenaeum_core` is
+retired to a forwarding shim (see [Retired code](#retired-code)).
 
-**`athenaeum_agent`** is that bundle: a capability seam that teaches the harness one new
-thing, *the project has a knowledge base and here is how to ask it questions*. It is small
-on purpose. It holds no knowledge itself.
+**`deepseek-harness`** is a general coding agent. It knows nothing about Athenaeum and never will.
+It is consumed **unmodified upstream** — never forked, never patched in place. Everything
+Athenaeum-specific reaches it as a bundle.
 
-**`athenaeum`** is the application a person opens and the library that holds what the
-project knows. It has a UI; the other two do not.
+**`athenaeum_agent`** is that bundle: a capability seam that teaches the harness one new thing,
+*the project has a knowledge base and here is how to ask it questions*. It holds no knowledge
+itself. It is the "Codex" of the product: the coding-agent half, with the harness beneath it.
 
-The split survives because each piece degrades cleanly. The harness with no bundle is an
-ordinary coding agent. The bundle with no knowledge base is a no-op. Athenaeum with no
-agent is a knowledge app you edit by hand.
+**`athenaeum_integrations`** is the same seam for everyone else: an MCP server and a typed client,
+with ready-made configuration for other agents. Reads are always allowed; every write is an explicit
+grant.
+
+**`athenaeum_protocol`** owns the wire shapes the others share, and their fixtures, so that a Rust
+client and a TypeScript server cannot silently disagree.
+
+**`athenaeum_api`**, **`athenaeum_library`** and **`athenaeum_admin`** are the hosted side: a
+text-only service and two static web frontends. The Library is a GitHub-like place to publish,
+browse, version and sync a person's accepted wiki memory. It stores Markdown and the minimal
+metadata for repository identity and revision history. It does no graph processing and no model
+work, and it never receives raw sources, databases, indexes, embeddings, sessions or credentials.
+
+**`athenaeum_validation`** holds the product tests that cross repositories, and the preserved
+suites of the others.
+
+The split survives because each piece degrades cleanly. The harness with no bundle is an ordinary
+coding agent. The bundle with no knowledge base is a no-op. Athenaeum with no agent is a knowledge
+app you edit by hand. Athenaeum with no network is a complete local app; the Library is optional
+and always explicit.
 
 ## What crosses the seam
 
-One thing: **`athenaeum bridge`**, protocol v1, JSON over stdio. Versioned, storage
-independent, documented in [`agent-integration.md`](agent-integration.md).
+Locally, one thing: **the bridge**, protocol v1 — `athenaeum bridge` as JSON over stdio for
+other processes, and the same function called in-process by the desktop app. Versioned, storage
+independent, documented in [`agent-integration.md`](agent-integration.md). To the hosted Library,
+one other thing: **Library API v1** over HTTPS, which carries text and nothing else
+([`portable-format.md`](portable-format.md)). The agent's turns, tool calls and permissions are
+carried by neither.
 
 The runtime knows it can ask for knowledge. It does not know Athenaeum is written in Rust,
 stores in SQLite, indexes with FTS5, or keeps evidence in content-addressed blobs. That
@@ -96,6 +123,13 @@ calls, permissions and session belong to the harness.
 
 **`crates/athenaeum-providers/`** was a model client with per-role routing, written before
 the runtime was split out. It has been **removed**: providers belong to `deepseek-harness`.
+
+**`athenaeum_core` (the repository)** held a second, thinner knowledge engine with its own index,
+`.athenaeum/local-core.db`. It is **retired**: its unique behaviours were ported into
+`crates/athenaeum-core` here (drafting a proposal from a source, refusing to attach evidence to or
+link accepted pages, looser near-duplicate detection, the bridge as an in-process function), and
+`athenaeum import-legacy-core` carries its pending proposals into `knowledge.db`. What remains
+there is a shim that forwards the old `athenaeum-core` command line to `athenaeum`.
 
 **`athenaeum_agent/crates/`** is a complete coding-agent runtime in Rust — 335 passing
 tests — written when no readable agent implementation was available to reuse. DeepSeek

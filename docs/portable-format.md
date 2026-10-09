@@ -1,12 +1,9 @@
 # Portable format and sync protocol
 
-> **Status: Stage 2 contract, decided 2026-10-09.**
-> **Built and tested:** declared page ids and their collision rules (section 4, "Identity and
-> acceptance", up to "Proposal, acceptance, rejection"), in `vault/page.rs` and
-> `vault/index.rs`. **Not built:** everything else, including accept and reject, `materialize`,
-> the manifest, the authority cap, export and import, MCP, and sync.
-> Where this document and the code disagree, the code is what runs today and this document is
-> what is being built; the disagreement is a bug in one of them and gets fixed, not left.
+> **Status: implementation in progress, 2026-10-09.** The local engine and CLI implement
+> identity, acceptance, authority caps, export/import, and explicit sync. The hosted API and
+> clients are being integrated across their repositories. The sync set below reflects the
+> product owner's accepted-wiki-only rule; older, broader text-file rules are superseded.
 
 One knowledge repository has to be usable by the desktop app, the `athenaeum` CLI, the agent,
 MCP clients, a Library server and a second computer. This document fixes what that
@@ -80,20 +77,25 @@ my-knowledge/
 
 ### What syncs
 
-The **sync set** is every regular file under the repository root that is not under a
-directory whose name starts with `.` and that:
+The **sync set** contains only accepted wiki pages under `wiki/**/*.md` and the minimal
+repository identity in `athenaeum.json`. A candidate must also:
 
-- has an extension in `.md .txt .json .yaml .yml .toml`;
-- is valid UTF-8, contains no NUL byte, and is not a symlink;
-- is within the server's advertised per-file limit (default 1 MiB) and the repository
+- be a regular file, outside hidden directories;
+- be valid UTF-8, contain no NUL byte, and not be a symlink;
+- fit within the server's advertised per-file limit (default 1 MiB) and the repository
   limit (default 50 MiB);
-- has a normalised path: `/` separators, no `.` or `..` segment, no leading `/`, no
+- have a normalised path: `/` separators, no `.` or `..` segment, no leading `/`, no
   drive letter, no control characters, at most 255 bytes per segment and 1,024 in total.
 
 Everything else stays local and is reported as **skipped**, with the reason, in the sync
-result. In particular: `.athenaeum/` (databases, embeddings, caches, agent state), binary
-files in `raw/sources/` (a citation to one survives as text in the page that cites it), and
-anything executable. A skipped file is never an error.
+result. In particular: `.athenaeum/` (databases, embeddings, caches, agent state), all
+`raw/sources/` files (a citation to one survives as text in the page that cites it), root
+Markdown such as `purpose.md`, code repositories, and anything executable. A skipped file
+is never an error.
+
+If `athenaeum.json` has fields beyond `formatVersion`, `repositoryId`, `name`, and
+`createdAt`, sync refuses it before upload. The local file remains intact; a person must
+remove or relocate extra metadata before sharing this repository.
 
 ## 4. Identity and acceptance
 

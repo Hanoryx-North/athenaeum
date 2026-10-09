@@ -18,7 +18,7 @@ use crate::model::{
     NodeVersion, Provenance, Scope, SourceAnchor,
 };
 use crate::portable::memory::{self, Accepted};
-use crate::store::{EdgeFilter, KnowledgeStore, SearchHit};
+use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter, SearchHit};
 pub use crate::vault::PageRef as WikiPage;
 
 /// Version of the cross-repository JSON contract.
@@ -659,6 +659,19 @@ impl<'a> WikiService<'a> {
     pub fn link(&mut self, input: WikiLinkCreate, caller: WikiCaller) -> Result<KnowledgeEdge> {
         let from = self.resolve(&input.from)?;
         let to = self.resolve(&input.to)?;
+        // A relationship between two pages is text in those pages. An edge made here would live
+        // only in the index, so it would be lost with it and never reach another device.
+        if self.is_page(&from)? && self.is_page(&to)? {
+            return Err(Error::Invalid {
+                id: from.id,
+                reason: format!(
+                    "both ends are pages of the vault, so the relationship belongs in their \
+                     canonical Markdown: add a [[wikilink]] or a `related:` / `relations:` entry \
+                     to one of them ({} and {})",
+                    from.title, to.title
+                ),
+            });
+        }
         let mut edge = KnowledgeEdge::new(from.id, input.edge_type, to.id)
             .with_provenance(model_provenance(caller)?);
         if let Some(note) = input.note {
@@ -676,6 +689,21 @@ impl<'a> WikiService<'a> {
         caller: WikiCaller,
     ) -> Result<Evidence> {
         let node = self.resolve(&input.node)?;
+        // Same reasoning as `update`: an accepted page cites its sources in its own frontmatter,
+        // and evidence attached here would be neither in the file nor kept by a rebuild.
+        let existing = self.store.evidence_for(&node.id)?;
+        if let Some(page) = WikiPage::of(&node, &existing, None) {
+            return Err(Error::Invalid {
+                id: node.id,
+                reason: format!(
+                    "it is a page of the vault, so its sources are cited in the canonical \
+                     Markdown of {}: add them to its `sources:` or `evidence:` frontmatter \
+                     instead — the index follows the vault and would not keep evidence attached \
+                     here",
+                    page.path
+                ),
+            });
+        }
         let mut evidence = Evidence::new(node.id, input.kind);
         if let Some(anchor) = input.anchor {
             evidence = evidence.with_anchor(anchor);
@@ -769,8 +797,45 @@ impl<'a> WikiService<'a> {
                 existing,
             });
         }
+
+        // The stored title key ignores only spacing, `-` and `_`. A model rephrasing "OAuth
+        // callback state validation" as "oauth-callback: state validation!" is still the same
+        // knowledge, so compare once more with every non-alphanumeric character ignored.
+        let loose = loose_title_key(title);
+        if loose.chars().count() >= LOOSE_TITLE_MIN {
+            let near = self
+                .store
+                .list_nodes(&NodeFilter::live())?
+                .into_iter()
+                .filter(|node| except != Some(&node.id) && loose_title_key(&node.title) == loose)
+                .map(|node| node.id)
+                .collect::<Vec<_>>();
+            if !near.is_empty() {
+                return Err(Error::NearDuplicateTitle {
+                    title: title.to_string(),
+                    existing: near,
+                });
+            }
+        }
         Ok(())
     }
+
+    /// True for a node that is a page of the vault, whose text and sources are its Markdown.
+    fn is_page(&self, node: &KnowledgeNode) -> Result<bool> {
+        let evidence = self.store.evidence_for(&node.id)?;
+        Ok(WikiPage::of(node, &evidence, None).is_some())
+    }
+}
+
+/// Titles shorter than this (after normalising) are too short to call near-duplicates.
+const LOOSE_TITLE_MIN: usize = 5;
+
+fn loose_title_key(title: &str) -> String {
+    title
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn model_provenance(caller: WikiCaller) -> Result<Provenance> {

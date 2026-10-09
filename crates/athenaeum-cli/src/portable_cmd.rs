@@ -588,15 +588,17 @@ pub fn sync(
         Some(SyncCommand::Link { server, remote, create, public, description }) => {
             let server = server_arg(server.as_deref(), state.as_ref())?;
             let client = client_for(&server)?;
-            let (manifest, _) = RepositoryManifest::read_or_init(&project, &default_name(&project))?;
             let repository = match (remote, create) {
                 (Some(remote), None) => client.resolve(remote)?,
-                (None, Some(name)) => client.create_repository(&CreateRepository {
-                    id: Some(manifest.repository_id.clone()),
-                    name: name.clone(),
-                    visibility: if *public { "public" } else { "private" }.to_string(),
-                    description: description.clone(),
-                })?,
+                (None, Some(name)) => {
+                    let (manifest, _) = RepositoryManifest::read_or_init(&project, &default_name(&project))?;
+                    client.create_repository(&CreateRepository {
+                        id: Some(manifest.repository_id),
+                        name: name.clone(),
+                        visibility: if *public { "public" } else { "private" }.to_string(),
+                        description: description.clone(),
+                    })?
+                }
                 _ => {
                     return Err(portable_error(
                         "invalid_request",
@@ -815,6 +817,46 @@ fn clone(json: bool, remote: &str, destination: &Path, server: Option<&str>) -> 
             index.pages
         );
         println!("cloned pages are capped at imported_knowledge until you edit or `athenaeum trust adopt` them");
+        Ok(())
+    })?;
+    Ok(Outcome::Ok)
+}
+
+pub fn draft_source(
+    json: bool,
+    store: &mut KnowledgeStore,
+    source: &str,
+    title: &str,
+) -> Result<Outcome> {
+    let drafted = memory::draft_from_source(store, source, title)?;
+    emit(json, &drafted, || {
+        println!(
+            "proposed {:?} from {} — review it with `athenaeum proposals`, then `accept` or `reject`",
+            drafted.node.title, source
+        );
+        Ok(())
+    })?;
+    Ok(Outcome::Ok)
+}
+
+pub fn import_legacy_core(json: bool, store: &mut KnowledgeStore, apply: bool) -> Result<Outcome> {
+    let report = memory::import_legacy_core(store, apply)?;
+    emit(json, &report, || {
+        if !report.found {
+            println!("no retired athenaeum-core index (.athenaeum/local-core.db) here; nothing to import");
+            return Ok(());
+        }
+        let verb = if report.dry_run { "would import" } else { "imported" };
+        println!("{verb} {} pending proposal(s) from .athenaeum/local-core.db", report.imported.len());
+        for item in &report.imported {
+            println!("  {:<40} {} evidence, {} relationship(s)", crate::render::truncate(&item.title, 40), item.evidence, item.relationships);
+        }
+        for note in &report.left_alone {
+            println!("  left alone: {note}");
+        }
+        if report.dry_run && !report.imported.is_empty() {
+            println!("re-run with --apply to import them; the old database is never changed");
+        }
         Ok(())
     })?;
     Ok(Outcome::Ok)

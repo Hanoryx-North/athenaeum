@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use super::manifest::{RepositoryManifest, FORMAT_VERSION, MANIFEST_FILE};
+use super::portable_error;
 use crate::error::Result;
 
-/// Extensions that sync. Everything else stays on the machine it is on.
-pub const SYNC_EXTENSIONS: &[&str] = &["md", "txt", "json", "yaml", "yml", "toml"];
 /// Per-file ceiling the server advertises by default.
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// Per-repository ceiling the server advertises by default.
@@ -110,15 +110,12 @@ pub fn validate_path(path: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Whether a path has an extension that syncs.
+/// Whether a path is an accepted wiki page or the repository identity.
 pub fn has_sync_extension(path: &str) -> bool {
-    path.rsplit_once('.')
-        .map(|(_, extension)| {
-            SYNC_EXTENSIONS
-                .iter()
-                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
-        })
-        .unwrap_or(false)
+    path == "athenaeum.json"
+        || path
+            .strip_prefix("wiki/")
+            .is_some_and(|page| !page.is_empty() && page.ends_with(".md"))
 }
 
 /// Check a file body against the format's rules: UTF-8, no NUL, within the per-file limit.
@@ -200,7 +197,7 @@ pub fn scan(root: &Path, limits: &SyncLimits) -> Result<SyncSet> {
         if !has_sync_extension(&relative) {
             set.skipped.push(Skipped {
                 path: relative,
-                reason: "not a text file type that syncs".into(),
+                reason: "only accepted wiki Markdown and athenaeum.json sync".into(),
             });
             continue;
         }
@@ -227,6 +224,17 @@ pub fn scan(root: &Path, limits: &SyncLimits) -> Result<SyncSet> {
                 reason,
             });
             continue;
+        }
+        if relative == MANIFEST_FILE {
+            let manifest: RepositoryManifest = serde_json::from_slice(&bytes).map_err(|error| {
+                portable_error("invalid_content", format!("{MANIFEST_FILE} cannot sync: {error}"))
+            })?;
+            if manifest.format_version != FORMAT_VERSION || !manifest.extra.is_empty() {
+                return Err(portable_error(
+                    "invalid_content",
+                    format!("{MANIFEST_FILE} cannot sync with an unsupported format or extra fields; only repository identity metadata may leave this machine"),
+                ));
+            }
         }
         if total + bytes.len() as u64 > limits.max_repository_bytes {
             set.skipped.push(Skipped {

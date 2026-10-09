@@ -30,7 +30,21 @@ the separately built agent runtime consumes its versioned Wiki contract.
 ```
 
 The boundary is specified in [agent-integration.md](agent-integration.md).
-Repository 2 never reaches through it into `KnowledgeStore` or SQLite.
+The agent runtime (`deepseek-harness` with the `athenaeum_agent` bundle) never reaches through it
+into `KnowledgeStore` or SQLite, and neither does any other client.
+
+### Clients of the one engine
+
+| Client | How it reaches the engine |
+| --- | --- |
+| Desktop app (`src-tauri`) | In-process: the `core_bridge` command calls `athenaeum_core::bridge`, the same function the CLI frames over stdio; the app's own commands call the library directly |
+| `athenaeum` CLI | Links the library; `athenaeum bridge` is the stdio form of the bridge |
+| `athenaeum_agent` (harness bundle) | Spawns `athenaeum bridge` once per request |
+| `athenaeum_integrations` (MCP server, typed client) | Spawns `athenaeum bridge`, and the `athenaeum sync` verbs for explicit sync |
+| Hosted Library | Never touched by the engine except through the CLI's sync client, over HTTPS, with text only |
+
+There is one index (`.athenaeum/knowledge.db`) and one bridge implementation. The retired second
+engine (`athenaeum_core`, index `local-core.db`) is described in [scope.md](scope.md#retired-code).
 
 Three things fall out of it, and they are the reasons for the arrangement:
 
@@ -56,7 +70,13 @@ source of truth. It is plain markdown on disk, it opens in Obsidian, and the
 agent edits it with ordinary file tools. Everything `athenaeum-core` stores
 about it is a **derived index**, and the test of that claim is blunt:
 
-> Delete `.athenaeum/knowledge.db` and you lose nothing but time.
+> Delete `.athenaeum/knowledge.db` and you lose nothing that was accepted.
+
+Accepted knowledge is Markdown: when a person accepts an agent's proposal it is written to the
+vault as a page that declares its own `id:`, so its identity, links, evidence references and
+authority are text and survive a rebuild. What is lost with the database is what no person ever
+looked at — proposals still waiting for review — and bookkeeping that costs nothing to recompute.
+That is deliberate: conversation never becomes permanent knowledge by itself.
 
 `crates/athenaeum-core/src/vault/` builds it. A page becomes a typed node,
 a `[[wikilink]]` becomes a deterministic edge, a file under `raw/sources/`

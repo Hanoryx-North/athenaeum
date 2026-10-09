@@ -2,7 +2,11 @@ import { invoke } from "@tauri-apps/api/core"
 import type { BridgeRequest, BridgeResponseMap } from "@athenaeum/protocol/bridge"
 
 /**
- * The desktop's one door to the separately owned local core.
+ * The desktop's one door to the local knowledge engine.
+ *
+ * It sends the same versioned bridge request an agent sends over `athenaeum bridge`; the Tauri
+ * command answers it in-process from the same engine (`athenaeum_core::bridge`), so the app needs
+ * no second executable and keeps no second index.
  *
  * Generic over the request itself rather than over a method name, so the `method` in the object a
  * caller writes is what fixes the response type; inferring it through `Extract` does not work.

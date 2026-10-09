@@ -1,20 +1,32 @@
 # Agent Runtime Integration
 
-Athenaeum is **Repository 1: the Wiki Library**. The coding agent is a separate
-repository and must remain independently usable when this library is absent.
-This repository does not own the agent loop, coding tools, shell, Git,
-streaming, context compaction, sessions, or the agent permission system.
+Athenaeum is **the app and the one local knowledge engine** (this document calls its
+library half "the Wiki Library"). The coding agent is `deepseek-harness`, extended by the
+`athenaeum_agent` bundle, in separate repositories, and must remain independently usable when
+this library is absent. This repository does not own the agent loop, coding tools, shell, Git,
+streaming, context compaction, sessions, or the agent permission system, and none of those
+travel over the bridge. **Every client uses this one bridge** — the agent bundle and the MCP
+server over `athenaeum bridge`, the desktop app in-process through the same
+`athenaeum_core::bridge` function (the Rust path of the `athenaeum-core` crate) — so none of them
+needs its own graph or may open `knowledge.db`.
+
+> The old separate `athenaeum-core` command (repository `athenaeum_core`) is retired. The bridge
+> is `athenaeum -C DIR bridge`; `athenaeum bridge --workspace DIR` is accepted as the old
+> spelling. See [scope.md](scope.md#retired-code).
+>
+> Below, **"Repository 2"** means the agent runtime: `deepseek-harness` with the `athenaeum_agent`
+> bundle (the MCP server in `athenaeum_integrations` is a second, equal consumer of the same bridge).
 
 The integration is intentionally shaped like this:
 
 ```text
-LLMWiki Agent Runtime (Repository 2)
+Agent runtime: deepseek-harness + athenaeum_agent
   Agent loop · providers · tools · permissions · sessions
                     │
                     │ WikiProvider adapter
                     │ protocol v1 JSON
                     ▼
-Athenaeum / Wiki Library (Repository 1)
+Athenaeum / Wiki Library (this repository)
   context · graph · curation · evidence · history · knowledge.db
 ```
 
@@ -23,7 +35,7 @@ implementation uses Rust, SQLite, FTS5, or content-addressed blobs.
 
 ## Repository ownership
 
-| Repository 1 — this repository | Repository 2 — agent runtime |
+| Athenaeum — this repository | Agent runtime — `deepseek-harness` + `athenaeum_agent` |
 | --- | --- |
 | Knowledge nodes and typed edges | Agent loop and conversation messages |
 | Evidence, provenance and authority | Model providers and streaming |

@@ -71,7 +71,6 @@ fn tray_available<R: tauri::Runtime>(window: &tauri::Window<R>) -> bool {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     apply_linux_webkit_compat_env();
 
