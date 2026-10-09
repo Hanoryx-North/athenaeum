@@ -103,10 +103,12 @@ pub fn new_repository_id() -> String {
     format!("repo_{}", uuid::Uuid::new_v4())
 }
 
-/// `repo_` followed by something that cannot escape a path or a URL segment.
+/// `repo_` followed by something that cannot escape a path or a URL segment: 1 to 60 letters,
+/// digits, `-` or `_`, which is the rule the Library and `athenaeum_protocol` apply to the same
+/// value (so the longest ID a Library accepts is one this build accepts too).
 pub fn is_valid_repository_id(id: &str) -> bool {
     id.len() >= 6
-        && id.len() <= 64
+        && id.len() <= 65
         && id.starts_with("repo_")
         && id[5..]
             .chars()

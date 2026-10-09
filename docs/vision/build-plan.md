@@ -14,6 +14,40 @@
 > Code comments cite this document as `§N`. Those citations are historical references to
 > the specification, not open work items.
 
+> [!NOTE]
+> **Ownership map: nine repositories.** The product owner's nine-repository map overrides the
+> three-repository wording above, in `AGENTS.md` and in `docs/scope.md`.
+>
+> | Repository | Owns |
+> | --- | --- |
+> | `athenaeum` | The desktop application. Also the legacy in-repo knowledge engine (`crates/athenaeum-core`, the `athenaeum` CLI), kept so existing data keeps working. Reaches the local core through the Tauri `core_bridge` command. |
+> | `athenaeum_protocol` | The wire contracts in Rust and TypeScript (bridge v1, hosted sync v1) and their shared fixtures. |
+> | `athenaeum_core` | The local Markdown-backed knowledge engine and the `athenaeum-core` CLI: bridge, proposals and acceptance, evidence, briefs, portable import and export, explicit sync. Its index is `.athenaeum/local-core.db`, apart from the desktop's `knowledge.db`. |
+> | `athenaeum_api` | The hosted Library backend and its operator routes. |
+> | `athenaeum_library` | The Library web frontend. It has no server. |
+> | `athenaeum_admin` | The operator console frontend. |
+> | `athenaeum_agent` | The harness bundle: the `wiki` seam, the `wiki_*` tools, the knowledge brief. |
+> | `athenaeum_integrations` | The MCP server and typed client for the core's bridge and sync. |
+> | `athenaeum_validation` | Product-owned tests and benchmarks. |
+> | `deepseek-harness` | The agent runtime, consumed unmodified. |
+>
+> **Repository identity and sync (written 2026-10-09; changed statically, not built or run).**
+> A vault and a hosted repository share one ID: the `repositoryId` in `athenaeum.json`, which is
+> `repo_` followed by 1 to 60 letters, digits, `-` or `_` (`athenaeum_protocol` owns the rule).
+>
+> - *Hosted-first.* Copy the ID from the repository's Library page, run `athenaeum-core repo init
+>   --repository ID` in the folder, then `sync pull`. `sync pull --repository ID` alone also gives an
+>   empty folder its identity.
+> - *Local-first.* `repo init`, then `sync create --url SERVER`, then `sync push`. The vault offers
+>   its own ID; the server keeps it when it is free and otherwise mints another, and the vault
+>   follows (`repo adopt` does the same by hand). A vault that has synced never changes its ID.
+> - A token travels only over https, or over http to localhost. Sharing is always an explicit command.
+>
+> Not done: automatic three-way merge on pull (a divergence is stored as a conflict and resolved by
+> hand); edits to accepted pages through the bridge (a proposal can only add a new page); a bundled
+> `athenaeum-core` in the desktop release; and a decision on whether a model may accept its own
+> proposals, which `athenaeum_agent` currently allows.
+
 ---
 
 # LLMWiki
