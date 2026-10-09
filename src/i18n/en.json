@@ -24,6 +24,7 @@
     "graph": "Graph",
     "lint": "Lint",
     "review": "Review",
+    "knowledge": "Knowledge",
     "skills": "Skills",
     "settings": "Settings",
     "settingsShortcut": " (Cmd/Ctrl+,)",

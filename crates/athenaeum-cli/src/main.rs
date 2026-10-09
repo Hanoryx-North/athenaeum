@@ -14,6 +14,7 @@
 mod bridge;
 mod library;
 mod portable_cmd;
+mod product_cmd;
 mod render;
 
 use std::path::PathBuf;
@@ -21,10 +22,11 @@ use std::process::ExitCode;
 
 use athenaeum_core::graph;
 use athenaeum_core::prelude::*;
-use athenaeum_core::vault::{lint, LintOptions, LintSeverity, PageRef};
+use athenaeum_core::vault::{lint, LintOptions, LintSeverity, PageRef, VaultSync};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use portable_cmd::{LibraryCommand, RepoCommand, SyncCommand, TrustCommand, VaultCommand};
+use product_cmd::ScopeArg;
 use render::emit;
 
 #[derive(Parser)]
@@ -64,8 +66,20 @@ enum Command {
     List(ListArgs),
     /// Replace a node's summary or content, archiving the previous version.
     Edit(EditArgs),
-    /// Change a node's lifecycle status.
-    Status { id: String, status: StatusArg },
+    /// Show the workspace and index state, or change a node's lifecycle status.
+    ///
+    /// With no arguments: whether a knowledge base is here, how big it is and whether the
+    /// derived index is behind the files on disk. An absent vault is a state, not a failure,
+    /// and this command reports it and exits 0. With `<id> <status>`: that node's lifecycle
+    /// status, exactly as before.
+    Status {
+        /// A node id or exact title. Omit for the workspace and index state.
+        #[arg(requires = "status")]
+        id: Option<String>,
+        /// The lifecycle status to set. Needs a node.
+        #[arg(requires = "id")]
+        status: Option<StatusArg>,
+    },
     /// Delete a node, its edges and its history.
     Remove { id: String },
     /// Assert a relationship: `link <from> <type> <to>`.
@@ -100,7 +114,8 @@ enum Command {
     /// Show how one node connects to another: `path <from> <to>`.
     ///
     /// The answer to "why is this relevant to that", which a list of
-    /// neighbours cannot give.
+    /// neighbours cannot give. Finding no path is an ordinary answer — the
+    /// two nodes may simply be unconnected — and exits 0.
     Path(PathArgs),
     /// Assemble a knowledge brief for a task.
     Brief(BriefArgs),
@@ -116,7 +131,22 @@ enum Command {
     /// This command always writes one JSON response, independent of --json.
     Bridge,
     /// Deterministically index files, symbols, imports and local Git history.
+    ///
+    /// Without `--scope` this indexes the repository with the budgets below and prints the
+    /// detailed repository report, which is what it has always done. `--scope vault|repository|all`
+    /// indexes with the engine's own budgets, prints one unified summary, and reports what it
+    /// skipped and whether a budget ended the walk early. `--scope repository` is therefore not
+    /// byte-identical to plain `index`: same work, summary instead of detail.
+    ///
+    /// A repository pass reuses the files whose size and modification time are unchanged, which
+    /// is what makes re-indexing a large tree cheap; `--full` reads every file again.
     Index(IndexArgs),
+    /// Every file the index has read: sources under `raw/sources/`, repository files, their
+    /// content hashes, how much of the graph points at them, and whether they moved since.
+    Sources {
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+    },
     /// Rebuild the derived index over the vault's markdown.
     ///
     /// Safe to run at any time and cheap to run often: it writes only what
@@ -139,6 +169,20 @@ enum Command {
     /// answer. Findings that are only untidy are reported and forgiven,
     /// unless `--strict` says otherwise.
     Check(CheckArgs),
+    /// Review the knowledge base: contradictions, disputes, stale anchors, unsupported rules,
+    /// proposals awaiting a decision, duplicates, near-duplicates, superseded knowledge, orphans
+    /// and incomplete scans.
+    ///
+    /// Exits non-zero only when a finding could hand an agent a wrong answer, unless `--strict`
+    /// says every finding counts. `check` remains the terse internal sweep; this is the queue a
+    /// person or a script acts on, in the same shape the bridge's `review` method returns.
+    Review {
+        #[arg(long, default_value_t = 200)]
+        limit: u32,
+        /// Treat every finding as a failure, not only the blocking ones.
+        #[arg(long)]
+        strict: bool,
+    },
     /// The repository's identity: `repo init`, `repo info`.
     Repo {
         #[command(subcommand)]
@@ -290,8 +334,13 @@ struct LinkArgs {
     /// makes it immediately traversable.
     #[arg(long)]
     derived: Option<String>,
+    /// Why the relationship exists, recorded with it.
     #[arg(long)]
     note: Option<String>,
+    /// How sure whoever wrote it was, from 0 to 1. Omit when the
+    /// relationship is simply a fact.
+    #[arg(long)]
+    confidence: Option<f32>,
 }
 
 #[derive(Args)]
@@ -347,6 +396,23 @@ struct BriefArgs {
 
 #[derive(Args)]
 struct IndexArgs {
+    /// What to index: `vault`, `repository` or `all`.
+    ///
+    /// Omit to index only the repository with the budgets below. With `--scope`, the pass uses
+    /// the engine's own scan budgets, so the four budget flags cannot be combined with it.
+    #[arg(
+        long,
+        value_enum,
+        conflicts_with_all = ["max_commits", "max_files", "max_file_bytes", "max_total_bytes", "max_duration_ms", "full"]
+    )]
+    scope: Option<ScopeArg>,
+    /// A repository-relative path to re-index. Repeatable; repository scope only.
+    #[arg(long = "path", value_name = "PATH", requires = "scope")]
+    paths: Vec<String>,
+    /// Read every repository file again instead of reusing the ones whose size and modification
+    /// time are unchanged. Slower; what a first scan, or a suspicious one, does.
+    #[arg(long, conflicts_with = "scope")]
+    full: bool,
     /// Maximum number of recent commits to connect to indexed files.
     #[arg(long, default_value_t = 500)]
     max_commits: usize,
@@ -359,6 +425,10 @@ struct IndexArgs {
     /// Maximum UTF-8 bytes read across the repository.
     #[arg(long, default_value_t = 67_108_864)]
     max_total_bytes: u64,
+    /// Wall-clock ceiling for the pass, in milliseconds; 0 means no ceiling. Reaching it stops
+    /// the walk and reports the scan incomplete rather than appearing to have read everything.
+    #[arg(long, default_value_t = 30_000)]
+    max_duration_ms: u64,
 }
 
 #[derive(Args)]
@@ -375,6 +445,10 @@ struct IndexVaultArgs {
     /// Maximum UTF-8 bytes read across the whole vault.
     #[arg(long, default_value_t = 268_435_456)]
     max_total_bytes: u64,
+    /// Wall-clock ceiling for the pass, in milliseconds; 0 means no ceiling. Reaching it stops
+    /// the walk and reports the scan incomplete rather than appearing to have read everything.
+    #[arg(long, default_value_t = 30_000)]
+    max_duration_ms: u64,
     /// List every unresolved `[[link]]` rather than the first few.
     #[arg(long)]
     show_unresolved: bool,
@@ -403,6 +477,9 @@ struct LintArgs {
     /// Maximum UTF-8 bytes read across the whole vault.
     #[arg(long, default_value_t = 268_435_456)]
     max_total_bytes: u64,
+    /// Wall-clock ceiling for the pass, in milliseconds; 0 means no ceiling.
+    #[arg(long, default_value_t = 30_000)]
+    max_duration_ms: u64,
 }
 
 #[derive(Args)]
@@ -416,6 +493,9 @@ struct RelocateArgs {
     /// Maximum UTF-8 bytes read across the repository.
     #[arg(long, default_value_t = 67_108_864)]
     max_total_bytes: u64,
+    /// Wall-clock ceiling for the scan, in milliseconds; 0 means no ceiling.
+    #[arg(long, default_value_t = 30_000)]
+    max_duration_ms: u64,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -447,13 +527,12 @@ fn main() -> ExitCode {
         Ok(outcome) => outcome.into(),
         Err(err) => {
             if cli.json {
-                // A script asked for JSON, so a failure is JSON too, with a code it can branch on.
-                let code = match &err {
-                    Error::Portable { code, .. } => code.clone(),
-                    Error::NoWorkspace { .. } => "workspace_not_found".to_string(),
-                    Error::NodeNotFound(_) => "not_found".to_string(),
-                    _ => "error".to_string(),
-                };
+                // A script asked for JSON, so a failure is JSON too, with a code it can branch
+                // on. The mapping is the bridge's, not a second one: `knowledge_error` for a
+                // store that cannot be read, `invalid_request` for a value the library refuses,
+                // `workspace_not_found` for an absent knowledge base — the same string a client
+                // sees from `athenaeum bridge` for the same failure.
+                let code = athenaeum_core::bridge::error_code(&err);
                 println!(
                     "{}",
                     serde_json::json!({ "error": { "code": code, "message": err.to_string() } })
@@ -502,10 +581,21 @@ fn run(cli: &Cli) -> Result<Outcome> {
     if let Command::Init = cli.command {
         let workspace = Workspace::init(&cwd)?;
         workspace.open()?;
-        println!(
-            "Initialized knowledge base at {}",
-            workspace.root().display()
-        );
+        emit(
+            cli.json,
+            &serde_json::json!({
+                "initialized": true,
+                "projectPath": cwd.display().to_string(),
+                "workspacePath": workspace.root().display().to_string(),
+            }),
+            || {
+                println!(
+                    "Initialized knowledge base at {}",
+                    workspace.root().display()
+                );
+                Ok(())
+            },
+        )?;
         return Ok(Outcome::Ok);
     }
 
@@ -524,6 +614,9 @@ fn run(cli: &Cli) -> Result<Outcome> {
         Command::Sync { command, message } => {
             return portable_cmd::sync(cli.json, &cwd, command.as_ref(), message.as_deref());
         }
+        // `athenaeum status` with no node is a question about the directory, and a directory
+        // with no knowledge base is exactly the answer it exists to give.
+        Command::Status { id: None, .. } => return product_cmd::status(cli.json, &cwd),
         _ => {}
     }
 
@@ -543,6 +636,13 @@ fn run(cli: &Cli) -> Result<Outcome> {
         path: cwd.display().to_string(),
     })?;
     let mut store = workspace.open()?;
+
+    // A read answered from an index built before the vault's last edit would present stale
+    // knowledge as current. The bridge already reconciles before it answers a read; the CLI
+    // answers from the same index, so it does the same, and says so when it changed something.
+    if reads_vault(&cli.command) {
+        refresh_vault_index(&mut store, &workspace);
+    }
 
     match &cli.command {
         Command::Init => unreachable!("handled before the workspace is opened"),
@@ -628,7 +728,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
-        Command::Status { id, status } => {
+        Command::Status { id: Some(id), status: Some(status) } => {
             let node = resolve(&store, id)?;
             let updated = store.set_node_status(&node.id, (*status).into())?;
             emit(cli.json, &updated, || {
@@ -636,6 +736,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 Ok(())
             })?;
         }
+
+        Command::Status { .. } => unreachable!("handled before the workspace is opened"),
 
         Command::Remove { id } => {
             let node = resolve(&store, id)?;
@@ -731,6 +833,17 @@ fn run(cli: &Cli) -> Result<Outcome> {
             if let Some(note) = &args.note {
                 edge = edge.with_note(note);
             }
+            // A confidence outside 0..1 is not a confidence. Refused at the boundary rather than
+            // stored and re-rendered as something a reader would take at face value.
+            if let Some(confidence) = args.confidence {
+                if !(0.0..=1.0).contains(&confidence) {
+                    return Err(Error::InvalidValue {
+                        field: "confidence",
+                        value: confidence.to_string(),
+                    });
+                }
+                edge = edge.with_confidence(confidence);
+            }
 
             let created = store.connect(edge)?;
             emit(cli.json, &created, || {
@@ -806,12 +919,10 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     .depth(args.depth)
                     .max_nodes(args.max_nodes),
             )?;
-            emit(cli.json, &path, || {
-                render::path(&store, &from, &to, path.as_deref())
-            })?;
-            if path.is_none() {
-                return Ok(Outcome::ProblemsFound);
-            }
+            // Succeeding with "no path" is the answer, not a failure: the two nodes exist and
+            // nothing connects them within the search depth. The bridge's `path` method reports
+            // the same thing as `found: false`, and the exit code agrees with it.
+            emit(cli.json, &path, || render::path(&store, &from, &to, path.as_deref()))?;
         }
 
         Command::Brief(args) => {
@@ -865,6 +976,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
         Command::Bridge => unreachable!("handled before the workspace is opened"),
 
+        Command::Sources { limit } => return product_cmd::sources(cli.json, &store, *limit),
+
         Command::Repo { .. } | Command::Import { .. } | Command::Library { .. } | Command::Sync { .. } => {
             unreachable!("handled before the workspace is opened")
         }
@@ -889,6 +1002,13 @@ fn run(cli: &Cli) -> Result<Outcome> {
         }
 
         Command::Index(args) => {
+            // `--scope` is the unified pass: it can cover the vault, the repository or both, and
+            // it reports what it skipped and whether a budget ended the walk early. Without it,
+            // the command does exactly what it always did — a repository pass with the budgets
+            // the caller named — so an existing script sees the same report it saw before.
+            if let Some(scope) = args.scope {
+                return product_cmd::index(cli.json, &mut store, &workspace, scope, &args.paths);
+            }
             let project_root = workspace
                 .project_root()
                 .ok_or_else(|| Error::InvalidValue {
@@ -903,6 +1023,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     max_files: args.max_files,
                     max_file_bytes: args.max_file_bytes,
                     max_total_bytes: args.max_total_bytes,
+                    max_duration_ms: args.max_duration_ms,
+                    incremental: !args.full,
                 },
             )?;
             emit(cli.json, &report, || {
@@ -948,6 +1070,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     max_sources: args.max_sources,
                     max_page_bytes: args.max_page_bytes,
                     max_total_bytes: args.max_total_bytes,
+                    max_duration_ms: args.max_duration_ms,
                 },
             )?;
             emit(cli.json, &report, || {
@@ -971,6 +1094,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     max_sources: args.max_sources,
                     max_page_bytes: args.max_page_bytes,
                     max_total_bytes: args.max_total_bytes,
+                    max_duration_ms: args.max_duration_ms,
                 },
                 &LintOptions {
                     ignore_orphan: args.ignore_orphan,
@@ -1009,6 +1133,11 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     max_file_bytes: args.max_file_bytes,
                     max_total_bytes: args.max_total_bytes,
                     max_commits: 0,
+                    max_duration_ms: args.max_duration_ms,
+                    // Relocation looks for a moved anchor, not for changed code, so it reuses the
+                    // files the last scan already read; the hash check inside the scan is what
+                    // keeps a reuse from being wrong.
+                    incremental: true,
                 },
             )?
             .relocate_store(&mut store)?;
@@ -1027,7 +1156,13 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
+        Command::Review { limit, strict } => {
+            note_if_index_stale(&store);
+            return product_cmd::review(cli.json, &store, *limit, *strict);
+        }
+
         Command::Check(args) => {
+            note_if_index_stale(&store);
             let report = athenaeum_core::review::sweep(&store)?;
             let blocking = report.has_blocking();
             emit(cli.json, &report, || {
@@ -1056,4 +1191,80 @@ fn resolve(store: &KnowledgeStore, reference: &str) -> Result<KnowledgeNode> {
     store
         .find_node_by_title(reference)?
         .ok_or(Error::NodeNotFound(id))
+}
+
+/// True for the commands that answer from the vault's derived index.
+///
+/// The same set the bridge treats as reads: a question asked just after the markdown moved must
+/// not be answered from the index as it was before the move. Commands that index the vault
+/// themselves (`lint`, `index-vault`) and commands that do not read vault knowledge (`journal`,
+/// the repository scan) are not listed, and neither are mutations: a write reconciles what it
+/// needs, and doing it here would make an edit depend on a scan it never asked for.
+///
+/// `status`, `review`, `check` and `sources` are absent on purpose: they *report* whether the
+/// index is behind and what a scan did not read, so repairing it first would erase the state they
+/// exist to show. They report rather than repair; a read repairs.
+fn reads_vault(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Stats
+            | Command::Show { .. }
+            | Command::List(_)
+            | Command::Search { .. }
+            | Command::Navigate(_)
+            | Command::Path(_)
+            | Command::Brief(_)
+            | Command::History { .. }
+            | Command::Proposals { .. }
+    )
+}
+
+/// Say so when a report about the index was produced from an index that is behind the files.
+///
+/// The report is not repaired here — `review`, `check` and `sources` exist to describe the state
+/// they find, including a stale one — but a person reading a queue deserves to know that the
+/// markdown has moved on since it was built.
+fn note_if_index_stale(store: &KnowledgeStore) {
+    match athenaeum_core::status::index_status(store) {
+        Ok(status) if status.stale => eprintln!(
+            "athenaeum: the files have changed since the index was last built; run \
+             `athenaeum index --scope all` for a report that reflects them"
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("athenaeum: could not tell whether the index is current: {error}"),
+    }
+}
+
+/// Reconcile the derived index with the vault before a read is answered from it.
+///
+/// A failure here never fails the read: the answer would have been the same without the step, so
+/// the reason goes to stderr — where `--json` output on stdout is untouched — and the command
+/// proceeds. The message names what changed rather than silently repairing it, because "the index
+/// was behind" is something a script may want to notice.
+fn refresh_vault_index(store: &mut KnowledgeStore, workspace: &Workspace) {
+    let Some(project) = workspace.project_root() else {
+        return;
+    };
+    match VaultIndexer::sync_if_changed(store, project, VaultScanOptions::default()) {
+        Ok(VaultSync::Unchanged) => {}
+        Ok(VaultSync::Reconciled(report)) => eprintln!(
+            "athenaeum: the vault changed since it was last indexed; refreshed the index \
+             ({} page(s), {} node(s) created, {} updated, {} removed)",
+            report.pages, report.nodes_created, report.nodes_updated, report.nodes_removed
+        ),
+        Ok(VaultSync::NotIndexed) => {
+            // Saying this on a project that simply has no vault would be noise; saying it where
+            // markdown exists and the index does not is the difference between an empty answer
+            // and a wrong one.
+            if project.join("wiki").is_dir() {
+                eprintln!(
+                    "athenaeum: this vault has not been indexed yet, so this answer comes from an \
+                     empty index; run `athenaeum index-vault`"
+                );
+            }
+        }
+        Err(error) => eprintln!(
+            "athenaeum: could not refresh the vault index, answering from the last one: {error}"
+        ),
+    }
 }

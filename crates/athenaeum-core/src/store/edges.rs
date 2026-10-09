@@ -130,6 +130,38 @@ impl KnowledgeStore {
         Ok(edge)
     }
 
+    /// Bring a deterministic relationship's reason and confidence up to date.
+    ///
+    /// [`connect`](Self::connect) is idempotent: the second read of the same
+    /// relationship returns the edge that already exists and writes nothing.
+    /// That is right for the relationship, and wrong for the two fields that
+    /// describe *how* it was read — the first reason an older build wrote would
+    /// otherwise outlive every later, better one. This rewrites exactly those
+    /// fields, and only when they differ, so a steady-state re-index still
+    /// writes nothing at all.
+    ///
+    /// Returns true when something changed.
+    pub fn refresh_edge_metadata(
+        &mut self,
+        id: &EdgeId,
+        note: Option<&str>,
+        confidence: Option<f32>,
+        detail: &str,
+    ) -> Result<bool> {
+        let edge = self.get_edge(id)?;
+        if edge.note.as_deref() == note
+            && edge.confidence == confidence
+            && edge.provenance.detail.as_deref() == Some(detail)
+        {
+            return Ok(false);
+        }
+        self.conn.execute(
+            "UPDATE edges SET note = ?2, confidence = ?3, provenance_detail = ?4 WHERE id = ?1",
+            params![id, note, confidence, detail],
+        )?;
+        Ok(true)
+    }
+
     /// Convenience for the common case: assert a model-proposed relationship.
     pub fn relate(
         &mut self,

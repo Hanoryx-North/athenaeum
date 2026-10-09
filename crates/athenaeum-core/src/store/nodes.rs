@@ -245,6 +245,43 @@ impl KnowledgeStore {
         Ok(nodes)
     }
 
+    /// Count the live nodes whose provenance detail begins with `prefix`.
+    ///
+    /// Used by the status and sources reports to count the vault's pages
+    /// without loading every node. The detail is written by the indexer that
+    /// owns the node type: a vault page records `vault_index:page`, then the
+    /// page type and the origin the page declared, any of which may be
+    /// absent. Counting the marker alone would therefore miss every page that
+    /// declares a type, so this matches the marker as a prefix.
+    ///
+    /// `substr` rather than `LIKE`: the markers contain `_`, which `LIKE`
+    /// treats as a wildcard, and a count that quietly means something wider
+    /// than it says is worse than one that has to scan.
+    pub fn count_nodes_by_provenance_prefix(&self, prefix: &str) -> Result<u64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE substr(provenance_detail, 1, length(?1)) = ?1",
+            [prefix],
+            |row| row.get::<_, i64>(0),
+        )? as u64)
+    }
+
+    /// Count the model proposals awaiting a decision, without loading them.
+    ///
+    /// The same predicate as [`crate::portable::memory::is_proposal`] — a live
+    /// node a model proposed that the vault does not own — expressed as a count
+    /// so a status line does not pay for the whole list. The two must agree;
+    /// change them together.
+    pub fn count_proposals(&self) -> Result<u64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM nodes
+             WHERE provenance_source = 'model'
+               AND status IN ('valid', 'stale', 'stale_requires_review')
+               AND (provenance_detail IS NULL OR provenance_detail NOT LIKE 'vault%')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? as u64)
+    }
+
     /// Replace a node's contents, archiving what it said before.
     ///
     /// The previous body is snapshotted into `node_versions` and the version

@@ -8,10 +8,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use athenaeum_core::findings::ReviewFindingView;
 use athenaeum_core::graph::{Reached, Step};
 use athenaeum_core::journal::Event;
 use athenaeum_core::model::NodeVersion;
 use athenaeum_core::prelude::*;
+use athenaeum_core::status::{IndexOutcome, SourceSummary, WorkspaceStatus};
 use athenaeum_core::vault::{LintSeverity, VaultLintReport};
 use serde::Serialize;
 
@@ -32,6 +34,131 @@ pub fn stats(stats: &Stats, root: &Path) {
     println!("events     {}", stats.events);
     println!("schema     v{}", stats.schema_version);
     println!("location   {}", root.display());
+}
+
+/// The workspace and index state, as `athenaeum status` prints it.
+///
+/// `initialized: false` is rendered as a state with no numbers under it, because a column of
+/// zeroes reads like a broken knowledge base rather than an absent one.
+pub fn workspace_status(status: &WorkspaceStatus) {
+    println!("path        {}", status.workspace_path);
+    if !status.initialized {
+        println!("knowledge   no knowledge base here yet; run `athenaeum init`");
+        return;
+    }
+    if status.has_vault {
+        println!("knowledge   initialized, with a vault of {} page(s)", status.vault_pages);
+    } else {
+        println!(
+            "knowledge   initialized, but there is no vault here (the repository is indexed, \
+             the wiki is not)"
+        );
+    }
+    match &status.indexed_at {
+        Some(at) => println!(
+            "index       {} node(s), {} edge(s), last built {at}",
+            status.nodes, status.edges
+        ),
+        None => println!(
+            "index       {} node(s), {} edge(s), never built; run `athenaeum index --scope all`",
+            status.nodes, status.edges
+        ),
+    }
+    if status.index_stale {
+        println!(
+            "            STALE — the files moved since it was last built; run \
+             `athenaeum index --scope all`"
+        );
+    }
+    println!(
+        "review      {} proposal(s) awaiting a decision, {} finding(s)",
+        status.proposals, status.findings
+    );
+    println!(
+        "protocol    v{} (engine {})",
+        status.protocol_version, status.engine_version
+    );
+}
+
+/// Every file the index has read, with its hash, coverage and freshness.
+///
+/// `limit` is what the caller asked for, so a listing that filled its budget says so instead of
+/// looking like the whole inventory.
+pub fn sources(sources: &[SourceSummary], limit: u32) {
+    if sources.is_empty() {
+        println!("nothing has been indexed from this project yet; run `athenaeum index --scope all`");
+        return;
+    }
+    for source in sources {
+        // The scope is part of the identity: the same path can be a file of the code repository
+        // and source material the wiki cites, and those are two records, not a duplicate.
+        println!(
+            "{:<10} {}  {}  {} node(s), {} anchor(s)  {}{}",
+            source.scope.as_str(),
+            truncate(&source.path, 56),
+            human_bytes(source.bytes),
+            source.nodes,
+            source.anchors,
+            if source.scanned { "scanned" } else { "not scanned" },
+            if source.stale { ", STALE" } else { "" }
+        );
+        if source.sha256.is_empty() {
+            println!("    sha256 not computed (the scan did not read it)");
+        } else {
+            println!("    sha256 {}", source.sha256);
+        }
+        if let Some(at) = &source.indexed_at {
+            println!("    indexed {at}");
+        }
+    }
+    if limit > 0 && sources.len() as u32 >= limit {
+        println!(
+            "… {} shown; there may be more, pass --limit for the rest",
+            sources.len()
+        );
+    }
+}
+
+/// What one `athenaeum index --scope` pass did.
+pub fn index_outcome(outcome: &IndexOutcome) {
+    println!(
+        "indexed {} vault page(s), {} repository file(s), {} symbol(s); the graph holds {} edge(s) after {} ms",
+        outcome.vault_pages, outcome.repository_files, outcome.symbols, outcome.edges, outcome.duration_ms
+    );
+    if !outcome.skipped.is_empty() {
+        println!("{} path(s) skipped:", outcome.skipped.len());
+        let shown = outcome.skipped.len().min(10);
+        for path in &outcome.skipped[..shown] {
+            println!("  {path}");
+        }
+        if shown < outcome.skipped.len() {
+            println!(
+                "  … and {} more; `athenaeum review` names the reason for each",
+                outcome.skipped.len() - shown
+            );
+        }
+    }
+    if outcome.incomplete {
+        eprintln!(
+            "warning: a scan budget ended a walk early; nothing was deleted on that basis, and \
+             `athenaeum review` reports it as an incomplete scan"
+        );
+    }
+}
+
+/// Bytes at human scale, so a listing is readable without arithmetic.
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KiB", "MiB", "GiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 pub fn node_list(nodes: &[KnowledgeNode]) {
@@ -92,7 +219,13 @@ pub fn node_detail(store: &KnowledgeStore, node: &KnowledgeNode) -> Result<()> {
             } else {
                 "?"
             };
-            println!("  {marker} {} → {}", neighbor.edge_type, other.title);
+            // Why the relationship exists is part of it: an edge with no reason is a claim about
+            // the graph, and a reader who cannot see the note cannot judge it.
+            let reason = reasons(
+                neighbor.edge.note.as_deref(),
+                neighbor.edge.confidence.map(f64::from),
+            );
+            println!("  {marker} {} → {}{reason}", neighbor.edge_type, other.title);
         }
     }
 
@@ -135,8 +268,9 @@ pub fn navigation(reached: &[Reached]) {
                     .get(&step.from)
                     .copied()
                     .unwrap_or_else(|| step.from.as_str());
+                let reason = reasons(step.note.as_deref(), step.confidence);
                 println!(
-                    "{:indent$}{} --{}--> {} [{}]",
+                    "{:indent$}{} --{}--> {} [{}]{reason}",
                     "",
                     from,
                     step.edge_type,
@@ -230,6 +364,59 @@ pub fn vault_index(report: &VaultIndexReport, show_unresolved: bool) {
     }
 }
 
+/// The review queue, as `athenaeum review` prints it.
+///
+/// The finding type is the contract's own — the same value `--json` serializes and the bridge
+/// returns — so a person and a script cannot be shown different queues. `limit` is what the
+/// caller asked for: a queue that filled its budget says so rather than looking complete.
+pub fn review_findings(findings: &[ReviewFindingView], limit: u32) {
+    if findings.is_empty() {
+        println!("nothing needs a decision");
+        return;
+    }
+    let blocking = findings.iter().filter(|finding| finding.blocking).count();
+    println!(
+        "{} finding(s), {} blocking; `athenaeum review --json` is the same queue for a script",
+        findings.len(),
+        blocking
+    );
+    for finding in findings {
+        let mark = if finding.blocking { "!" } else { "-" };
+        if finding.title.is_empty() {
+            println!("{mark} {} ({})", finding.kind, finding.severity);
+        } else {
+            println!("{mark} {} ({})  {}", finding.kind, finding.severity, finding.title);
+        }
+        if !finding.detail.is_empty() {
+            println!("    {}", finding.detail);
+        }
+        if let Some(path) = &finding.source_path {
+            println!("    source: {path}");
+        }
+        if !finding.nodes.is_empty() {
+            println!("    nodes: {}", joined_ids(&finding.nodes));
+        }
+        if !finding.evidence.is_empty() {
+            println!("    evidence: {}", joined_ids(&finding.evidence));
+        }
+        println!("    confidence: {:.2}", finding.confidence);
+    }
+    if limit > 0 && findings.len() as u32 >= limit {
+        println!(
+            "… {} shown; the queue may be longer, pass --limit for the rest",
+            findings.len()
+        );
+    }
+}
+
+fn joined_ids<T: std::fmt::Display>(values: &[T]) -> String {
+    values
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn vault_lint(report: &VaultLintReport) {
     if report.findings.is_empty() {
         println!("{} page(s) linted, nothing to report", report.pages);
@@ -289,11 +476,17 @@ pub fn path(
     // node each one arrived at is named by the next step's origin — and for
     // the last one, by the destination itself.
     for (index, step) in steps.iter().enumerate() {
-        let arrived = match steps.get(index + 1) {
-            Some(next) => store.get_node(&next.from)?.title,
-            None => to.title.clone(),
+        let arrived_id = match steps.get(index + 1) {
+            Some(next) => &next.from,
+            None => &to.id,
         };
-        println!("  --{}-> {}", step.edge_type, arrived);
+        let arrived = store.get_node(arrived_id)?.title;
+        println!(
+            "  --{}-> {}{}",
+            step.edge_type,
+            arrived,
+            reasons(step.note.as_deref(), step.confidence)
+        );
     }
     Ok(())
 }
@@ -351,4 +544,22 @@ pub fn truncate(text: &str, max: usize) -> String {
     let mut out: String = head.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// The reason a relationship exists, as one line's tail.
+///
+/// The engine's own note, verbatim — paraphrasing it here would make the reason something this
+/// renderer wrote rather than what the edge says — and the confidence only when the edge carries
+/// one. Absent both, the line ends where it always did.
+fn reasons(note: Option<&str>, confidence: Option<f64>) -> String {
+    let mut tail = String::new();
+    if let Some(note) = note.map(str::trim).filter(|note| !note.is_empty()) {
+        tail.push_str("  (");
+        tail.push_str(note);
+        tail.push(')');
+    }
+    if let Some(confidence) = confidence {
+        tail.push_str(&format!("  [confidence {confidence:.2}]"));
+    }
+    tail
 }

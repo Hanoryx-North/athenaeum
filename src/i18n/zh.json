@@ -24,6 +24,7 @@
     "graph": "关系图",
     "lint": "检查",
     "review": "待审阅",
+    "knowledge": "知识",
     "skills": "Skills",
     "settings": "设置",
     "settingsShortcut": " (Cmd/Ctrl+,)",

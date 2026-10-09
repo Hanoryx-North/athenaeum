@@ -17,6 +17,7 @@ use super::{
     RepositoryCall, RepositoryImport, RepositoryRelation, RepositorySymbol, SourceLanguage,
     SymbolKind,
 };
+use super::ExtractionMethod;
 
 static RUST_DECL: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::new(|| {
     Regex::new(
@@ -156,22 +157,157 @@ const CALL_KEYWORDS: &[&str] = &[
     "yield",
 ];
 
-/// What one file said about itself.
+/// What one file said about itself, and how it was read.
 #[derive(Debug, Default)]
 pub(super) struct ParsedFile {
     pub symbols: Vec<RepositorySymbol>,
     pub imports: Vec<RepositoryImport>,
     pub implements: Vec<RepositoryRelation>,
+    /// Call sites, attributed to their declaration by [`finish`].
+    pub calls: Vec<(u32, RepositoryCall)>,
+    pub method: ExtractionMethod,
+    pub detail: Option<String>,
 }
 
+/// Read one file of a supported language, without a path to attribute it to.
+///
+/// Retained because callers that already know the language — and the pinned
+/// tests that prove the fallback reader still reads what it always read — do
+/// not all have a repository-relative path in hand. The path only ever refines
+/// the attribution a parser can do, never whether a file is read at all.
+///
+/// This is the entry point for a caller that has content but no path — and the
+/// pinned entry point the preserved inline tests exercise. Keep its signature.
+#[allow(dead_code)]
 pub(super) fn parse(language: SourceLanguage, content: &str) -> crate::Result<ParsedFile> {
-    match language {
-        SourceLanguage::Rust => parse_rust(content),
-        SourceLanguage::TypeScript | SourceLanguage::JavaScript => parse_javascript(content),
-        SourceLanguage::Python => parse_python(content),
-        SourceLanguage::Go => parse_go(content),
+    parse_with_path(language, None, content)
+}
+
+/// Read one file of a supported language, attributing it to `path` where the
+/// parser can use it.
+///
+/// A real parser goes first, because it is the only reader here that can tell a
+/// declaration from a word in a comment. The line reader is the fallback for a
+/// file the parser could not make sense of, and the result says which of the
+/// two produced it.
+pub(super) fn parse_with_path(
+    language: SourceLanguage,
+    path: Option<&str>,
+    content: &str,
+) -> crate::Result<ParsedFile> {
+    if let Some(parsed) = super::ast::parse_with_tree(language, path, content) {
+        // The attribution, ordering and de-duplication passes are shared with
+        // the fallback reader, so the two paths cannot disagree about which
+        // declaration a call belongs to.
+        let mut finished = finish(
+            parsed.symbols,
+            parsed.imports,
+            parsed.implements,
+            parsed.calls,
+        )?;
+        finished.method = parsed.method;
+        finished.detail = parsed.detail;
+        return Ok(finished);
+    }
+    let parsed = match language {
+        SourceLanguage::Rust => parse_rust(content)?,
+        SourceLanguage::TypeScript | SourceLanguage::JavaScript => parse_javascript(content)?,
+        SourceLanguage::Python => parse_python(content)?,
+        SourceLanguage::Go => parse_go(content)?,
+    };
+    Ok(parsed
+        .with_method(
+            ExtractionMethod::Fallback,
+            format!(
+                "the {} parser reported syntax errors, so this file was read line by line",
+                language.as_str()
+            ),
+        ))
+}
+
+/// Read a file of a language this build has no parser for.
+///
+/// The alternative was silence, and silence is the one answer that is actually
+/// wrong: a Java or C# file contributes nothing to the graph and says nothing
+/// about having contributed nothing. This recognises the declaration and import
+/// shapes those languages share, marks every symbol it produces as a fallback,
+/// and leaves the confidence to [`ExtractionMethod::Fallback`].
+pub(super) fn parse_unsupported(path: &str, content: &str) -> crate::Result<ParsedFile> {
+    let mut symbols = Vec::new();
+    let mut imports = Vec::new();
+    let mut call_sites = Vec::new();
+    let mut spans = BraceSpans::default();
+    let mut depth = 0_i32;
+    let mut last_line = 1;
+    let mut block_comment = false;
+
+    for (index, line) in content.lines().enumerate() {
+        let line_number = index as u32 + 1;
+        last_line = line_number;
+        let code = strip_c_style_comments(line, &mut block_comment, true, true);
+        let trimmed = code.trim();
+        let scan = scan_braces(&code, depth);
+        if trimmed.is_empty() {
+            spans.advance(&mut symbols, line_number, &scan, false);
+            depth = scan.end;
+            continue;
+        }
+
+        if let Some(captures) = compiled(&GENERIC_DECL, "unsupported language")?.captures(trimmed) {
+            let raw_kind = &captures[1];
+            let name = captures[2].to_string();
+            let kind = generic_kind(raw_kind);
+            let exported = !trimmed.contains("private")
+                && !trimmed.contains("protected")
+                && !trimmed.contains("internal");
+            symbols.push(symbol(name.clone(), name, kind, line_number, exported));
+            // Only a declaration that opens a brace has a body to follow. In a
+            // language that closes with `end`, the line itself is all we claim.
+            if scan.max > depth {
+                spans.open(symbols.len() - 1, depth);
+            }
+        }
+        if let Some(captures) = compiled(&GENERIC_IMPORT, "unsupported language")?.captures(trimmed) {
+            if let Some(specifier) = captures.get(1).or_else(|| captures.get(2)) {
+                imports.push(import(specifier.as_str(), line_number));
+            }
+        }
+
+        collect_calls(&mut call_sites, &code, line_number)?;
+        spans.advance(&mut symbols, line_number, &scan, ends_statement(&code));
+        depth = scan.end;
+    }
+
+    spans.close_remaining(&mut symbols, last_line);
+    let mut parsed = finish(symbols, imports, Vec::new(), call_sites)?;
+    parsed.detail = Some(format!(
+        "no parser for this language; {path} was read line by line at lower confidence"
+    ));
+    Ok(parsed)
+}
+
+impl ParsedFile {
+    fn with_method(mut self, method: ExtractionMethod, detail: impl Into<String>) -> Self {
+        self.method = method;
+        self.detail = Some(detail.into());
+        self
     }
 }
+
+/// Declaration shapes shared by the languages without a grammar here: the
+/// C family, Java, Kotlin, C#, Ruby, PHP, Swift and the rest.
+static GENERIC_DECL: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?:(?:public|private|protected|internal|static|final|abstract|sealed|open|override|virtual|async|export|declare|pub|unsafe|extern|partial|data|inline|constexpr)\s+)*(func|function|fun|def|class|interface|struct|enum|trait|type|typedef|const|var|let|val|record|protocol|extension|namespace|module|object|package)\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+    )
+});
+
+/// Import shapes shared by the same languages.
+static GENERIC_IMPORT: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::new(|| {
+    Regex::new(
+        r#"^(?:import|using|use|#include|#import|require|include|from)\s+(?:static\s+)?(?:"([^"]+)"|<([^>]+)>|([A-Za-z_][A-Za-z0-9_.:]*))"#,
+    )
+});
 
 fn parse_rust(content: &str) -> crate::Result<ParsedFile> {
     let mut symbols = Vec::new();
@@ -499,6 +635,9 @@ fn finish(
         symbols,
         imports,
         implements,
+        calls: Vec::new(),
+        method: ExtractionMethod::Fallback,
+        detail: None,
     })
 }
 
@@ -732,6 +871,7 @@ fn symbol(
         exported,
         calls: Vec::new(),
         test_scoped: false,
+        extraction: ExtractionMethod::Fallback,
     }
 }
 
@@ -767,6 +907,20 @@ fn relation(subject: String, object: String, line: u32) -> RepositoryRelation {
     }
 }
 
+fn generic_kind(raw: &str) -> SymbolKind {
+    match raw {
+        "func" | "function" | "fun" | "def" => SymbolKind::Function,
+        "class" => SymbolKind::Class,
+        "interface" | "protocol" => SymbolKind::Interface,
+        "trait" => SymbolKind::Trait,
+        "struct" | "record" | "data" => SymbolKind::Struct,
+        "enum" => SymbolKind::Enum,
+        "const" | "var" | "let" | "val" => SymbolKind::Constant,
+        "namespace" | "module" | "object" | "package" => SymbolKind::Module,
+        _ => SymbolKind::Type,
+    }
+}
+
 fn rust_kind(raw: &str) -> SymbolKind {
     match raw {
         "struct" => SymbolKind::Struct,
@@ -790,7 +944,7 @@ fn js_kind(raw: &str) -> SymbolKind {
     }
 }
 
-fn simplify_type(raw: &str) -> String {
+pub(super) fn simplify_type(raw: &str) -> String {
     raw.trim()
         .rsplit("::")
         .next()

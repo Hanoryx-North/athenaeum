@@ -13,7 +13,7 @@ use athenaeum_core::wiki::WikiOutcome;
 use serde_json::Value;
 
 /// Answer one bridge request for the knowledge base that contains `workspace`.
-fn answer(workspace: &str, request: Value, request_id: String) -> Result<Value, String> {
+pub(crate) fn answer(workspace: &str, request: Value, request_id: String) -> Result<Value, String> {
     let method = request
         .get("method")
         .and_then(Value::as_str)
@@ -47,4 +47,12 @@ pub async fn core_bridge(workspace: String, request: Value) -> Result<Value, Str
     tauri::async_runtime::spawn_blocking(move || answer(&workspace, request, request_id))
         .await
         .map_err(|error| format!("bridge task failed: {error}"))?
+}
+
+/// Answer one bridge request with a fresh request id.
+///
+/// The typed commands in [`crate::engine`] build their own requests and check the answer against a
+/// DTO; this is the shared half, so there is still exactly one door to the engine.
+pub(crate) fn execute(workspace: &str, request: Value) -> Result<Value, String> {
+    answer(workspace, request, uuid::Uuid::new_v4().to_string())
 }

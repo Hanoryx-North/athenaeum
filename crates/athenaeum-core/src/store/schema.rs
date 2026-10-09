@@ -9,12 +9,12 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// The schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Migrations, applied in order. Index `n` migrates from version `n` to
 /// `n + 1`, so appending to this array is the only way to change the schema.
 /// Never edit an entry that has shipped.
-const MIGRATIONS: &[&str] = &[V1, V2];
+const MIGRATIONS: &[&str] = &[V1, V2, V3];
 
 /// Connection-level settings applied every time the database is opened.
 ///
@@ -188,4 +188,29 @@ SET title_key = lower(replace(replace(replace(replace(replace(replace(
     replace(replace(title, ' ', ''), char(9), ''), char(10), ''),
     char(11), ''), char(12), ''), char(13), ''), '-', ''), '_', ''));
 CREATE INDEX idx_nodes_title_key ON nodes(title_key);
+"#;
+
+const V3: &str = r#"
+-- The source inventory: one row per file the engine scanned, holding what the
+-- `sources` report needs and the modification time an incremental scan
+-- compares against before it reads a file again.
+--
+-- Derived data in the same sense as `nodes_fts`, and for the same reason: it
+-- describes files on disk, it is rebuilt by the next index pass, and deleting
+-- every row loses no knowledge. `scanned = 0` is a first-class value: it marks
+-- a file the scan saw and deliberately did not read, which is the difference
+-- between "not indexed" and "there is nothing here to index".
+CREATE TABLE source_files (
+    scope      TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    bytes      INTEGER NOT NULL,
+    sha256     TEXT NOT NULL,
+    mtime_ns   INTEGER NOT NULL,
+    scanned    INTEGER NOT NULL,
+    detail     TEXT,
+    indexed_at TEXT NOT NULL,
+    PRIMARY KEY (scope, path)
+);
+
+CREATE INDEX idx_source_files_path ON source_files(path);
 "#;

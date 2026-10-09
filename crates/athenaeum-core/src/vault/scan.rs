@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 
 use super::page::VaultPage;
 use super::{VaultScanOptions, VaultSnapshot, VaultSource};
+use crate::status::SkippedFile;
 
 /// The directory holding wiki pages.
 pub(super) const WIKI_DIR: &str = "wiki";
@@ -48,11 +49,13 @@ pub(super) fn scan(root: &Path, options: VaultScanOptions) -> Result<VaultSnapsh
         sources: Vec::new(),
         warnings: Vec::new(),
         complete: true,
+        skipped: Vec::new(),
         arrived: Default::default(),
     };
 
-    scan_pages(root, &options, &mut snapshot)?;
-    scan_sources(root, &options, &mut snapshot)?;
+    let started = std::time::Instant::now();
+    scan_pages(root, &options, &mut snapshot, started)?;
+    scan_sources(root, &options, &mut snapshot, started)?;
     mark_arrivals(root, &mut snapshot);
 
     // Sorted so two scans of the same vault produce the same snapshot
@@ -170,13 +173,18 @@ pub(super) fn fingerprint(root: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnapshot) -> Result<()> {
+fn scan_pages(
+    root: &Path,
+    options: &VaultScanOptions,
+    snapshot: &mut VaultSnapshot,
+    started: std::time::Instant,
+) -> Result<()> {
     let mut total_bytes = 0_u64;
 
     for name in ROOT_PAGES {
         let path = root.join(name);
         if path.is_file() {
-            read_page(&path, name, options, &mut total_bytes, snapshot)?;
+            read_page(&path, name, options, &mut total_bytes, snapshot, started)?;
         }
     }
 
@@ -192,6 +200,9 @@ fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnaps
         .filter_entry(|entry| !hidden(entry));
 
     for entry in entries {
+        if budget_spent(options, started, snapshot) {
+            break;
+        }
         let entry = entry.map_err(walk_error)?;
         if !entry.file_type().is_file() {
             continue;
@@ -200,6 +211,11 @@ fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnaps
             snapshot.warnings.push(format!(
                 "Skipped a path that is not valid UTF-8: {}",
                 entry.path().display()
+            ));
+            snapshot.skipped.push(SkippedFile::new(
+                entry.path().display().to_string(),
+                "not_utf8",
+                "the path is not valid UTF-8, so it cannot be named in the index",
             ));
             snapshot.complete = false;
             continue;
@@ -215,10 +231,20 @@ fn scan_pages(root: &Path, options: &VaultScanOptions, snapshot: &mut VaultSnaps
                 "Stopped after the configured {} page limit",
                 options.max_pages
             ));
+            snapshot
+                .skipped
+                .push(SkippedFile::new(&relative, "budget", "the page limit was reached"));
             snapshot.complete = false;
             break;
         }
-        if !read_page(entry.path(), &relative, options, &mut total_bytes, snapshot)? {
+        if !read_page(
+            entry.path(),
+            &relative,
+            options,
+            &mut total_bytes,
+            snapshot,
+            started,
+        )? {
             break;
         }
     }
@@ -234,12 +260,21 @@ fn read_page(
     options: &VaultScanOptions,
     total_bytes: &mut u64,
     snapshot: &mut VaultSnapshot,
+    started: std::time::Instant,
 ) -> Result<bool> {
+    if budget_spent(options, started, snapshot) {
+        return Ok(false);
+    }
     let metadata = std::fs::metadata(path)?;
     if metadata.len() > options.max_page_bytes {
         snapshot.warnings.push(format!(
             "Skipped {relative}: {} bytes exceeds the per-page limit",
             metadata.len()
+        ));
+        snapshot.skipped.push(SkippedFile::new(
+            relative,
+            "too_large",
+            format!("{} bytes exceeds the per-page limit", metadata.len()),
         ));
         snapshot.complete = false;
         return Ok(true);
@@ -247,6 +282,11 @@ fn read_page(
     if total_bytes.saturating_add(metadata.len()) > options.max_total_bytes {
         snapshot.warnings.push(format!(
             "Stopped before {relative}: the configured total byte limit was reached"
+        ));
+        snapshot.skipped.push(SkippedFile::new(
+            relative,
+            "budget",
+            "the total byte budget was reached before this page",
         ));
         snapshot.complete = false;
         return Ok(false);
@@ -259,6 +299,11 @@ fn read_page(
             snapshot
                 .warnings
                 .push(format!("Skipped {relative}: not valid UTF-8"));
+            snapshot.skipped.push(SkippedFile::new(
+                relative,
+                "not_utf8",
+                "the page is not valid UTF-8 text",
+            ));
             snapshot.complete = false;
             return Ok(true);
         }
@@ -272,6 +317,7 @@ fn scan_sources(
     root: &Path,
     options: &VaultScanOptions,
     snapshot: &mut VaultSnapshot,
+    started: std::time::Instant,
 ) -> Result<()> {
     let sources_root = root.join("raw").join("sources");
     if !sources_root.is_dir() {
@@ -285,6 +331,9 @@ fn scan_sources(
         .filter_entry(|entry| !hidden(entry));
 
     for entry in entries {
+        if budget_spent(options, started, snapshot) {
+            break;
+        }
         let entry = entry.map_err(walk_error)?;
         if !entry.file_type().is_file() {
             continue;
@@ -294,6 +343,11 @@ fn scan_sources(
                 "Skipped a source path that is not valid UTF-8: {}",
                 entry.path().display()
             ));
+            snapshot.skipped.push(SkippedFile::new(
+                entry.path().display().to_string(),
+                "not_utf8",
+                "the source path is not valid UTF-8, so it cannot be cited",
+            ));
             snapshot.complete = false;
             continue;
         };
@@ -301,6 +355,11 @@ fn scan_sources(
             snapshot.warnings.push(format!(
                 "Stopped after the configured {} source limit",
                 options.max_sources
+            ));
+            snapshot.skipped.push(SkippedFile::new(
+                format!("{RAW_SOURCES_DIR}/{identity}"),
+                "budget",
+                "the source limit was reached",
             ));
             snapshot.complete = false;
             break;
@@ -310,11 +369,12 @@ fn scan_sources(
         // text file, and re-hashing every one on every index would make
         // reconciling cost as much as rebuilding — which is the thing this
         // whole design exists to avoid.
-        let bytes = entry.metadata().map_err(walk_error)?.len();
+        let metadata = entry.metadata().map_err(walk_error)?;
         snapshot.sources.push(VaultSource {
             path: format!("{RAW_SOURCES_DIR}/{identity}"),
             identity,
-            bytes,
+            bytes: metadata.len(),
+            mtime_ns: crate::status::modification_time(&metadata),
         });
     }
 
@@ -351,6 +411,32 @@ fn hidden(entry: &DirEntry) -> bool {
             .file_name()
             .to_str()
             .is_some_and(|name| name.starts_with('.'))
+}
+
+/// True when the wall-clock ceiling has been reached, recording why once.
+fn budget_spent(
+    options: &VaultScanOptions,
+    started: std::time::Instant,
+    snapshot: &mut VaultSnapshot,
+) -> bool {
+    if options.max_duration_ms == 0
+        || started.elapsed().as_millis() as u64 <= options.max_duration_ms
+    {
+        return false;
+    }
+    if snapshot.complete {
+        snapshot.warnings.push(format!(
+            "Stopped after the configured {} ms time budget",
+            options.max_duration_ms
+        ));
+        snapshot.skipped.push(SkippedFile::new(
+            "",
+            "budget",
+            "the time budget was reached before the vault ended",
+        ));
+        snapshot.complete = false;
+    }
+    true
 }
 
 fn walk_error(error: walkdir::Error) -> Error {

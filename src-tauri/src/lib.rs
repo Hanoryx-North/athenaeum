@@ -15,6 +15,7 @@
 
 mod commands;
 mod core_bridge;
+mod engine;
 mod knowledge;
 mod panic_guard;
 mod proxy;
@@ -220,6 +221,10 @@ pub fn run() {
             knowledge::lint_vault,
             knowledge::vocabularies,
             core_bridge::core_bridge,
+            engine::engine_request,
+            engine::engine_accept,
+            engine::engine_reject,
+            engine::library_link,
             set_proxy_env,
             set_close_behavior,
         ])

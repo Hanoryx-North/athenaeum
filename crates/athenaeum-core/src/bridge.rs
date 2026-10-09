@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::store::KnowledgeStore;
 use crate::vault::{VaultIndexer, VaultScanOptions};
+use crate::status;
 use crate::wiki::{
     WikiRequest, WikiRequestEnvelope, WikiResponse, WikiResponseEnvelope, WikiService,
     WIKI_PROTOCOL_VERSION,
@@ -51,6 +52,16 @@ pub fn execute(
         }
     };
 
+    // Field-level validation before anything is executed: serde ignores what it
+    // does not know, and an ignored field is a client bug that would otherwise
+    // go unnoticed until it mattered.
+    if let Some((code, message)) = unknown_request_field(bytes) {
+        return (
+            WikiResponseEnvelope::error(None, code, message),
+            false,
+        );
+    }
+
     let request_id = envelope.request_id;
     if envelope.protocol_version != WIKI_PROTOCOL_VERSION {
         return (
@@ -70,6 +81,20 @@ pub fn execute(
         WikiRequest::Capabilities => Ok(WikiResponse::Capabilities {
             capabilities: WikiService::capabilities(),
         }),
+        // `status` answers without a workspace, exactly as `capabilities` does.
+        // "There is no vault here" is a fact about the directory, and a client
+        // that renders a project picker needs it as an answer rather than as a
+        // transport error it has to interpret.
+        WikiRequest::Status => {
+            let opened = match workspace {
+                Some(workspace) => workspace.open().map(Some),
+                None => Ok(None),
+            };
+            opened.and_then(|store| {
+                status::workspace_status(store.as_ref(), requested_path)
+                    .map(|status| WikiResponse::Status { status })
+            })
+        }
         request => match workspace {
             Some(workspace) => match workspace.open() {
                 Ok(mut store) => {
@@ -101,6 +126,38 @@ pub fn execute(
             (response, false)
         }
     }
+}
+
+/// The fields an envelope and its request may carry, checked against the raw
+/// JSON because typed deserialization cannot see what it silently dropped.
+///
+/// Only the top level of each object is checked: a nested payload is validated
+/// by its own type, and a caller that sends an unknown key alongside a known one
+/// gets told which key was unknown rather than a parse error about the shape.
+fn unknown_request_field(bytes: &[u8]) -> Option<(String, String)> {
+    const ENVELOPE_FIELDS: &[&str] = &["protocolVersion", "requestId", "request"];
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let object = value.as_object()?;
+    for key in object.keys() {
+        if !ENVELOPE_FIELDS.contains(&key.as_str()) {
+            return Some((
+                "invalid_request".to_string(),
+                format!("unknown field {key:?} in the request envelope"),
+            ));
+        }
+    }
+    let request = object.get("request")?.as_object()?;
+    let method = request.get("method")?.as_str()?;
+    let allowed = WikiRequest::allowed_fields(method)?;
+    for key in request.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Some((
+                "invalid_request".to_string(),
+                format!("unknown field {key:?} for method {method:?}"),
+            ));
+        }
+    }
+    None
 }
 
 /// Run a request against the knowledge base that contains `path`, if there is one.

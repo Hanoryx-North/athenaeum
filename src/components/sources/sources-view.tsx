@@ -24,6 +24,7 @@ import {
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { SourceCoverageStrip } from "@/components/sources/source-coverage-strip"
 import { importSourceUrls, parseImportUrls, type UrlImportResult } from "@/lib/url-source-import"
 import { listIngestedSourceIdentities } from "@/lib/ingest-cache"
 import { getQueue, type IngestTask } from "@/lib/ingest-queue"
@@ -398,6 +399,10 @@ export function SourcesView() {
           </Button>
         </div>
       </div>
+
+      {/* What the engine did with what is in this folder: a file listing is not
+          an index, so scan coverage is stated rather than implied. */}
+      <SourceCoverageStrip />
 
       <Dialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen}>
         <DialogContent className="sm:max-w-lg">

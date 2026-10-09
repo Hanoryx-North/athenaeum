@@ -13,6 +13,8 @@ import { useReviewStore } from "@/stores/review-store"
 import { useLintStore } from "@/stores/lint-store"
 import { useActivityStore } from "@/stores/activity-store"
 import { useResearchStore } from "@/stores/research-store"
+import { useEngineStore } from "@/stores/engine-store"
+import { useProposalStore } from "@/stores/proposal-store"
 import { useWikiStore } from "@/stores/wiki-store"
 
 export async function resetProjectState(): Promise<void> {
@@ -22,6 +24,13 @@ export async function resetProjectState(): Promise<void> {
     llmConfig: globalLlmConfig,
     projectLlmOverride: { enabled: false, presetId: null, model: "", profile: undefined },
   })
+
+  // The engine-backed stores: dropping the workspace also invalidates any
+  // answer still in flight, so a reply for the outgoing project cannot land
+  // after the next one opens.
+  useEngineStore.getState().detach()
+  useProposalStore.getState().detach()
+
   useChatStore.setState({
     conversations: [],
     messages: [],

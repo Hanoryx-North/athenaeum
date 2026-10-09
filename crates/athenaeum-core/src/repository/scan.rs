@@ -1,18 +1,41 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
 use super::parse;
-use super::{RepositoryFile, RepositoryScanOptions, RepositorySnapshot, SourceLanguage};
+use super::{
+    Extraction, RepositoryFile, RepositoryScan, RepositoryScanOptions, RepositorySnapshot,
+    SourceLanguage,
+};
 use crate::error::{Error, Result};
 use crate::model::hash;
+use crate::status::SkippedFile;
 
+/// Scan a repository into a snapshot, discarding what only a scan produces.
+///
+/// The snapshot is what a caller inspects or indexes. Skipped files, extraction
+/// methods and the incremental reuse count live on [`RepositoryScan`], which
+/// [`scan_with_details`] returns.
 pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<RepositorySnapshot> {
+    Ok(scan_with_details(root, options)?.snapshot)
+}
+
+/// Scan a repository, keeping what the walk learned along the way.
+pub(super) fn scan_with_details(
+    root: &Path,
+    options: RepositoryScanOptions,
+) -> Result<RepositoryScan> {
     validate_root(root)?;
 
+    let started = std::time::Instant::now();
+    let cache = Cache::load(root, options.incremental);
     let mut files = Vec::new();
     let mut warnings = Vec::new();
+    let mut skipped = Vec::new();
+    let mut extractions = BTreeMap::new();
+    let mut reused_files = 0_usize;
     let mut total_bytes = 0_u64;
     let mut complete = true;
     let entries = WalkDir::new(root)
@@ -22,6 +45,21 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
         .filter_entry(|entry| !ignored_directory(entry));
 
     for entry in entries {
+        if options.max_duration_ms > 0
+            && started.elapsed().as_millis() as u64 > options.max_duration_ms
+        {
+            warnings.push(format!(
+                "Stopped after the configured {} ms time budget",
+                options.max_duration_ms
+            ));
+            skipped.push(SkippedFile::new(
+                "",
+                "budget",
+                "the time budget was reached before this file",
+            ));
+            complete = false;
+            break;
+        }
         let entry = entry.map_err(walk_error)?;
         if !entry.file_type().is_file() {
             continue;
@@ -38,6 +76,11 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
                 "Skipped a path that is not valid UTF-8: {}",
                 relative.display()
             ));
+            skipped.push(SkippedFile::new(
+                relative.display().to_string(),
+                "not_utf8",
+                "the path is not valid UTF-8, so it cannot be named in the index",
+            ));
             complete = false;
             continue;
         };
@@ -49,6 +92,11 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
                 "Stopped after the configured {} file limit",
                 options.max_files
             ));
+            skipped.push(SkippedFile::new(
+                &path,
+                "budget",
+                "the configured file limit was reached",
+            ));
             complete = false;
             break;
         }
@@ -59,6 +107,11 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
                 "Skipped {path}: {} bytes exceeds the per-file limit",
                 metadata.len()
             ));
+            skipped.push(SkippedFile::new(
+                &path,
+                "too_large",
+                format!("{} bytes exceeds the per-file limit", metadata.len()),
+            ));
             complete = false;
             continue;
         }
@@ -66,8 +119,24 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
             warnings.push(format!(
                 "Stopped before {path}: the configured total byte limit was reached"
             ));
+            skipped.push(SkippedFile::new(
+                &path,
+                "budget",
+                "the total byte budget was reached before this file",
+            ));
             complete = false;
             break;
+        }
+
+        let modified = crate::status::modification_time(&metadata);
+        // The cheap path: this file was read before and has not moved since, so
+        // its declarations, imports and call sites are still what they were.
+        if let Some((file, extraction)) = cache.reuse(&path, metadata.len(), modified) {
+            total_bytes += metadata.len();
+            reused_files += 1;
+            files.push(file);
+            extractions.insert(path, extraction);
+            continue;
         }
 
         let bytes = std::fs::read(entry.path())?;
@@ -75,23 +144,39 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
             Ok(content) if !content.contains('\0') => content,
             _ => {
                 warnings.push(format!("Skipped non-text file {path}"));
+                skipped.push(SkippedFile::new(
+                    &path,
+                    "binary",
+                    "the file is not UTF-8 text, so there is nothing to read here",
+                ));
                 continue;
             }
         };
         total_bytes += metadata.len();
         let language = language_for(&path);
         let parsed = match language {
-            Some(language) => parse::parse(language, content)?,
-            None => parse::ParsedFile::default(),
+            Some(language) => parse::parse_with_path(language, Some(&path), content)?,
+            // A language with no parser here still gets read, and the result
+            // says plainly that it was read line by line — never that it was
+            // understood.
+            None if is_code_like(&path) => parse::parse_unsupported(&path, content)?,
+            None => Default::default(),
         };
+        extractions.insert(
+            path.clone(),
+            Extraction::new(parsed.method, parsed.detail.clone()),
+        );
+        let is_test = is_test_path(&path);
+        let is_documentation = is_documentation(&path);
+        let is_configuration = is_configuration(&path);
         files.push(RepositoryFile {
-            path: path.clone(),
+            path,
             language,
             bytes: metadata.len(),
             content_hash: hash(content),
-            is_test: is_test_path(&path),
-            is_documentation: is_documentation(&path),
-            is_configuration: is_configuration(&path),
+            is_test,
+            is_documentation,
+            is_configuration,
             symbols: parsed.symbols,
             imports: parsed.imports,
             implements: parsed.implements,
@@ -104,12 +189,125 @@ pub(super) fn scan(root: &Path, options: RepositoryScanOptions) -> Result<Reposi
         warnings.push(warning);
     }
 
-    Ok(RepositorySnapshot {
-        files,
-        commits,
-        warnings,
-        complete,
+    if options.incremental {
+        if let Err(error) = cache.store(root, &files, &extractions) {
+            warnings.push(format!("Could not write the scan cache: {error}"));
+        }
+    }
+
+    Ok(RepositoryScan {
+        snapshot: RepositorySnapshot {
+            files,
+            commits,
+            warnings,
+            complete,
+        },
+        skipped,
+        extractions,
+        reused_files,
+        filtered: false,
     })
+}
+
+/// The previous scan's structural facts, keyed by path.
+///
+/// A cache of the *derived* reading of the tree, in the workspace's `cache/`
+/// directory, which is the one place this crate is allowed to put data that can
+/// be deleted without losing anything. Its version is part of the file, so a
+/// cache written by an older build is ignored rather than trusted.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Cache {
+    version: u32,
+    files: Vec<CachedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedFile {
+    path: String,
+    bytes: u64,
+    mtime_ns: i64,
+    file: RepositoryFile,
+    extraction: Extraction,
+}
+
+/// The cache format this build writes. Bump it when the extraction changes, so
+/// a stale cache cannot describe a file the current reader would read
+/// differently.
+const CACHE_VERSION: u32 = 1;
+const CACHE_FILE: &str = "repository-scan.json";
+
+impl Cache {
+    /// Load the cache, or an empty one when there is nothing to load.
+    ///
+    /// A cache is only meaningful inside a project: a directory with no
+    /// `.athenaeum/` is not one, and writing derived state into somebody's
+    /// source tree because they happened to index it would be rude.
+    fn load(root: &Path, enabled: bool) -> Self {
+        if !enabled {
+            return Self::default();
+        }
+        let Ok(raw) = std::fs::read_to_string(cache_path(root)) else {
+            return Self::default();
+        };
+        match serde_json::from_str::<Cache>(&raw) {
+            Ok(cache) if cache.version == CACHE_VERSION => cache,
+            _ => Self::default(),
+        }
+    }
+
+    /// The recorded facts for `path`, when they are still valid.
+    fn reuse(&self, path: &str, bytes: u64, mtime_ns: i64) -> Option<(RepositoryFile, Extraction)> {
+        let cached = self
+            .files
+            .iter()
+            .find(|cached| cached.path == path && cached.bytes == bytes && cached.mtime_ns == mtime_ns)?;
+        let mut file = cached.file.clone();
+        // Path-derived facts are cheap to recompute and are the ones a moved
+        // file could have changed, so they never come from the cache.
+        file.is_test = is_test_path(path);
+        file.is_documentation = is_documentation(path);
+        file.is_configuration = is_configuration(path);
+        let mut extraction = cached.extraction.clone();
+        extraction.reused = true;
+        Some((file, extraction))
+    }
+
+    fn store(&self, root: &Path, files: &[RepositoryFile], extractions: &BTreeMap<String, Extraction>) -> Result<()> {
+        let cache = Cache {
+            version: CACHE_VERSION,
+            files: files
+                .iter()
+                .filter_map(|file| {
+                    extractions.get(&file.path).map(|extraction| CachedFile {
+                        path: file.path.clone(),
+                        bytes: file.bytes,
+                        mtime_ns: mtime_of(root, &file.path),
+                        file: file.clone(),
+                        extraction: extraction.clone(),
+                    })
+                })
+                .collect(),
+        };
+        let path = cache_path(root);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, serde_json::to_vec(&cache)?)?;
+        Ok(())
+    }
+}
+
+fn cache_path(root: &Path) -> PathBuf {
+    root.join(crate::workspace::WORKSPACE_DIR)
+        .join("cache")
+        .join(CACHE_FILE)
+}
+
+/// The modification time a later scan will compare against.
+fn mtime_of(root: &Path, relative: &str) -> i64 {
+    std::fs::metadata(root.join(relative))
+        .map(|metadata| crate::status::modification_time(&metadata))
+        .unwrap_or(0)
 }
 
 fn validate_root(root: &Path) -> Result<()> {
@@ -235,6 +433,62 @@ fn language_for(path: &str) -> Option<SourceLanguage> {
         "go" => Some(SourceLanguage::Go),
         _ => None,
     }
+}
+
+/// True for a file of a language this build has no parser for, but which is
+/// source code all the same.
+///
+/// These are the files that used to contribute nothing and say nothing. They
+/// are read by the line-oriented fallback and marked as such, so a Java file's
+/// declarations appear in the graph at lower confidence instead of not at all.
+fn is_code_like(path: &str) -> bool {
+    matches!(
+        Path::new(path)
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "java"
+                | "kt"
+                | "kts"
+                | "c"
+                | "h"
+                | "cc"
+                | "cpp"
+                | "cxx"
+                | "hpp"
+                | "cs"
+                | "rb"
+                | "php"
+                | "swift"
+                | "scala"
+                | "lua"
+                | "ex"
+                | "exs"
+                | "erl"
+                | "hrl"
+                | "pl"
+                | "pm"
+                | "vue"
+                | "svelte"
+                | "dart"
+                | "r"
+                | "jl"
+                | "m"
+                | "mm"
+                | "groovy"
+                | "hs"
+                | "clj"
+                | "fs"
+                | "fsx"
+                | "vb"
+                | "sh"
+                | "bash"
+                | "zsh"
+                | "ps1"
+        )
+    )
 }
 
 fn is_test_path(path: &str) -> bool {

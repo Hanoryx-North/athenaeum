@@ -142,6 +142,11 @@ duplicate the vocabularies in Repository 2.
 | `link` | Store a model-attributed proposed relationship | Yes |
 | `attach_evidence` | Attach source evidence to a node | Yes |
 | `record_use` | Report which retrieved nodes actually helped | Utility journal only |
+| `status` | Workspace and index state; answers with no vault present | No |
+| `review` | Findings that need a decision, as one bounded list | No |
+| `sources` | Files under `raw/sources/` with hash, coverage and staleness | No |
+| `index` | Index the vault, the repository, or both | Rebuilds derived state |
+| `path` | How one node connects to another; `found:false` is an answer | No |
 
 Node references accept either an ID or an exact title. `context.seeds` may be
 omitted; the library will search for seeds and then navigate. All caller
@@ -194,6 +199,224 @@ runtime can report utility with:
   "session": "sess_123"
 }
 ```
+
+## Product state: `status`
+
+A client that cannot tell "no vault here" from "an empty vault" from "a vault whose index is
+behind" will report a confident lie. `status` answers all three, and unlike every other method
+except `capabilities` it succeeds with no vault at all — absence is a state, not a transport
+error:
+
+```json
+{ "method": "status" }
+```
+
+```json
+{
+  "method": "status",
+  "status": {
+    "workspacePath": "/home/x/project",
+    "initialized": true,
+    "hasVault": true,
+    "vaultPages": 42,
+    "nodes": 310,
+    "edges": 288,
+    "proposals": 3,
+    "findings": 7,
+    "indexedAt": "2026-10-09T09:12:44Z",
+    "indexStale": false,
+    "protocolVersion": 1,
+    "engineVersion": "0.1.0"
+  }
+}
+```
+
+* `initialized` — `.athenaeum/` exists. `false` means every other field is a zero and
+  `indexedAt` is `null`; a client shows the "no knowledge base here yet" state rather than an
+  error, and says how to create one (`athenaeum init`).
+* `hasVault` — the project holds a vault (`wiki/`). A project can be indexed for code and have
+  no vault at all, which is a legitimate shape.
+* `vaultPages`, `nodes`, `edges`, `proposals` — the vault, the derived index and the queue a
+  person still has to decide about. `proposals` counts unreviewed proposals; `findings` counts
+  the same findings `review` returns.
+* `indexStale` — an index **exists** and the sources it describes have moved on since. A project
+  that has never been indexed reports `indexedAt: null` and is rendered as an empty (or absent)
+  knowledge base, never as a stale one; the two states mean different things to a person, and a
+  client that conflates them will offer to re-index a directory that has nothing in it.
+  Staleness is **reported, never silently repaired** by this method: `status` does not write.
+  Reads (`search`, `open`, `navigate`, `related`, `evidence`, `history`, `context`, `proposals`)
+  do reconcile first via the `vault_sync` feature, so a client that wants a question answered
+  from current markdown asks a read; a client that wants to know whether the index is behind
+  asks `status`. `indexedAt` is the newest of the vault and repository index times; `null` means
+  nothing has been indexed yet.
+* `engineVersion` — the build that answered. Compare it with `protocolVersion` when reporting a
+  problem: a version skew is a deployment fact, not a client bug.
+
+A stale index is not an error. `status.indexStale`, `sources[].stale` and the
+`incomplete_scan` finding are the three places it surfaces; none of them is an error code.
+
+## Product state: `review`
+
+```json
+{ "method": "review", "limit": 20 }
+```
+
+```json
+{
+  "method": "review",
+  "findings": [
+    {
+      "id": "finding_contradiction_1",
+      "kind": "contradiction",
+      "severity": "blocking",
+      "title": "Validate state first",
+      "detail": "disagrees with \"Create the session first\", and nobody has decided between them",
+      "nodes": ["node_9f2c", "node_4a11"],
+      "evidence": ["ev_3a6fc937115e432e"],
+      "sourcePath": null,
+      "confidence": 1.0,
+      "blocking": true
+    }
+  ]
+}
+```
+
+`id` is stable for as long as the finding is: the same base reports the same findings in the
+same order, so a caller can diff two `review` calls and mean something by it. `nodes` holds node
+ids, `evidence` holds evidence ids, and `sourcePath` names the file a stale anchor was taken
+from, when the finding is about one.
+
+`kind` is a closed vocabulary:
+
+| Kind | Meaning | Severity |
+| --- | --- | --- |
+| `contradiction` | Two live claims disagree and nobody has decided | blocking |
+| `dispute` | Several live claims describe one subject; one governs | blocking |
+| `stale_anchor` | Its source moved, changed or could not be recovered | blocking when lost, warning when moved |
+| `unsupported_rule` | A rule or decision resting on no evidence | warning |
+| `unreviewed_proposal` | A model proposal, or a proposed relationship, awaiting a decision | info |
+| `duplicate` | Two nodes with the same title | warning |
+| `near_duplicate` | Two titles that differ only in punctuation or case | warning |
+| `superseded` | Kept for history, no longer offered | warning, or info when it merely supersedes without saying so |
+| `incomplete_scan` | A scan budget ended the walk before the tree did | warning |
+| `orphan` | Live, but no traversable relationship reaches it | warning |
+
+Severity is the engine's judgement about what the finding means, and `blocking` is exactly
+`severity == "blocking"`.
+
+`blocking: true` means the finding could hand a model something incorrect; it is exactly the
+findings whose `severity` is `blocking`. A client may page the list with `limit`; there is no
+offset, because findings are regenerated deterministically, not stored.
+
+## `sources`
+
+Every file the index has read — sources under `raw/sources/` and repository files — with its
+hash, how much of the graph points at it, and whether it has moved since:
+
+```json
+{ "method": "sources", "limit": 50 }
+```
+
+```json
+{
+  "method": "sources",
+  "sources": [
+    {
+      "scope": "vault",
+      "path": "raw/sources/design-notes.md",
+      "bytes": 78,
+      "sha256": "9f2c…",
+      "scanned": true,
+      "nodes": 2,
+      "anchors": 2,
+      "indexedAt": "2026-10-09T09:12:44Z",
+      "stale": false
+    },
+    {
+      "scope": "repository",
+      "path": "src/auth/oauth.ts",
+      "bytes": 2048,
+      "sha256": "c0ff…",
+      "scanned": true,
+      "nodes": 1,
+      "anchors": 1,
+      "indexedAt": "2026-10-09T09:12:44Z",
+      "stale": false
+    }
+  ]
+}
+```
+
+* `scope` — which pass produced the record, `"vault"` or `"repository"`. A path both passes read
+  appears **once per scope**, because the two records describe different things: a file of the
+  code repository, and source material the wiki cites. The pair is the identity, not the path
+  alone.
+* `path` is project-relative with forward slashes, so the same source names the same file on
+  every platform.
+* `sha256` is the hash recorded when the file was read — empty for a file that was deliberately
+  not read, and never silently absent for one that was.
+* `scanned` — the file was inside the last scan's coverage. `false` means a budget or a filter
+  left it out — the same paths appear in `index.skipped` — which is why it is reported rather
+  than omitted; `indexedAt` is then `null`.
+* `nodes` / `anchors` — how many knowledge nodes rest on it, and how many evidence anchors point
+  into it. A source nothing cites is material, not knowledge.
+* `stale` — the file is gone, or has changed since it was read. A `stat` comparison, not a
+  re-read: this is asked on a poll.
+
+## `index`
+
+```json
+{ "method": "index", "scope": "all" }
+```
+
+```json
+{
+  "method": "index",
+  "index": {
+    "vaultPages": 42,
+    "repositoryFiles": 137,
+    "symbols": 604,
+    "edges": 288,
+    "durationMs": 412,
+    "incomplete": false,
+    "skipped": []
+  }
+}
+```
+
+* `scope` is `"vault"`, `"repository"` or `"all"`. `paths` is an optional list of
+  repository-relative paths that narrows a **repository** pass; a narrowed pass never marks
+  anything stale, because it did not see the whole tree. Vault scope with `paths` is
+  `invalid_request` rather than a silent partial reconcile.
+* `skipped` names what the pass deliberately did not index — files outside the requested scope
+  that a caller might have expected, or paths a filter excluded. It is not a warning list.
+* `incomplete: true` means a budget or an unreadable file stopped the walk short. Nothing was
+  deleted on that basis: a truncated scan is never evidence that knowledge disappeared.
+
+## `path`
+
+```json
+{ "method": "path", "from": "Authentication", "to": "Validate state first", "depth": 6 }
+```
+
+```json
+{
+  "method": "path",
+  "path": {
+    "from": "Authentication",
+    "to": "Validate state first",
+    "found": true,
+    "steps": [{ "from": "Authentication", "edgeType": "references" }],
+    "nodes": []
+  }
+}
+```
+
+`found: false` is an **ok** envelope with an empty `steps`: the two nodes exist and nothing
+connects them within the budget. It is the answer to "why is this relevant to that", and a
+client shows it rather than treating it as a failure. Node references follow every other method:
+an id or an exact title. Each step carries the relationship and, when the edge has one, its note
+and confidence — the reason the relationship exists, verbatim, so a reader can judge it.
 
 ## Pages: which file a node is
 
@@ -279,6 +502,64 @@ history of the vault, which breaks the property that the index is a function of 
 `knowledge.db` and you lose nothing but time). Until that trade is revisited, a runtime tells its
 model to edit pages and not move them.
 
+## The CLI, as the human's scripting surface
+
+`athenaeum` is the same engine without a window, and the transport every non-Rust client uses.
+The commands a person scripts map one-to-one onto the methods above:
+
+| Command | Method it answers from |
+| --- | --- |
+| `athenaeum init [--json]`, `repo init`, `repo info` | workspace and repository identity |
+| `athenaeum status [--json]` | `status` |
+| `athenaeum index [--full] [--json]`, `athenaeum index --scope vault\|repository\|all [--path P] [--json]` | `index` |
+| `athenaeum index-vault` | `index` with vault scope |
+| `athenaeum sources [--limit N] [--json]` | `sources` |
+| `athenaeum check [--strict] [--json]`, `athenaeum review [--limit N] [--strict] [--json]` | `review` |
+| `athenaeum search`, `show`, `list`, `navigate`, `path`, `brief`, `history`, `journal` | the read methods |
+| `athenaeum proposals`, `accept`, `reject`, `draft-source` | the proposal lifecycle |
+| `athenaeum lint`, `relocate`, `evidence`, `verify`, `supersede`, `contradict`, `link` | maintenance |
+| `athenaeum export`, `import`, `trust`, `vault materialize`, `import-legacy-core` | portability |
+| `athenaeum library …`, `athenaeum sync …` | Library API v1, never the bridge |
+
+Plain `index` and `index --scope` differ on purpose. Plain `index` prints the detailed repository
+report (files, symbols, imports, commits, warnings) and takes the budgets
+(`--max-files`, `--max-file-bytes`, `--max-total-bytes`, `--max-commits`); `--full` reads every
+file again instead of reusing the ones whose size and modification time are unchanged, which is
+what re-indexing a large tree cheaply depends on. `index --scope` prints the one unified summary
+and takes none of those budgets — the engine's own apply — so the two flag sets conflict rather
+than one silently winning.
+
+A relationship carries its reason. `athenaeum link … --note "…" --confidence 0..1` records one,
+and `show`, `navigate` and `path` print it beside the relationship — the note verbatim, the
+confidence only when the edge has one — so a reader can judge the edge and not just the arrow. A
+confidence outside `0..=1` is refused at the boundary rather than stored and re-rendered as
+something a reader would take at face value.
+
+Every command honours `--json`, and the value printed as JSON is the same value the human
+rendering is made from — two separately built representations drift. Failures are JSON too when
+`--json` was asked for: `{"error":{"code":"…","message":"…"}}` on stdout, the message also on
+stderr, and a non-zero exit.
+
+**Exit codes.** `0` for an answer, `1` for a failure or a state the command exists to detect.
+`check` and `review` exit `1` only when a blocking finding is present (`--strict` makes every
+finding count), because being untidy is not a build failure. `status` exits `0` with
+`initialized: false` when there is no vault: absence is the answer. `path` exits `0` whether or
+not a path was found, matching `found: false` on the bridge. Every other command exits `1` with
+`workspace_not_found` on a directory that has not been initialised. A failure under `--json`
+prints `{"error":{"code":"…","message":"…"}}` on stdout using the same code the bridge would
+return for the same condition — `knowledge_error` for a store that cannot be read,
+`invalid_request` for a value the library refuses — so a script branches on one vocabulary.
+
+**A stale index is never silently trusted.** The CLI's read commands reconcile the vault index
+before they answer, exactly as the bridge does for a read, and print what changed on stderr so
+`--json` output on stdout stays clean. `status` and `review` do not write; they report
+`indexStale` and `incomplete_scan` instead.
+
+**The Library is a place to publish, and nothing here needs it.** `library` and `sync` are the
+only commands that touch a network. When the server cannot be reached they report an explicit
+`offline` error, write nothing, and leave local work exactly as it was; `sync status` says
+`offline` without failing. There are no hosted features and no background sync.
+
 ## Runtime-side adapter
 
 The runtime defines the interface in its own terms and translates it to
@@ -334,13 +615,34 @@ become Wiki knowledge automatically.
 - `protocolVersion` changes only for breaking wire or semantic changes.
 - Additive response fields do not require a version bump; consumers must
   ignore unknown fields.
-- Unknown methods, enums and malformed inputs fail loudly.
+- Unknown methods, enums, **fields** and malformed inputs fail loudly. A field the engine does
+  not know is refused with `invalid_request` and a message that names it — the same treatment an
+  unknown method gets, on purpose. The compatibility rule this encodes:
+  * The engine is updated **first** to accept a new optional field. Existing clients that do not
+    send it are unaffected, which is the additive direction v1 guarantees.
+  * A newer client sending a field an older engine does not know gets `invalid_request` naming
+    the field. That is the protocol-mismatch signal — an adapter maps it to its own
+    "incompatible" or "protocol_mismatch" error — and it is the honest outcome, because the older
+    engine could not honour the field anyway. Silently ignoring it would answer a different
+    question than the one that was asked.
+  * So a client never has to guess: `capabilities.operations` and `capabilities.features` say
+    what the build supports before anything is sent, and a request built beyond that is refused
+    rather than half-answered.
 - A client requesting a newer protocol receives `unsupported_protocol`; the
+  message names the version requested and the version supported. The
   database is never opened through an assumed schema.
 - Stable error codes in v1 are `invalid_request`, `not_found`,
   `incompatible_store`, `knowledge_error`, `request_too_large`,
   `unsupported_protocol` and `workspace_not_found`. The last tells the
-  adapter to behave like `NoWikiProvider` for that workspace.
+  adapter to behave like `NoWikiProvider` for that workspace, and is not
+  returned by `capabilities` or `status`.
+- A stale index is not an error and has no code of its own: read
+  `status.indexStale`, `sources[].stale` and the `incomplete_scan` finding.
+  Inventing an error for it would make a client treat "the markdown moved"
+  as "the engine is broken".
+- `offline` is a CLI-side code from the Library client (`library`, `sync`)
+  when a server cannot be reached. It is never a bridge response: the bridge
+  makes no network calls.
 - The CLI bridge is the cross-language compatibility harness. Its integration
   tests must stay offline and run on Windows, macOS and Linux.
 

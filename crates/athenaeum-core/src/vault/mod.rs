@@ -80,6 +80,25 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::status::SkippedFile;
+
+/// The `meta` key holding the fingerprint of the vault as it was last indexed.
+///
+/// Exported so callers that report freshness — [`crate::status::index_status`]
+/// — compare against the same value the indexer recorded, rather than a second
+/// spelling of it that could drift.
+pub const FINGERPRINT_KEY: &str = "vault_fingerprint";
+
+/// The metadata-only fingerprint of a vault: which files exist, how long each
+/// is, and when each was last written.
+///
+/// Answers "has the vault changed since it was indexed?" with a directory walk
+/// instead of the read every page a reconcile costs. It is explicitly a
+/// heuristic — see [`scan::fingerprint`] — and a missed edit is repaired by the
+/// next explicit index.
+pub fn fingerprint(root: impl AsRef<Path>) -> Result<String> {
+    scan::fingerprint(root.as_ref())
+}
 
 /// Budgets that stop a pathological vault from stalling the app.
 ///
@@ -93,6 +112,11 @@ pub struct VaultScanOptions {
     pub max_sources: usize,
     pub max_page_bytes: u64,
     pub max_total_bytes: u64,
+    /// Wall-clock ceiling for one pass, in milliseconds. `0` means no ceiling.
+    /// Reaching it stops the walk and marks the snapshot incomplete, exactly as
+    /// a size budget does — the point is that a scan reports what it did not
+    /// finish rather than appearing to have read everything.
+    pub max_duration_ms: u64,
 }
 
 impl Default for VaultScanOptions {
@@ -102,6 +126,7 @@ impl Default for VaultScanOptions {
             max_sources: 50_000,
             max_page_bytes: 4_000_000,
             max_total_bytes: 268_435_456,
+            max_duration_ms: 30_000,
         }
     }
 }
@@ -120,6 +145,10 @@ pub struct VaultSource {
     /// Vault-relative path, e.g. `raw/sources/papers/wei-2022.pdf`.
     pub path: String,
     pub bytes: u64,
+    /// Modification time in nanoseconds since the Unix epoch, recorded so the
+    /// source inventory can tell whether the file moved on without reading it.
+    #[serde(default)]
+    pub mtime_ns: i64,
 }
 
 /// Everything a vault contains, read but not yet interpreted.
@@ -130,6 +159,10 @@ pub struct VaultSnapshot {
     pub warnings: Vec<String>,
     /// False when a budget stopped the walk before the vault ended.
     pub complete: bool,
+    /// What the walk saw and did not read, with a reason. `complete: false`
+    /// says a scan was truncated; this says which files it left behind and
+    /// why, which is what a person can act on.
+    pub skipped: Vec<SkippedFile>,
     /// Paths of pages that still hold exactly what arrived from a pull, a fork or an import. The
     /// indexer caps their authority: a claim of authority in text that came from elsewhere is a
     /// claim, not a fact. See [`crate::portable::ledger`].

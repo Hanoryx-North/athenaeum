@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::Result;
 use crate::id::{EvidenceId, NodeId};
@@ -15,7 +16,8 @@ use crate::model::{
     hash, Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, NodeStatus,
     NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
 };
-use crate::store::{KnowledgeStore, NodeFilter};
+use crate::store::{KnowledgeStore, NodeFilter, SourceRecord, SourceScope};
+use crate::status::{record_scan_state, ScanState, SkippedFile};
 
 use super::page::{slug_of, VaultPage};
 use super::{VaultScanOptions, VaultSnapshot, VaultSource};
@@ -109,6 +111,9 @@ pub struct VaultIndexReport {
     pub evidence_removed: usize,
     /// A bounded sample of unresolved links, sorted for stable output.
     pub unresolved: Vec<UnresolvedLink>,
+    /// Files the scan saw and deliberately did not read, with the reason.
+    #[serde(default)]
+    pub skipped: Vec<SkippedFile>,
     pub warnings: Vec<String>,
 }
 
@@ -139,9 +144,6 @@ impl VaultIndexReport {
 /// Builds and maintains the derived index over a vault.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct VaultIndexer;
-
-/// The `meta` key holding the fingerprint of the vault as it was last indexed.
-const FINGERPRINT_KEY: &str = "vault_fingerprint";
 
 /// What [`VaultIndexer::sync_if_changed`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +176,8 @@ impl VaultIndexer {
         let fingerprint = super::scan::fingerprint(root.as_ref())?;
         let snapshot = VaultSnapshot::scan(root.as_ref(), options)?;
         let report = Self::index(store, &snapshot)?;
-        store.meta_set(FINGERPRINT_KEY, &fingerprint)?;
+        store.meta_set(super::FINGERPRINT_KEY, &fingerprint)?;
+        record_inventory(store, root.as_ref(), &snapshot)?;
         Ok(report)
     }
 
@@ -191,7 +194,7 @@ impl VaultIndexer {
         root: impl AsRef<Path>,
         options: VaultScanOptions,
     ) -> Result<VaultSync> {
-        let Some(recorded) = store.meta_get(FINGERPRINT_KEY)? else {
+        let Some(recorded) = store.meta_get(super::FINGERPRINT_KEY)? else {
             return Ok(VaultSync::NotIndexed);
         };
         if super::scan::fingerprint(root.as_ref())? == recorded {
@@ -226,6 +229,7 @@ impl VaultIndexer {
             scan_complete: snapshot.complete,
             pages: snapshot.pages.len(),
             sources: snapshot.sources.len(),
+            skipped: snapshot.skipped.clone(),
             warnings: snapshot.warnings.clone(),
             ..VaultIndexReport::default()
         };
@@ -928,12 +932,17 @@ fn reconcile_edges(
 
     for ((to, _), edge) in desired {
         if store.find_edge_between(from, to, edge.edge_type)?.is_none() {
-            store.connect(KnowledgeEdge::deterministic(
-                from.clone(),
-                edge.edge_type,
-                to.clone(),
-                edge.detail,
-            ))?;
+            // A link, a relation or a citation is written in the page itself,
+            // so the relationship is as certain as the text that states it.
+            store.connect(
+                KnowledgeEdge::deterministic(
+                    from.clone(),
+                    edge.edge_type,
+                    to.clone(),
+                    edge.detail,
+                )
+                .with_confidence(1.0),
+            )?;
             report.edges_created += 1;
         }
     }
@@ -1013,4 +1022,120 @@ fn reconcile_evidence(
         }
     }
     Ok(())
+}
+
+/// Record what the pass read, so `sources`, `status` and `review` can answer
+/// without walking the vault again.
+///
+/// Pages carry their real SHA-256, because the pass read them. Raw source
+/// material carries the size and modification time the scan saw and is marked
+/// `scanned: false`: its content is deliberately not parsed, and saying so is
+/// more useful than an empty hash with no explanation. That is also why this
+/// is a metadata-only record for sources — re-hashing a directory of PDFs on
+/// every reconcile would cost as much as rebuilding the index.
+fn record_inventory(
+    store: &mut KnowledgeStore,
+    root: &Path,
+    snapshot: &VaultSnapshot,
+) -> Result<()> {
+    let at = chrono::Utc::now().to_rfc3339();
+    let mut records = Vec::with_capacity(snapshot.pages.len() + snapshot.sources.len());
+
+    for page in &snapshot.pages {
+        let metadata = std::fs::metadata(root.join(&page.path)).ok();
+        records.push(SourceRecord {
+            path: page.path.clone(),
+            bytes: metadata
+                .as_ref()
+                .map(std::fs::Metadata::len)
+                .unwrap_or_else(|| page.body.len() as u64),
+            sha256: page.content_hash.clone(),
+            mtime_ns: metadata
+                .as_ref()
+                .map(crate::status::modification_time)
+                .unwrap_or(0),
+            scanned: true,
+            detail: None,
+            indexed_at: at.clone(),
+        });
+    }
+
+    // Source material is hashed so that a citation can be checked against the
+    // file it points at, and so that `sources` can answer with a real digest
+    // rather than a blank one. Bounded twice over: a huge PDF is recorded
+    // unread rather than read, and the whole pass stops hashing once it has
+    // spent its budget. Both outcomes are recorded as `scanned: false` with
+    // the reason, which is the honest answer and the one a caller can act on.
+    let mut hashed_bytes = 0_u64;
+    for source in &snapshot.sources {
+        let path = root.join(&source.path);
+        let read = if source.bytes <= SOURCE_HASH_MAX_BYTES
+            && hashed_bytes.saturating_add(source.bytes) <= SOURCE_HASH_TOTAL_BYTES
+        {
+            std::fs::read(&path).ok()
+        } else {
+            None
+        };
+        let (sha256, scanned, detail) = match read {
+            Some(bytes) => {
+                hashed_bytes += bytes.len() as u64;
+                (hash_bytes(&bytes), true, None)
+            }
+            None if source.bytes > SOURCE_HASH_MAX_BYTES => (
+                String::new(),
+                false,
+                Some(format!(
+                    "not read: {} bytes exceeds the per-source hashing limit of {SOURCE_HASH_MAX_BYTES}",
+                    source.bytes
+                )),
+            ),
+            None => (
+                String::new(),
+                false,
+                Some(
+                    "not read: the pass reached its hashing budget, or the file could not be read"
+                        .to_string(),
+                ),
+            ),
+        };
+        records.push(SourceRecord {
+            path: source.path.clone(),
+            bytes: source.bytes,
+            sha256,
+            mtime_ns: source.mtime_ns,
+            scanned,
+            detail,
+            indexed_at: at.clone(),
+        });
+    }
+
+    store.replace_sources(SourceScope::Vault, &records)?;
+    record_scan_state(
+        store,
+        SourceScope::Vault,
+        &ScanState {
+            complete: snapshot.complete,
+            scanned: snapshot.pages.len(),
+            skipped: snapshot.skipped.clone(),
+            skipped_total: snapshot.skipped.len(),
+            at,
+        },
+    )
+}
+
+/// The most of one source file a vault pass will read in order to hash it.
+const SOURCE_HASH_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The most a single vault pass will read across all source files. A vault of
+/// large PDFs is described by its metadata, not read end to end to satisfy a
+/// digest.
+const SOURCE_HASH_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+
+/// SHA-256 of a file's bytes, lowercase hex — the same digest the rest of the
+/// crate uses, over bytes rather than a decoded string so that a binary source
+/// hashes to exactly what `shasum` prints.
+fn hash_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }

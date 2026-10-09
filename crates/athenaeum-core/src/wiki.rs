@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::brief::KnowledgeBrief;
 use crate::error::{Error, Result};
-use crate::graph::{self, NavigationOptions, Reached};
+use crate::findings::{self, ReviewFindingView};
+use crate::graph::{self, NavigationOptions, Reached, Step};
+use crate::status::{self, IndexOutcome, IndexScope, SourceSummary, WorkspaceStatus};
 use crate::id::{EdgeId, NodeId, SessionId};
 use crate::journal::NodeUtility;
 use crate::model::{
@@ -20,6 +22,7 @@ use crate::model::{
 use crate::portable::memory::{self, Accepted};
 use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter, SearchHit};
 pub use crate::vault::PageRef as WikiPage;
+use crate::workspace::Workspace;
 
 /// Version of the cross-repository JSON contract.
 ///
@@ -38,7 +41,19 @@ pub const WIKI_PROTOCOL_VERSION: u32 = 1;
 /// * `vault_sync` — the bridge compares the vault with the index before it answers a read and
 ///   reconciles when they differ, so a page an agent just edited is what the next question sees.
 ///   It keeps an index that was built; it does not build the first one.
-const FEATURES: &[&str] = &["page_pointers", "vault_sync", "memory_lifecycle"];
+const FEATURES: &[&str] = &[
+    "page_pointers",
+    "vault_sync",
+    "memory_lifecycle",
+    // `status`, `sources` and `index` report on the engine's own state: how
+    // fresh the derived index is, what it has read, and how to rebuild it.
+    "engine_status",
+    // `review` reports every kind of finding, not only the ones the older
+    // review sweep knew about.
+    "finding_report",
+    // `path` answers "how are these connected?" from the graph itself.
+    "graph_path",
+];
 
 const DEFAULT_SEARCH_LIMIT: u32 = 20;
 const MAX_SEARCH_LIMIT: u32 = 100;
@@ -146,13 +161,80 @@ pub enum WikiRequest {
         reason: Option<String>,
         caller: WikiCaller,
     },
+    /// What this workspace is, how much knowledge it holds, and whether the
+    /// derived index is behind the files it describes.
+    ///
+    /// Answered even when there is no workspace at all: a directory with no
+    /// vault is a state to render, not a transport error.
+    Status,
+    /// Everything in the knowledge base that needs a decision, in the shape a
+    /// review queue renders. Reads only; decides nothing.
+    Review {
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// Every file the last index read, with how much of the graph points at it.
+    Sources {
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    /// Rebuild the derived index for one scope.
+    ///
+    /// An explicit act, not a read: `paths` narrows a repository pass, and a
+    /// vault pass always covers the whole vault.
+    Index {
+        scope: IndexScope,
+        #[serde(default)]
+        paths: Vec<String>,
+    },
+    /// How two nodes are connected: the shortest chain of relationships
+    /// between them, bounded like every other traversal here.
+    Path {
+        from: String,
+        to: String,
+        #[serde(default)]
+        depth: Option<u8>,
+        #[serde(default)]
+        max_nodes: Option<usize>,
+    },
 }
 
 impl WikiRequest {
+    /// The fields a request of this method may carry.
+    ///
+    /// Serde cannot express this: an internally-tagged enum consumes the tag
+    /// and ignores everything else it does not recognise, so an unknown field
+    /// would be accepted in silence. A versioned contract is exactly where a
+    /// misspelled key should be an error — the caller meant something by it, and
+    /// answering as if they had not said it is how two clients drift apart.
+    pub fn allowed_fields(method: &str) -> Option<&'static [&'static str]> {
+        Some(match method {
+            "capabilities" => &["method"],
+            "search" => &["method", "query", "limit"],
+            "open" | "evidence" | "history" => &["method", "node"],
+            "navigate" => &["method", "node", "depth", "maxNodes"],
+            "related" => &["method", "node", "includeProposed"],
+            "context" => &["method", "task", "seeds", "depth", "maxNodes"],
+            "create" | "update" | "link" | "attach_evidence" => &["method", "input", "caller"],
+            "record_use" => &["method", "nodes", "session"],
+            "proposals" | "review" | "sources" => &["method", "limit"],
+            "accept" => &["method", "node", "caller"],
+            "reject" => &["method", "node", "reason", "caller"],
+            "status" => &["method"],
+            "index" => &["method", "scope", "paths"],
+            "path" => &["method", "from", "to", "depth", "maxNodes"],
+            _ => return None,
+        })
+    }
+
     /// True for the requests that only look at knowledge: search, open, navigate, related,
-    /// evidence, history and context. These are the ones a stale index would answer wrongly, and
-    /// the ones a runtime can issue on every turn, which is why a transport refreshes the index
+    /// evidence, history, context and path. These are the ones a stale index would answer wrongly,
+    /// and the ones a runtime can issue on every turn, which is why a transport refreshes the index
     /// for them and not for a mutation.
+    ///
+    /// `status`, `review` and `sources` are deliberately absent. They report how far behind the
+    /// index is — `indexStale`, per-source `stale`, and an `incomplete_scan` finding — and
+    /// reconciling the vault first would erase the very thing they were asked for.
     pub fn reads_knowledge(&self) -> bool {
         matches!(
             self,
@@ -164,6 +246,7 @@ impl WikiRequest {
                 | Self::History { .. }
                 | Self::Context { .. }
                 | Self::Proposals { .. }
+                | Self::Path { .. }
         )
     }
 }
@@ -255,6 +338,31 @@ pub enum WikiResponse {
     Proposals { proposals: Vec<WikiProposal> },
     Accept { accepted: Box<Accepted> },
     Reject { node: KnowledgeNode },
+    Status { status: WorkspaceStatus },
+    Review { findings: Vec<ReviewFindingView> },
+    Sources { sources: Vec<SourceSummary> },
+    Index { index: IndexOutcome },
+    Path { path: WikiPath },
+}
+
+/// The shortest chain of relationships connecting two nodes.
+///
+/// `steps` is the traversal as it happened — each step leaves a node along one
+/// relationship, in the direction travelled — and `nodes` is the same path in
+/// full, so a client can render titles without asking again. Both are bounded
+/// by the same budget as [`WikiRequest::Navigate`]. When there is no path
+/// within budget, `found` is false and both lists are empty: that is an answer,
+/// not a failure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiPath {
+    /// The resolved node the walk started from.
+    pub from: NodeId,
+    /// The resolved node it was looking for.
+    pub to: NodeId,
+    pub found: bool,
+    pub steps: Vec<Step>,
+    pub nodes: Vec<KnowledgeNode>,
 }
 
 /// A proposal awaiting a decision, with what a reviewer needs to make it.
@@ -392,6 +500,16 @@ pub struct WikiRelatedNode {
     pub edge_id: EdgeId,
     pub outbound: bool,
     pub established: bool,
+    /// Why this relationship exists, in one line, exactly as the edge records
+    /// it. Absent when the producer wrote no reason, which is not the same as
+    /// having written an empty one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// How sure the producer was, when it said. A deterministic edge read
+    /// straight from source carries no measured confidence, and says so by
+    /// omitting it rather than by claiming zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// Context returned to an agent, both structured and already trust-wrapped.
@@ -479,6 +597,26 @@ impl<'a> WikiService<'a> {
             } => Ok(WikiResponse::Reject {
                 node: self.reject(&node, reason.as_deref(), caller)?,
             }),
+            WikiRequest::Status => Ok(WikiResponse::Status {
+                status: self.status()?,
+            }),
+            WikiRequest::Review { limit } => Ok(WikiResponse::Review {
+                findings: self.review(limit)?,
+            }),
+            WikiRequest::Sources { limit } => Ok(WikiResponse::Sources {
+                sources: self.sources(limit)?,
+            }),
+            WikiRequest::Index { scope, paths } => Ok(WikiResponse::Index {
+                index: self.index(scope, &paths)?,
+            }),
+            WikiRequest::Path {
+                from,
+                to,
+                depth,
+                max_nodes,
+            } => Ok(WikiResponse::Path {
+                path: self.path(&from, &to, depth, max_nodes)?,
+            }),
         }
     }
 
@@ -502,6 +640,11 @@ impl<'a> WikiService<'a> {
                 "proposals",
                 "accept",
                 "reject",
+                "status",
+                "review",
+                "sources",
+                "index",
+                "path",
             ]
             .into_iter()
             .map(str::to_string)
@@ -764,6 +907,76 @@ impl<'a> WikiService<'a> {
         memory::reject(self.store, &node.id, reason, &caller.model)
     }
 
+    /// The workspace's state: what it holds, and how fresh the index is.
+    pub fn status(&self) -> Result<WorkspaceStatus> {
+        status::workspace_status(Some(self.store), self.store.root())
+    }
+
+    /// Everything that needs a decision, in the pinned review shape.
+    pub fn review(&self, limit: Option<u32>) -> Result<Vec<ReviewFindingView>> {
+        findings::review_findings(self.store, limit)
+    }
+
+    /// Every file the last index read, with what points at it.
+    pub fn sources(&self, limit: Option<u32>) -> Result<Vec<SourceSummary>> {
+        status::source_summaries(self.store, limit)
+    }
+
+    /// Rebuild the derived index for one scope.
+    ///
+    /// Deliberately not something a read does: a caller asking for an index is
+    /// asking for work, and wants to be told how much of it happened.
+    pub fn index(&mut self, scope: IndexScope, paths: &[String]) -> Result<IndexOutcome> {
+        let workspace = Workspace::of_store(self.store);
+        status::index_scopes(self.store, &workspace, scope, paths)
+    }
+
+    /// The shortest chain of relationships between two nodes.
+    ///
+    /// Reuses [`graph::shortest_path`] rather than walking again: there is one
+    /// traversal implementation in this crate and this is a caller of it.
+    pub fn path(
+        &self,
+        from: &str,
+        to: &str,
+        depth: Option<u8>,
+        max_nodes: Option<usize>,
+    ) -> Result<WikiPath> {
+        let from_node = self.resolve(from)?;
+        let to_node = self.resolve(to)?;
+        let mut options = bounded_navigation(depth.or(Some(MAX_CONTEXT_DEPTH)), max_nodes);
+        // A path of n steps visits n + 1 nodes, so the node budget also bounds
+        // the steps: a walk may not return more of a path than it can show.
+        options.max_depth = (options.max_depth as usize)
+            .min(options.max_nodes.saturating_sub(1))
+            .min(u8::MAX as usize) as u8;
+        let steps = graph::shortest_path(self.store, &from_node.id, &to_node.id, &options)?
+            .unwrap_or_default();
+        let found = !steps.is_empty() || from_node.id == to_node.id;
+        let mut nodes = Vec::new();
+        if found {
+            // The chain is `from`, the source of every step after the first,
+            // and finally `to`.
+            let mut ids = steps
+                .iter()
+                .map(|step| step.from.clone())
+                .collect::<Vec<_>>();
+            ids.push(to_node.id.clone());
+            for id in ids.into_iter().take(options.max_nodes) {
+                if let Some(node) = self.store.find_node(&id)? {
+                    nodes.push(node);
+                }
+            }
+        }
+        Ok(WikiPath {
+            found,
+            from: from_node.id,
+            to: to_node.id,
+            steps,
+            nodes,
+        })
+    }
+
     fn resolve(&self, reference: &str) -> Result<KnowledgeNode> {
         let id = NodeId::from_existing(reference);
         if let Some(node) = self.store.find_node(&id)? {
@@ -886,6 +1099,11 @@ fn related_node(store: &KnowledgeStore, neighbor: Neighbor) -> Result<WikiRelate
         title: node.title,
         node_type: node.node_type,
         edge_type: neighbor.edge_type,
+        note: neighbor.edge.note.clone(),
+        confidence: neighbor
+            .edge
+            .confidence
+            .map(crate::model::wire_confidence),
         edge_id: neighbor.edge.id.clone(),
         outbound: neighbor.outbound,
         established: neighbor.edge.is_traversable(),

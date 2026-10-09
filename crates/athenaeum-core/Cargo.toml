@@ -21,3 +21,12 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 regex = "1"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Real parsers, used for the languages where a line reader is not good enough.
+# The grammars are compiled from C sources by their own build scripts; they add
+# build time and nothing at runtime — no network, no shared library, no service.
+tree-sitter = "0.25"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"

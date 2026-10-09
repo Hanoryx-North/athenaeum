@@ -78,11 +78,33 @@ pub struct Reached {
 }
 
 /// One traversal step, as seen from the node being left.
+///
+/// A step says which relationship was followed *and* why it exists: the edge's
+/// own note and measured confidence travel with it, so a caller can render
+/// "calls, because the call site resolved to Store::get" rather than only
+/// "calls". Both are optional because both are optional on the edge: a producer
+/// that measured nothing must not be shown as having measured zero.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
     pub from: NodeId,
     pub edge_type: EdgeType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+}
+
+impl Step {
+    /// The step taken by following one stored relationship.
+    pub fn of(from: &NodeId, edge: &crate::model::KnowledgeEdge, edge_type: EdgeType) -> Self {
+        Self {
+            from: from.clone(),
+            edge_type,
+            note: edge.note.clone(),
+            confidence: edge.confidence.map(crate::model::wire_confidence),
+        }
+    }
 }
 
 /// Walk outward from `seeds`, breadth-first, within budget.
@@ -134,10 +156,7 @@ pub fn navigate(
                 queue.push_back((
                     neighbor.node,
                     depth + 1,
-                    Some(Step {
-                        from: id.clone(),
-                        edge_type: neighbor.edge_type,
-                    }),
+                    Some(Step::of(&id, &neighbor.edge, neighbor.edge_type)),
                 ));
             }
         }
@@ -175,10 +194,7 @@ pub fn shortest_path(
             }
             parents.insert(
                 neighbor.node.clone(),
-                Step {
-                    from: id.clone(),
-                    edge_type: neighbor.edge_type,
-                },
+                Step::of(&id, &neighbor.edge, neighbor.edge_type),
             );
 
             if &neighbor.node == to {

@@ -71,6 +71,7 @@ pub mod blobs;
 pub mod brief;
 pub mod bridge;
 pub mod error;
+pub mod findings;
 pub mod graph;
 pub mod id;
 pub mod journal;
@@ -78,6 +79,7 @@ pub mod model;
 pub mod portable;
 pub mod repository;
 pub mod review;
+pub mod status;
 pub mod store;
 pub mod vault;
 pub mod wiki;
@@ -100,10 +102,19 @@ pub mod prelude {
         Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, Neighbor,
         NodeStatus, NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
     };
+    pub use crate::findings::{
+        Finding, FindingKind, FindingOptions, FindingSeverity, ReviewFindingView,
+    };
     pub use crate::repository::{
-        RepositoryIndexReport, RepositoryIndexer, RepositoryScanOptions, RepositorySnapshot,
+        Extraction, ExtractionMethod, RepositoryIndexReport, RepositoryIndexer, RepositoryScan,
+        RepositoryScanOptions, RepositorySnapshot,
     };
     pub use crate::review::{ReviewFinding, ReviewKind, ReviewReport};
+    pub use crate::status::{
+        index_scopes, index_status, source_summaries, workspace_status, workspace_status_at,
+        IndexOutcome, IndexScope, IndexStatus, ScanState, SkippedFile, SourceSummary,
+        WorkspaceStatus,
+    };
     pub use crate::store::{EdgeFilter, EventFilter, KnowledgeStore, NodeFilter, SearchHit, Stats};
     pub use crate::vault::{
         VaultIndexReport, VaultIndexer, VaultPage, VaultScanOptions, VaultSnapshot, VaultSource,

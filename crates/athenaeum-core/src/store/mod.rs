@@ -10,12 +10,14 @@ mod evidence;
 mod nodes;
 mod schema;
 mod search;
+mod sources;
 
 pub use edges::EdgeFilter;
 pub use events::EventFilter;
 pub use nodes::NodeFilter;
 pub use schema::SCHEMA_VERSION;
 pub use search::SearchHit;
+pub use sources::{SourceRecord, SourceReferences, SourceScope};
 
 use std::path::{Path, PathBuf};
 

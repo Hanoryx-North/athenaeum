@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+import { useEngineWorkspace } from "@/hooks/useEngineWorkspace"
 import { IconSidebar } from "./icon-sidebar"
 import { UpdateBanner } from "./update-banner"
 import { SidebarPanel } from "./sidebar-panel"
@@ -24,6 +25,9 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
   const researchPanelOpen = useResearchStore((s) => s.panelOpen)
+  // The engine-backed stores follow the open project for the whole app, so the
+  // sidebar badge and every knowledge panel read the same workspace.
+  useEngineWorkspace()
   const [leftWidth, setLeftWidth] = useState(220)
   const [rightWidth, setRightWidth] = useState(400)
   const [leftCollapsed, setLeftCollapsed] = useState(

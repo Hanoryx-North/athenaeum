@@ -83,4 +83,14 @@ impl Workspace {
     pub fn open(&self) -> Result<KnowledgeStore> {
         KnowledgeStore::open(&self.root)
     }
+
+    /// The workspace an open store is rooted in.
+    ///
+    /// Lets a caller that already holds a store — the bridge, the desktop —
+    /// reach the paths around it without a second `discover`, and without the
+    /// risk of a caller-supplied workspace disagreeing with the store it is
+    /// reading.
+    pub fn of_store(store: &KnowledgeStore) -> Self {
+        Self::at(store.root().to_path_buf())
+    }
 }

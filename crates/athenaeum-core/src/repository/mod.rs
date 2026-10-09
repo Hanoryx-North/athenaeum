@@ -6,10 +6,13 @@
 //! commands. The resulting graph nodes and relationships retain deterministic
 //! provenance and are valid on arrival.
 
+mod ast;
 mod git;
 mod index;
 mod parse;
 mod scan;
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +25,24 @@ pub struct RepositoryScanOptions {
     pub max_file_bytes: u64,
     pub max_total_bytes: u64,
     pub max_commits: usize,
+    /// Wall-clock ceiling for one scan, in milliseconds. `0` means no ceiling.
+    ///
+    /// A size budget bounds how much is read; it does not bound how long a
+    /// pathological repository takes to read it, and a scan that runs for
+    /// minutes is indistinguishable from a hang to the person waiting. When the
+    /// ceiling is reached the walk stops and reports itself incomplete, which is
+    /// the same honest answer a size budget produces.
+    pub max_duration_ms: u64,
+    /// Reuse the previous scan's structural facts for files whose size and
+    /// modification time are unchanged, instead of reading and parsing them
+    /// again.
+    ///
+    /// This is what makes a re-index of a large repository cheap. It is a
+    /// heuristic and it is safe to be wrong about: a file whose content changed
+    /// without its size or timestamp moving is caught by the content hash the
+    /// index verifies before it writes anything. Set false to read every file
+    /// again regardless — what a first scan, or a suspicious one, does.
+    pub incremental: bool,
 }
 
 impl Default for RepositoryScanOptions {
@@ -31,7 +52,186 @@ impl Default for RepositoryScanOptions {
             max_file_bytes: 1_000_000,
             max_total_bytes: 64 * 1024 * 1024,
             max_commits: 500,
+            max_duration_ms: 30_000,
+            incremental: true,
         }
+    }
+}
+
+/// How a file's structure was read.
+///
+/// The vocabulary is deliberately small and the default is deliberately
+/// uninformative: a snapshot deserialized from an older build, or handed in by
+/// a caller that did its own parsing, must not be described as something it
+/// never claimed to be.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtractionMethod {
+    /// Read by a real parser into a syntax tree, then walked.
+    Ast,
+    /// Read by a line-oriented extractor. It recognises declarations and the
+    /// shapes around them; it does not understand the language, and nothing
+    /// derived this way is ever presented as understanding.
+    Fallback,
+    /// Nothing recorded — an older snapshot, or a caller-supplied one.
+    #[default]
+    Unknown,
+}
+
+impl ExtractionMethod {
+    pub const ALL: &'static [ExtractionMethod] = &[
+        ExtractionMethod::Ast,
+        ExtractionMethod::Fallback,
+        ExtractionMethod::Unknown,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExtractionMethod::Ast => "ast",
+            ExtractionMethod::Fallback => "fallback",
+            ExtractionMethod::Unknown => "unknown",
+        }
+    }
+
+    /// The confidence a relationship derived this way carries by default.
+    ///
+    /// A syntax tree is as certain as reading gets without type resolution, so
+    /// its edges are fully confident. A line reader's are not: it can mistake a
+    /// word in a string for a declaration, so its edges say so. `Unknown` makes
+    /// no claim at all and therefore does not lower anything.
+    pub fn confidence(&self) -> f32 {
+        match self {
+            ExtractionMethod::Ast => 1.0,
+            ExtractionMethod::Fallback => 0.6,
+            ExtractionMethod::Unknown => 1.0,
+        }
+    }
+
+    /// The sentence appended to a node's summary, so the graph itself records
+    /// which of the two readings produced it.
+    pub fn explanation(&self) -> Option<&'static str> {
+        match self {
+            ExtractionMethod::Ast => Some("Read from a syntax tree."),
+            ExtractionMethod::Fallback => {
+                Some("Read by a line-oriented fallback, not a syntax tree.")
+            }
+            ExtractionMethod::Unknown => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ExtractionMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.pad(self.as_str())
+    }
+}
+
+/// How one file was read, and whether its facts came from the previous scan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Extraction {
+    pub method: ExtractionMethod,
+    /// Why this method, when there is something to say: which language had no
+    /// parser, or that the parser found an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// True when the structural facts were reused from the previous scan
+    /// because the file had not changed.
+    #[serde(default)]
+    pub reused: bool,
+}
+
+impl Extraction {
+    pub fn new(method: ExtractionMethod, detail: Option<String>) -> Self {
+        Self {
+            method,
+            detail,
+            reused: false,
+        }
+    }
+}
+
+/// A snapshot plus what only the scanner knows: what it skipped, how it read
+/// each file, and whether it looked at the whole tree.
+///
+/// Kept beside [`RepositorySnapshot`] rather than inside it, for a plain
+/// reason: a snapshot is a storage-independent value other code builds by
+/// hand, and widening it would break every such caller to carry metadata only
+/// a scan can produce.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepositoryScan {
+    pub snapshot: RepositorySnapshot,
+    /// Files the walk saw and deliberately did not read, with the reason.
+    pub skipped: Vec<crate::status::SkippedFile>,
+    /// How each indexed file was read, keyed by repository-relative path.
+    pub extractions: BTreeMap<String, Extraction>,
+    /// Files whose structural facts came from the previous scan.
+    pub reused_files: usize,
+    /// True when a caller narrowed this scan to named paths. Absence then
+    /// proves nothing, so the indexer must not mark anything stale.
+    pub filtered: bool,
+}
+
+impl RepositoryScan {
+    pub fn new(snapshot: RepositorySnapshot) -> Self {
+        Self {
+            snapshot,
+            ..Self::default()
+        }
+    }
+
+    /// Narrow the scan to the named files or directories.
+    ///
+    /// Returns the paths that matched nothing, so a caller asking for a file
+    /// that does not exist is told rather than quietly given a smaller answer.
+    /// Directories match by prefix, which is what a person typing `src` means.
+    pub fn restrict_to(&mut self, paths: &[String]) -> crate::Result<Vec<String>> {
+        let mut wanted = Vec::new();
+        for path in paths {
+            let normalized = path.trim().replace('\\', "/");
+            // Named `paths` because that is the request field the caller wrote,
+            // and an error about their input should quote it.
+            validate_relative_path(&normalized, "paths")?;
+            wanted.push(normalized);
+        }
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tree = self
+            .snapshot
+            .files
+            .iter()
+            .map(|file| file.path.clone())
+            .chain(self.skipped.iter().map(|file| file.path.clone()))
+            .collect::<Vec<_>>();
+        let matching = |candidate: &str| {
+            wanted.iter().any(|wanted| {
+                candidate == wanted
+                    || candidate
+                        .strip_prefix(wanted.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+        };
+
+        self.snapshot.files.retain(|file| matching(&file.path));
+        self.skipped.retain(|file| matching(&file.path));
+        self.extractions.retain(|path, _| matching(path));
+        self.filtered = true;
+
+        Ok(wanted
+            .into_iter()
+            .filter(|wanted| {
+                !tree.iter().any(|candidate| {
+                    candidate == wanted
+                        || candidate
+                            .strip_prefix(wanted.as_str())
+                            .is_some_and(|rest| rest.starts_with('/'))
+                })
+            })
+            .collect())
     }
 }
 
@@ -119,6 +319,11 @@ pub struct RepositorySymbol {
     /// this a Rust project's tests reference nothing (§19, §29).
     #[serde(default)]
     pub test_scoped: bool,
+    /// How this declaration was read. Carried per declaration rather than per
+    /// file because one file can be read by a parser and still contain a
+    /// declaration the parser could not place.
+    #[serde(default)]
+    pub extraction: ExtractionMethod,
 }
 
 /// One call site, and how it was written.
@@ -232,6 +437,16 @@ impl RepositorySnapshot {
         options: RepositoryScanOptions,
     ) -> crate::Result<Self> {
         scan::scan(root.as_ref(), options)
+    }
+
+    /// Scan a repository and keep what only a scan produces: which files were
+    /// skipped and why, how each one was read, and how much was reused from the
+    /// previous scan.
+    pub fn scan_detailed(
+        root: impl AsRef<std::path::Path>,
+        options: RepositoryScanOptions,
+    ) -> crate::Result<RepositoryScan> {
+        scan::scan_with_details(root.as_ref(), options)
     }
 }
 

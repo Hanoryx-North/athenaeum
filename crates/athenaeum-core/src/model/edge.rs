@@ -26,9 +26,17 @@ pub struct KnowledgeEdge {
     /// from default traversal until something promotes them.
     pub status: NodeStatus,
     pub scope: Scope,
-    /// 0.0–1.0 where the producer can express one. Deterministic edges leave
-    /// this at `None` rather than claiming a fake 1.0 — absence of doubt is
-    /// not the same as measured certainty.
+    /// 0.0–1.0 where the producer can express one.
+    ///
+    /// The rule, in full: a structural relationship read from a syntax tree
+    /// carries a confidence reflecting what it is — a file containing a
+    /// declaration is 1.0, a call site resolved by name is lower, because a
+    /// name match can be a different `open`. The same relationship read by the
+    /// line-oriented fallback carries a lower number still, and says so in its
+    /// note. A model's proposal carries the model's own number. `None` means the
+    /// producer measured nothing: a snapshot that did not record how it was read,
+    /// or a producer with no basis for a number. Absence is not zero, and it is
+    /// not certainty either.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f32>,
     /// Why this relationship exists, in one line.
