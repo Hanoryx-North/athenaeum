@@ -15,6 +15,7 @@ import { loadKnowledgeGraph, nodeFilePath } from "@/lib/knowledge-index"
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
+import { MemoryBriefPanel } from "./memory-brief-panel"
 
 interface WikiPageInfo {
   /** Absolute path of the page's markdown file. */
@@ -162,6 +163,8 @@ export function KnowledgeTree() {
         <div className="mb-2 px-2 text-xs font-semibold uppercase text-muted-foreground">
           {project.name}
         </div>
+
+        <MemoryBriefPanel workspace={normalizePath(project.path)} openPage={openPathInPreview} />
 
         {sortedGroups.length === 0 && (
           <div className="px-2 py-4 text-center text-xs text-muted-foreground">

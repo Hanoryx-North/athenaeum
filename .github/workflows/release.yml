@@ -41,6 +41,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "5"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   plan:
@@ -55,6 +56,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Configure access to the shared protocol
+        env:
+          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
 
       - uses: actions/setup-node@v4
         with:
@@ -146,6 +158,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure access to the shared protocol
+        env:
+          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

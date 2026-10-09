@@ -565,6 +565,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "athenaeum-core",
+ "athenaeum-protocol",
  "base64 0.22.1",
  "calamine 0.34.0",
  "chrono",
@@ -608,7 +609,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -621,11 +621,19 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "tempfile",
  "thiserror 2.0.20",
  "uuid",
  "walkdir",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "athenaeum-protocol"
+version = "1.0.0"
+source = "git+https://github.com/Hanoryx-North/athenaeum_protocol.git?rev=b48966943e111cb0859329eb224dd8f9e1c7409f#b48966943e111cb0859329eb224dd8f9e1c7409f"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

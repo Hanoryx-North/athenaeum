@@ -46,6 +46,11 @@ belongs to the runtime.
 The typed implementation is in `athenaeum_core::wiki`. A consumer can use it
 in-process through `WikiService`, or use the language-neutral CLI bridge:
 
+The shared TypeScript and Rust wire types are maintained in the private
+`Hanoryx-North/athenaeum_protocol` repository. Desktop dependencies are pinned
+to a protocol commit. CI and release builds therefore require an
+`ATHENAEUM_PROTOCOL_TOKEN` Actions secret with read access to that repository.
+
 ```bash
 printf '%s\n' '{
   "protocolVersion": 1,

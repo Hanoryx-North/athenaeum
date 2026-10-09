@@ -17,6 +17,7 @@ env:
   # large dependency graphs. Retries plus HTTP/1.1 make this far less flaky.
   CARGO_HTTP_MULTIPLEXING: "false"
   CARGO_NET_RETRY: "5"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   lint:
@@ -24,6 +25,17 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure access to the shared protocol
+        env:
+          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -54,6 +66,17 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure access to the shared protocol
+        env:
+          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
 
       - uses: actions/setup-node@v4
         with:

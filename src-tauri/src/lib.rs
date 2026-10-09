@@ -14,6 +14,7 @@
 //! See `AGENTS.md` and `docs/porting-athenaeum.md`.
 
 mod commands;
+mod core_bridge;
 mod knowledge;
 mod panic_guard;
 mod proxy;
@@ -219,6 +220,7 @@ pub fn run() {
             knowledge::knowledge_graph,
             knowledge::lint_vault,
             knowledge::vocabularies,
+            core_bridge::core_bridge,
             set_proxy_env,
             set_close_behavior,
         ])
