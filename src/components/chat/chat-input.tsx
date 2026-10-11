@@ -149,6 +149,7 @@ interface ChatInputProps {
   onSelectedContextFilesChange: (paths: string[]) => void
   anyTxtAvailable?: boolean
   imageInputAvailable?: boolean
+  harnessManaged?: boolean
   placeholder?: string
 }
 
@@ -172,6 +173,7 @@ export function ChatInput({
   onSelectedContextFilesChange,
   anyTxtAvailable = true,
   imageInputAvailable = true,
+  harnessManaged = false,
   placeholder,
 }: ChatInputProps) {
   const { t } = useTranslation()
@@ -589,7 +591,7 @@ export function ChatInput({
               </button>
             </span>
           ))}
-          {selectedSkillOptions.map((skill) => (
+          {!harnessManaged && selectedSkillOptions.map((skill) => (
             <span
               key={skill.id}
               className="group mt-1 inline-flex h-7 max-w-[16rem] items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 text-xs font-medium text-emerald-700 shadow-sm dark:text-emerald-300"
@@ -622,7 +624,7 @@ export function ChatInput({
             style={{ maxHeight: "120px", overflowY: "auto" }}
           />
         </div>
-        {showSlashSkills && (
+        {!harnessManaged && showSlashSkills && (
           <div className="absolute bottom-[4.75rem] left-4 right-4 z-30 max-w-xl rounded-md border border-border bg-popover p-1.5 text-popover-foreground shadow-lg">
             <div className="px-2 pb-1 text-[11px] font-medium text-muted-foreground">
               {t("chat.slashSkillHint")}
@@ -706,6 +708,7 @@ export function ChatInput({
                 <span className="hidden sm:inline">{t("chat.attachImage")}</span>
               </button>
             </span>
+            {!harnessManaged && <>
             <button
               type="button"
               aria-pressed={useWebSearch}
@@ -850,6 +853,7 @@ export function ChatInput({
               </select>
               <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-muted-foreground" />
             </label>
+            </>}
           </div>
           {isStreaming ? (
             <Button

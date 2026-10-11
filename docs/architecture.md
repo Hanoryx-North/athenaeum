@@ -363,13 +363,26 @@ the knowledge belongs to the user.
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
 | 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation and review done:** exact, symbol, fingerprint and stale outcomes are searched and persisted, and `review::sweep` makes disputes, contradictions, lost anchors, unsupported rules and unaccepted proposals visible; semantic/model revalidation remains external |
-| 7 — Obsidian-style app | **Shell ported and wired:** the `llm_wiki` desktop application supplies the UI and the wiki engine, and its graph, knowledge and search panels read the derived index rather than re-deriving one from files. Chat still needs the harness behind it |
+| 7 — Obsidian-style app | **Shell and chat client wired:** the desktop launches the installed Harness SDK profile in the selected project, relays session/tool events, and links directly to proposal review |
 
 Phase 5 was the real product milestone, and it is met without this repository
 absorbing runtime responsibilities. The runtime negotiates capabilities,
 requests trust-wrapped context, submits model-attributed curation proposals and
 reports which knowledge was useful, all without knowing the storage
 implementation — over the published protocol, from a different language.
+
+The chat panel is a client of `@deepseek-ai/dsh-sdk-client`; a small Node driver
+loads that installed package and relays notifications between Tauri and the SDK.
+The Harness profile owns the turn, tools, permissions and session. The UI shows
+session/tool progress and the final committed response; the SDK has no per-turn
+cancel operation, so Stop closes the runtime and the next turn starts a fresh one.
+The app keeps local knowledge usable without this runtime, a model or a network.
+
+Wiki curation calls create proposals and only a person accepting one in Review
+writes its Markdown page. The Harness profile also exposes workspace file tools,
+which have no path-specific policy for protecting `wiki/`; until Harness provides
+that boundary, a session with direct write access can still edit a wiki file outside
+the proposal queue. The app does not treat conversation text as accepted knowledge.
 
 ## Next
 
@@ -384,10 +397,11 @@ implementation — over the published protocol, from a different language.
    claim is right, and revalidating a stale claim against changed source.
    Both belong behind the existing protocol and the runtime's verifier
    policy; the local library continues to own persisted outcomes.
-3. **Chat on the harness** (Phase 7 tail) — the chat UI is ported and its
-   agent-CLI transports are gone; it now needs `athenaeum_agent` behind it,
-   driven through the harness SDK. That is the last place where the visible
-   layer still has a hole rather than a seam.
+3. **Protect accepted wiki pages from direct tool writes** — Harness owns file
+   permissions, while the current profile has no path-level deny for `wiki/`.
+   The wiki tools are proposal-only and Athenaeum's review queue remains the
+   acceptance gate; the remaining policy needs a supported Harness permission
+   boundary before the desktop can guarantee that every agent edit goes through it.
 
 ## Deterministic repository knowledge
 

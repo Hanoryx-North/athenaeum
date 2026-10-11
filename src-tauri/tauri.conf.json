@@ -37,6 +37,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/harness-driver.mjs": "harness-driver.mjs"
+    },
     "category": "DeveloperTool",
     "shortDescription": "A local knowledge graph for a codebase.",
     "longDescription": "Athenaeum keeps a persistent, navigable network of project knowledge — decisions, gotchas, symbols, evidence — so a coding agent stops rediscovering the same things every session.",

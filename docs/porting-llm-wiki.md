@@ -81,8 +81,8 @@ Sizes are llm_wiki's, to show where the work actually is.
 
 | Subsystem | Change |
 | --- | --- |
-| Chat panel (`src/components/chat/`) | Keep the UI. **Replace its backend.** It talks to llm_wiki's in-process Rust agent today; it must talk to `athenaeum_agent` over the harness instead. This is the single most important rewire in the port. |
-| Chat store, `chat-agent-types.ts`, `agent-file-activity.ts` | Retarget at the harness event stream. The rendering survives; the transport does not. |
+| Chat panel (`src/components/chat/`) | Keep the UI. It now calls the installed Harness SDK runtime through a small Tauri-managed Node driver, and the selected Athenaeum project is the runtime workspace. |
+| Chat store and event rendering | The existing local chat presentation receives Harness session and tool updates, then stores the final response. The Harness remains the owner of turns and sessions. |
 | Settings (`src/components/settings/`, 23 files) | Drop provider/model/routing panes — `deepseek-harness` owns providers now. Keep vault, ingest, appearance, language, API, embedding settings. |
 | Knowledge model glue | llm_wiki has no typed knowledge graph. Athenaeum's `athenaeum-core` indexes the vault: pages become nodes, `[[wikilinks]]` become deterministic edges, frontmatter carries type and authority. **Done** — see Status below. |
 | Branding | `llm_wiki` / `LLM Wiki` → `athenaeum` / `Athenaeum` throughout. Bundle identifiers, window titles, config paths, store keys. |
@@ -186,13 +186,27 @@ Steps 1–7 and step 9 of the order above are done:
   its topic instead of the raw text of `index.md`.
 - `crates/athenaeum-providers` — retired and removed.
 
+## Desktop chat
+
+The app launches `@deepseek-ai/dsh-sdk-client` from the installed Athenaeum Agent
+profile, using the current project directory and a stable session id for each chat.
+The driver only translates a small newline-delimited control protocol; Harness owns
+agent execution. The panel reports Harness status, session activity and tool results,
+and Stop closes the runtime because the SDK has no per-turn cancellation method.
+The agent bundle already exposes wiki read and curation tools. Curation records
+proposals in the local engine; accepting in Review is what writes Markdown.
+
+The remaining safety gap belongs to the Harness permission boundary: its ordinary
+workspace file tools can still write `wiki/` directly when the profile grants that
+access. The current SDK has no profile-level path deny that this app can apply. The
+desktop does not convert chat text into accepted knowledge, but it cannot yet guarantee
+that every file edit to a wiki page passes through proposal review.
+
 Still open, in order:
 
-1. **Chat rewired to `athenaeum_agent`** (step 8). The chat UI is ported and its
-   agent-CLI transports are removed; it now needs the harness behind it, driven through
-   the SDK in `deepseek-harness/packages/sdk/` over stdio JSON-RPC, against a profile
-   that mounts the `athenaeum_agent` bundle. Not ACP: that is automation-only, not a
-   presentation layer.
+1. **Protect accepted wiki pages from direct tool writes.** Add this through a documented
+   Harness permission extension when one is available; do not fork Harness or implement
+   a second permission system in Athenaeum.
 2. **Restyle toward SiYuan's density** (step 10).
 3. Optionally, the local HTTP API, once something in scope needs it.
 

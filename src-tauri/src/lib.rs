@@ -16,6 +16,7 @@
 mod commands;
 mod core_bridge;
 mod engine;
+mod harness;
 mod knowledge;
 mod panic_guard;
 mod proxy;
@@ -119,6 +120,7 @@ pub fn run() {
                 eprintln!("[proxy] could not resolve app_data_dir");
             }
             app.manage(commands::file_sync::FileSyncState::default());
+            app.manage(harness::HarnessChatState::default());
             app.manage(knowledge::AppState::default());
             app.manage(CloseBehaviorState(Mutex::new("minimize".to_string())));
             app.manage(TrayAvailabilityState(Mutex::new(false)));
@@ -225,6 +227,9 @@ pub fn run() {
             engine::engine_accept,
             engine::engine_reject,
             engine::library_link,
+            harness::harness_check,
+            harness::harness_start_turn_stream,
+            harness::harness_cancel_turn,
             set_proxy_env,
             set_close_behavior,
         ])
@@ -278,6 +283,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if matches!(&event, tauri::RunEvent::Exit) {
+                if let Some(state) = app.try_state::<harness::HarnessChatState>() {
+                    state.shutdown();
+                }
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
                 has_visible_windows,

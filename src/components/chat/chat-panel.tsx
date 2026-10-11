@@ -2,46 +2,30 @@ import { useRef, useEffect, useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText, ListTree, ChevronDown, ChevronRight } from "lucide-react"
+import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText, ListTree, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardCheck, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePreview } from "./chat-message"
-import { ChatInput, type ChatSendOptions } from "./chat-input"
-import { useChatStore, chatMessagesToLLM, type MessageImage, type MessageReference } from "@/stores/chat-store"
+import { ChatInput, type ChatSendOptions, type ChatSkillOption } from "./chat-input"
+import { useChatStore, type MessageImage, type MessageReference } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
-import { isReasoningOnlyResponseError, streamChat } from "@/lib/llm-client"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, openPathInProject, readFile } from "@/commands/fs"
 import { getFileName, isAbsolutePath, normalizePath } from "@/lib/path-utils"
 import { hasConfiguredAnyTxt } from "@/lib/anytxt-search"
-import type { ChatAgentEvent, ChatAgentFileChange, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
-import type { ChatMessage as LlmChatMessage, ContentBlock } from "@/lib/llm-client"
+import type { ChatAgentEvent, ChatAgentStep, ChatUserInputRequest } from "@/lib/chat-agent-types"
 import { FilePreview } from "@/components/editor/file-preview"
 import { WikiReader } from "@/components/editor/wiki-reader"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
-import { summarizeAgentFileChange } from "@/lib/agent-file-activity"
 import { ReferenceKnowledgeGraph } from "@/components/chat/reference-knowledge-graph"
 
 type InternalChatSendOptions = ChatSendOptions & {
   suppressUserMessage?: boolean
   historyOverride?: { role: "user" | "assistant"; content: string }[]
-}
-
-interface BackendAgentReference {
-  title: string
-  path: string
-  kind: string
-  snippet?: string
-  score?: number
-  knowledgeContext?: {
-    relatedTo?: string[]
-    outgoingLinks?: string[]
-    backlinks?: string[]
-  }
 }
 
 interface BackendAgentToolEvent {
@@ -51,39 +35,23 @@ interface BackendAgentToolEvent {
   timestamp?: number
 }
 
-interface BackendAgentEventPayload {
-  sessionId: string
-  runId?: string
-  event: {
-    type: string
-    text?: string
-    tool?: string
-    input?: string
-    output?: string
-    message?: string
-    reference?: BackendAgentReference
-    request?: ChatUserInputRequest
-    sessionId?: string
-    path?: string
-    existedBefore?: boolean
-    previousContent?: string
+interface HarnessNotificationPayload {
+  runId: string
+  notification: {
+    method: string
+    params: Record<string, unknown>
   }
 }
 
-interface BackendAgentResponse {
-  sessionId: string
-  mode?: string
-  message: string | { role?: string; content?: string }
-  references?: BackendAgentReference[]
-  toolEvents?: BackendAgentToolEvent[]
-  userInputRequest?: ChatUserInputRequest
+interface HarnessStatus {
+  workspace: string
+  provider: string
+  model: string
 }
 
-interface AvailableAgentSkill {
-  id: string
-  name: string
-  description?: string
-  source: string
+interface HarnessTurnResult {
+  sessionId: string
+  finalResponse: string
 }
 
 type ContextDetailCategory = "wiki" | "graph" | "web" | "anytxt" | "workspace" | "external"
@@ -106,19 +74,6 @@ function contextDetailCategory(reference: MessageReference): ContextDetailCatego
 
 // Store the page mapping from the last query so SourceFilesBar can show which pages were cited
 export let lastQueryPages: { title: string; path: string }[] = []
-
-const AGENT_STREAM_IDLE_TIMEOUT_MS = 8 * 60 * 1000
-const AGENT_SKILL_STREAM_IDLE_TIMEOUT_MS = 15 * 60 * 1000
-const MAX_AGENT_ACTIVITY_SNAPSHOT_CHARS = 512_000
-
-async function readAgentActivitySnapshot(path: string): Promise<string | null> {
-  try {
-    const content = await readFile(path)
-    return content.length <= MAX_AGENT_ACTIVITY_SNAPSHOT_CHARS ? content : null
-  } catch {
-    return null
-  }
-}
 
 function parentDirectory(path: string): string {
   const normalized = normalizePath(path).replace(/\/+$/g, "")
@@ -145,12 +100,6 @@ function commonDirectory(paths: string[]): string | null {
     }
   }
   return firstParts.slice(0, commonLength).join("/") || null
-}
-
-function agentStreamIdleTimeoutMs(options: ChatSendOptions, skillCount: number): number {
-  return skillCount > 0 || options.agentMode === "deep"
-    ? AGENT_SKILL_STREAM_IDLE_TIMEOUT_MS
-    : AGENT_STREAM_IDLE_TIMEOUT_MS
 }
 
 function formatDate(timestamp: number): string {
@@ -272,28 +221,6 @@ function ConversationSidebar({
   )
 }
 
-function backendReferenceToMessageReference(ref: BackendAgentReference): MessageReference {
-  const isWiki = ref.kind === "wiki" || ref.path.startsWith("wiki/")
-  const isWeb = ref.kind === "web" || /^https?:\/\//i.test(ref.path)
-  const isWorkspace = ref.kind === "workspace" || ref.path.startsWith("agent-workspace/")
-  const source =
-    isWorkspace ? "Workspace"
-      : ref.kind === "anytxt" ? "AnyTXT"
-      : ref.kind === "web" ? "Web"
-        : ref.kind === "source" ? "Source"
-          : ref.kind === "graph" ? "Graph"
-            : undefined
-  return {
-    title: ref.title,
-    path: ref.path,
-    kind: isWiki ? "wiki" : isWorkspace ? "workspace" : "external",
-    source,
-    url: isWeb ? ref.path : undefined,
-    snippet: ref.snippet,
-    graphRelations: ref.knowledgeContext?.relatedTo,
-  }
-}
-
 function projectAbsolutePath(projectPath: string, path: string): string {
   const pp = normalizePath(projectPath)
   const normalized = normalizePath(path)
@@ -405,14 +332,18 @@ function backendToolToAgentEvent(event: BackendAgentToolEvent): ChatAgentEvent {
   }
 }
 
-function backendResponseText(response: BackendAgentResponse): string {
-  if (typeof response.message === "string") return response.message
-  return response.message?.content ?? ""
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
-function enabledSkillIds(skills: AvailableAgentSkill[], disabledSkills: string[]): Set<string> {
-  const disabled = new Set(disabledSkills)
-  return new Set(skills.filter((skill) => !disabled.has(skill.id)).map((skill) => skill.id))
+function textFromContent(value: unknown): string {
+  if (!Array.isArray(value)) return ""
+  return value.flatMap((block) => {
+    const item = asRecord(block)
+    return item?.type === "text" && typeof item.text === "string" ? [item.text] : []
+  }).join("")
 }
 
 function summarizeAgentStepsForResume(steps: ChatAgentStep[] = []): string {
@@ -442,10 +373,6 @@ function compactChatHistoryForResume(
     }))
 }
 
-function conversationMessages(conversationId: string) {
-  return useChatStore.getState().messages.filter((message) => message.conversationId === conversationId)
-}
-
 export function ChatPanel() {
   const { t } = useTranslation()
   useSourceFiles() // Keep source file cache warm
@@ -466,7 +393,6 @@ export function ChatPanel() {
   const retrievalMode = useChatStore((s) => s.retrievalMode)
   const selectedSkills = useChatStore((s) => s.selectedSkills)
   const selectedContextFiles = useChatStore((s) => s.selectedContextFiles)
-  const disabledSkills = useChatStore((s) => s.disabledSkills)
   const setUseWebSearch = useChatStore((s) => s.setUseWebSearch)
   const setUseAnyTxtSearch = useChatStore((s) => s.setUseAnyTxtSearch)
   const setAgentMode = useChatStore((s) => s.setAgentMode)
@@ -481,6 +407,7 @@ export function ChatPanel() {
     : []
 
   const project = useWikiStore((s) => s.project)
+  const setActiveView = useWikiStore((s) => s.setActiveView)
   const projectPathIndex = useWikiStore((s) => s.projectPathIndex)
   const baseLlmConfig = useWikiStore((s) => s.llmConfig)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
@@ -493,7 +420,7 @@ export function ChatPanel() {
   )
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
-  const imageInputAvailable = supportsImageInput(llmConfig)
+  const imageInputAvailable = mode === "chat" || supportsImageInput(llmConfig)
   const availableContextFiles = useMemo(() => {
     if (!project) return []
     const root = normalizePath(project.path).replace(/\/+$/g, "")
@@ -524,62 +451,17 @@ export function ChatPanel() {
     setGeneratedOutputPreviews([])
     setContextDetailReferences(references)
   }, [])
-  const [availableSkills, setAvailableSkills] = useState<AvailableAgentSkill[]>([])
+  const [availableSkills] = useState<ChatSkillOption[]>([])
+  const [harnessStatus, setHarnessStatus] = useState<
+    | { state: "checking" }
+    | { state: "ready"; provider: string; model: string }
+    | { state: "offline"; message: string }
+  >({ state: "checking" })
   const [approvingShellMessageId, setApprovingShellMessageId] = useState<string | null>(null)
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
   useEffect(() => {
     setContextDetailReferences(null)
   }, [activeConversationId])
-  const buildGeneratedOutputPreview = useCallback(async (ref: MessageReference): Promise<ChatReferencePreview | null> => {
-    if (!project) return null
-    const outputPath = projectAbsolutePath(project.path, ref.path)
-    try {
-      const category = getFileCategory(outputPath)
-      const shouldReadContent = isTextReadable(category) || category === "pdf"
-      const content = shouldReadContent ? await readFile(outputPath) : ""
-      return {
-        title: ref.title || getFileName(outputPath),
-        path: outputPath,
-        source: ref.source ?? "Workspace",
-        content,
-        snippet: ref.snippet,
-      }
-    } catch (err) {
-      console.warn("[chat] failed to auto-open generated output:", err)
-      return {
-        title: ref.title || getFileName(outputPath),
-        path: outputPath,
-        source: ref.source ?? "Workspace",
-        content: `Unable to load generated file: ${ref.path}`,
-        snippet: ref.snippet,
-      }
-    }
-  }, [project])
-  const autoOpenSingleGeneratedOutput = useCallback((conversationId: string, references?: MessageReference[]) => {
-    if (useChatStore.getState().activeConversationId !== conversationId) return
-    const outputs = (references ?? []).filter((ref) => ref.kind === "workspace")
-    if (outputs.length === 0 || !project) return
-    const previews = outputs.map((ref) => {
-      const outputPath = projectAbsolutePath(project.path, ref.path)
-      return {
-        title: ref.title || getFileName(outputPath),
-        path: outputPath,
-        source: ref.source ?? "Workspace",
-        content: "",
-        snippet: ref.snippet,
-      }
-    })
-    setReferencePreview(null)
-    setGeneratedOutputPreviews(previews)
-    if (outputs.length === 1) {
-      void buildGeneratedOutputPreview(outputs[0]).then((preview) => {
-        if (preview) {
-          setGeneratedOutputPreviews([preview])
-          setGeneratedOutputPreview(preview)
-        }
-      })
-    }
-  }, [buildGeneratedOutputPreview, project])
   const activeStreaming = Boolean(isStreaming && activeConversationId && streamingConversationId === activeConversationId)
   const activeAgentEvents = activeStreaming ? agentEvents : []
   const lastMessage = activeMessages[activeMessages.length - 1]
@@ -693,29 +575,26 @@ export function ChatPanel() {
 
   useEffect(() => {
     let cancelled = false
+    if (mode !== "chat") return
     if (!project?.path) {
-      setAvailableSkills([])
+      setHarnessStatus({ state: "offline", message: t("chat.agent.noWorkspace") })
       return
     }
-    invoke<AvailableAgentSkill[]>("agent_list_skills", { projectPath: project.path })
-      .then((skills) => {
-        if (cancelled) return
-        const enabled = enabledSkillIds(skills, useChatStore.getState().disabledSkills)
-        const enabledSkills = skills.filter((skill) => enabled.has(skill.id))
-        setAvailableSkills(enabledSkills)
-        const current = useChatStore.getState().selectedSkills
-        const filtered = current.filter((name) => enabled.has(name))
-        if (filtered.length !== current.length) {
-          setSelectedSkills(filtered)
+    setHarnessStatus({ state: "checking" })
+    invoke<HarnessStatus>("harness_check", { projectPath: project.path })
+      .then((status) => {
+        if (!cancelled) setHarnessStatus({ state: "ready", provider: status.provider, model: status.model })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setHarnessStatus({
+            state: "offline",
+            message: error instanceof Error ? error.message : String(error),
+          })
         }
       })
-      .catch(() => {
-        if (!cancelled) setAvailableSkills([])
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [project?.path, disabledSkills, setSelectedSkills])
+    return () => { cancelled = true }
+  }, [mode, project?.path, t])
 
   const handleSend = useCallback(
     async (
@@ -732,16 +611,6 @@ export function ChatPanel() {
         contextFiles: useChatStore.getState().selectedContextFiles,
         skillMode: useChatStore.getState().selectedSkills.length > 0 ? "explicit" : "auto",
       }
-      const allowedSkills = enabledSkillIds(
-        availableSkills,
-        useChatStore.getState().disabledSkills,
-      )
-      const requestedSkillMode = sendOptions.skillMode ?? (
-        sendOptions.skills.length > 0 ? "explicit" : "auto"
-      )
-      const requestSkills = requestedSkillMode === "auto" && sendOptions.skills.length === 0
-        ? Array.from(allowedSkills)
-        : sendOptions.skills.filter((id) => allowedSkills.has(id))
       // Auto-create a conversation if none is active
       let convId = useChatStore.getState().activeConversationId
       if (!convId) {
@@ -768,457 +637,138 @@ export function ChatPanel() {
         activeRunIdRef.current = backendRunId
         const isCurrentRun = () => runIdRef.current === runId && !controller.signal.aborted
 
-        const useBackendAgent =
-          llmConfig.provider !== "claude-code" &&
-          llmConfig.provider !== "codex-cli"
+        if (!project?.path) {
+          throw new Error(t("chat.agent.noWorkspace"))
+        }
 
-        if (useBackendAgent) {
-          setAgentEvents([
-            {
-              stage: "routing",
-              status: "running",
-              message: t("chat.agent.routing"),
-            },
-          ])
-          const visibleHistory = conversationMessages(convId)
-            .filter((m) => m.role === "user" || m.role === "assistant")
-          const activeConvMessages = sendOptions.historyOverride
-            ?? (sendOptions.suppressUserMessage ? visibleHistory : visibleHistory.slice(0, -1))
-              .slice(-maxHistoryMessages)
-              .map((m) => ({ role: m.role, content: m.content }))
-          let accumulated = ""
-          const references: MessageReference[] = []
-          const backendEvents: BackendAgentToolEvent[] = []
-          const fileChanges = new Map<string, ChatAgentFileChange>()
-          const fileEditChanges: ChatAgentFileChange[] = []
-          let fileEditSequence = 0
-          const fileEditOrder = new Map<string, number>()
-          const trackedFilePaths = new Set<string>()
-          const fileActivityTasks: Promise<void>[] = []
-          const fileActivityChains = new Map<string, Promise<void>>()
-          const seenRefs = new Set<string>()
-          let pendingUserInputRequest: ChatUserInputRequest | undefined
-          let streamFinished = false
-          let streamUnlisten: (() => void) | null = null
-          let resolveStream: (() => void) | null = null
-          let rejectStream: ((err: Error) => void) | null = null
-          const streamDone = new Promise<void>((resolve, reject) => {
-            resolveStream = resolve
-            rejectStream = reject
-          })
-          void streamDone.catch(() => {})
-          const streamIdleTimeoutMs = agentStreamIdleTimeoutMs(sendOptions, requestSkills.length)
-          let timeout: number | undefined
-          const clearStreamTimeout = () => {
-            if (timeout !== undefined) {
-              window.clearTimeout(timeout)
-              timeout = undefined
-            }
-          }
-          const resetStreamTimeout = () => {
-            clearStreamTimeout()
-            timeout = window.setTimeout(() => {
-              if (!streamFinished) {
-                streamFinished = true
-                rejectStream?.(new Error("Agent stream timed out"))
-              }
-            }, streamIdleTimeoutMs)
-          }
-          resetStreamTimeout()
-          streamUnlisten = await listen<BackendAgentEventPayload>("agent-event", (event) => {
-            const payload = event.payload
-            if (payload.sessionId !== convId || payload.runId !== backendRunId || !isCurrentRun()) return
-            resetStreamTimeout()
-            const agentEvent = payload.event
-            if (agentEvent.type === "done") {
-              if (!streamFinished) {
-                streamFinished = true
-                clearStreamTimeout()
-                resolveStream?.()
-              }
-              return
-            }
-            if (agentEvent.type === "messageDelta" && agentEvent.text) {
-              accumulated += agentEvent.text
-              appendStreamToken(agentEvent.text)
-              return
-            }
-            if (agentEvent.type === "referenceAdded" && agentEvent.reference) {
-              const ref = backendReferenceToMessageReference(agentEvent.reference)
-              const key = `${ref.kind ?? "wiki"}:${ref.url ?? ref.path}`.toLowerCase()
-              if (!seenRefs.has(key)) {
-                seenRefs.add(key)
-                references.push(ref)
-              }
-              if (ref.kind === "workspace" && project) {
-                const outputPath = projectAbsolutePath(project.path, ref.path)
-                const preview: ChatReferencePreview = {
-                  title: ref.title || getFileName(outputPath),
-                  path: outputPath,
-                  source: ref.source ?? "Workspace",
-                  content: "",
-                  snippet: ref.snippet,
-                }
-                dismissedGeneratedOutputsKeyRef.current = null
-                setReferencePreview(null)
-                setGeneratedOutputPreviews((prev) => {
-                  if (prev.some((item) => item.path === preview.path)) return prev
-                  return [...prev, preview]
-                })
-                if (!trackedFilePaths.has(outputPath) && !fileChanges.has(outputPath)) {
-                  const editSequence = ++fileEditSequence
-                  const editId = `${backendRunId}:${outputPath}:${editSequence}`
-                  const editTimestamp = Date.now()
-                  fileEditOrder.set(editId, editSequence)
-                  const task = readAgentActivitySnapshot(outputPath).then((afterContent) => {
-                    if (afterContent === null) return
-                    const change = summarizeAgentFileChange({
-                      id: editId,
-                      path: outputPath,
-                      tool: "shell.exec",
-                      // Shell can create or replace multiple files, but it cannot
-                      // provide an atomic pre-write snapshot. Never guess that an
-                      // observed file is new because Undo could delete user data.
-                      beforeContent: "",
-                      afterContent,
-                      timestamp: editTimestamp,
-                    })
-                    change.operation = "modified"
-                    change.additions = 0
-                    change.deletions = 0
-                    change.diff = t("chat.agentChanges.shellSnapshotUnavailable")
-                    change.beforeContent = undefined
-                    change.afterContent = undefined
-                    fileChanges.set(outputPath, change)
-                    fileEditChanges.push(change)
-                  })
-                  fileActivityTasks.push(task)
-                }
-              }
-              return
-            }
-            if (agentEvent.type === "fileChanged" && project && agentEvent.path && agentEvent.tool) {
-              const filePath = projectAbsolutePath(project.path, agentEvent.path)
-              const editSequence = ++fileEditSequence
-              const editId = `${backendRunId}:${filePath}:${editSequence}`
-              const editTimestamp = Date.now()
-              fileEditOrder.set(editId, editSequence)
-              trackedFilePaths.add(filePath)
-              const previousTask = fileActivityChains.get(filePath) ?? Promise.resolve()
-              const task = previousTask.then(async () => {
-                const afterContent = await readAgentActivitySnapshot(filePath)
-                if (afterContent === null) return
-                const originalBefore = agentEvent.existedBefore ? agentEvent.previousContent : null
-                const beforeKnown = !agentEvent.existedBefore || typeof originalBefore === "string"
-                const change = summarizeAgentFileChange({
-                  id: editId,
-                  path: filePath,
-                  tool: agentEvent.tool!,
-                  beforeContent: beforeKnown ? (originalBefore ?? null) : "",
-                  afterContent,
-                  timestamp: editTimestamp,
-                })
-                if (!beforeKnown) {
-                  change.operation = "modified"
-                  change.additions = 0
-                  change.deletions = 0
-                  change.diff = t("chat.agentChanges.diffUnavailable")
-                  change.beforeContent = undefined
-                  change.afterContent = undefined
-                }
-                fileChanges.set(filePath, change)
-                fileEditChanges.push(change)
+        setAgentEvents([{
+          stage: "understanding",
+          status: "running",
+          message: t("chat.agent.connecting"),
+        }])
+        let turnFailure: string | null = null
+        const backendEvents: BackendAgentToolEvent[] = []
+        const toolsByCallId = new Map<string, string>()
+        const addAgentActivity = (activity: ChatAgentEvent) => {
+          setAgentEvents((previous) => [...previous, activity].slice(-6))
+        }
+        const unlisten = await listen<HarnessNotificationPayload>("harness-notification", (event) => {
+          const payload = event.payload
+          if (payload.runId !== backendRunId || !isCurrentRun()) return
+          const notification = payload.notification
+          const params = notification.params
+          if (notification.method === "session.status") {
+            if (params.sessionId !== convId) return
+            if (params.status === "running") {
+              addAgentActivity({
+                stage: "understanding",
+                status: "running",
+                message: t("chat.agent.running"),
+                timestamp: Date.now(),
               })
-              fileActivityChains.set(filePath, task)
-              fileActivityTasks.push(task)
-              return
             }
-            if (agentEvent.type === "userInputRequired" && agentEvent.request) {
-              pendingUserInputRequest = agentEvent.request
-              if (!accumulated.trim()) {
-                const intro = agentEvent.request.description
-                  || t("chat.userInputRequiredDescription", { defaultValue: "Please provide the requested information to continue." })
-                accumulated = intro
-                appendStreamToken(intro)
-              }
-              return
-            }
-            if (agentEvent.type === "toolStart" && agentEvent.tool) {
-              const toolEvent: BackendAgentToolEvent = {
-                tool: agentEvent.tool,
-                status: "started",
-                detail: agentEvent.input,
-                timestamp: Date.now(),
-              }
-              backendEvents.push(toolEvent)
-              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
-              return
-            }
-            if (agentEvent.type === "toolEnd" && agentEvent.tool) {
-              const failed = typeof agentEvent.output === "string" && agentEvent.output.startsWith("failed:")
-              const skipped = typeof agentEvent.output === "string" && agentEvent.output.startsWith("approval required:")
-              const toolEvent: BackendAgentToolEvent = {
-                tool: agentEvent.tool,
-                status: failed ? "failed" : skipped ? "available" : "completed",
-                detail: agentEvent.output,
-                timestamp: Date.now(),
-              }
-              backendEvents.push(toolEvent)
-              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
-              return
-            }
-            if (agentEvent.type === "error" && agentEvent.message) {
-              const toolEvent: BackendAgentToolEvent = {
-                tool: "agent",
-                status: "failed",
-                detail: agentEvent.message,
-                timestamp: Date.now(),
-              }
-              backendEvents.push(toolEvent)
-              setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
-              if (!streamFinished) {
-                streamFinished = true
-                clearStreamTimeout()
-                rejectStream?.(new Error(agentEvent.message))
-              }
-            }
-          })
-          try {
-            await invoke<string>("agent_start_turn_stream", {
-              projectId: project?.id ?? "current",
-              request: {
-                message: text,
-                sessionId: convId,
-                runId: backendRunId,
-                mode: sendOptions.agentMode,
-                retrievalMode: sendOptions.retrievalMode,
-                stream: true,
-                tools: {
-                  wiki: true,
-                  web: sendOptions.useWebSearch,
-                  anytxt: sendOptions.useAnyTxtSearch,
-                },
-                topK: sendOptions.agentMode === "deep" ? 8 : 5,
-                includeContent: sendOptions.agentMode === "deep",
-                history: activeConvMessages,
-                historyExplicit: true,
-                skills: requestSkills,
-                contextFiles: sendOptions.contextFiles,
-                skillMode: requestedSkillMode,
-                approvedShellCommands: sendOptions.approvedShellCommands ?? [],
-                shellCommand: sendOptions.shellCommand,
-                images: images.map((image) => ({
-                  mediaType: image.mediaType,
-                  dataBase64: image.dataBase64,
-                })),
-              },
+            return
+          }
+          if (notification.method !== "session.event" || params.sessionId !== convId) return
+          const agentEvent = asRecord(params.event)
+          if (!agentEvent || typeof agentEvent.type !== "string") return
+          const data = asRecord(agentEvent.data) ?? {}
+
+          if (agentEvent.type === "step/start") {
+            addAgentActivity({
+              stage: "understanding",
+              status: "running",
+              message: t("chat.agent.running"),
+              timestamp: Date.now(),
             })
-            await streamDone
-            await Promise.allSettled(fileActivityTasks)
-            fileEditChanges.sort(
-              (left, right) => (fileEditOrder.get(left.id) ?? 0) - (fileEditOrder.get(right.id) ?? 0),
-            )
-          } finally {
-            clearStreamTimeout()
-            streamUnlisten?.()
+            return
           }
-          if (!isCurrentRun()) return
-          lastQueryPages = references
-            .filter((ref) => ref.kind === "wiki")
-            .map((ref) => ({ title: ref.title, path: ref.path }))
-          const steps = backendEvents.map(backendToolToAgentStep)
-          finalized = true
-          finalizeStreamForConversation(
-            convId,
-            accumulated,
-            references,
-            steps,
-            pendingUserInputRequest,
-            fileEditChanges,
-          )
-          if (!pendingUserInputRequest) {
-            autoOpenSingleGeneratedOutput(convId, references)
+          if (agentEvent.type === "tool/call") {
+            const name = typeof data.name === "string" ? data.name : "tool"
+            const callId = typeof data.callId === "string" ? data.callId : ""
+            if (callId) toolsByCallId.set(callId, name)
+            const detail = typeof data.arguments === "string" ? data.arguments : ""
+            const toolEvent: BackendAgentToolEvent = {
+              tool: name,
+              status: "started",
+              detail,
+              timestamp: Date.now(),
+            }
+            backendEvents.push(toolEvent)
+            setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
+            return
           }
-          setAgentEvents([])
-          setStreamingConversationId(null)
-          abortRef.current = null
-          activeRunSessionIdRef.current = null
-          activeRunIdRef.current = null
-          return
-        }
-
-        const activeConvMessages = conversationMessages(convId)
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .slice(-maxHistoryMessages)
-        const priorMessages = activeConvMessages.slice(0, -1)
-        const priorWireMessages = sendOptions.historyOverride
-          ?? chatMessagesToLLM(priorMessages).map((m) => ({
-            role: m.role,
-            content: typeof m.content === "string"
-              ? m.content
-              : m.content
-                  .filter((block) => block.type === "text")
-                  .map((block) => block.text)
-                  .join("\n"),
-          }))
-        const backendResponse = await invoke<BackendAgentResponse>("agent_start_turn", {
-          projectId: project?.id ?? "current",
-          request: {
-            message: text,
-            sessionId: convId,
-            runId: backendRunId,
-            persistSession: false,
-            mode: sendOptions.agentMode,
-            retrievalMode: sendOptions.retrievalMode,
-            tools: {
-              wiki: true,
-              web: sendOptions.useWebSearch,
-              anytxt: sendOptions.useAnyTxtSearch,
-            },
-            topK: sendOptions.agentMode === "deep" ? 8 : 5,
-            includeContent: sendOptions.agentMode === "deep",
-            skills: requestSkills,
-            contextFiles: sendOptions.contextFiles,
-            skillMode: requestedSkillMode,
-            historyExplicit: true,
-            approvedShellCommands: sendOptions.approvedShellCommands ?? [],
-            shellCommand: sendOptions.shellCommand,
-            history: priorWireMessages,
-            images: images.map((image) => ({
-              mediaType: image.mediaType,
-              dataBase64: image.dataBase64,
-            })),
-          },
+          if (agentEvent.type === "tool/result") {
+            const message = asRecord(data.message)
+            const callId = typeof message?.toolCallId === "string"
+              ? message.toolCallId
+              : typeof data.callId === "string" ? data.callId : ""
+            const name = (callId && toolsByCallId.get(callId)) || "tool"
+            const failed = message?.isError === true || asRecord(data.error) !== null
+            const toolEvent: BackendAgentToolEvent = {
+              tool: name,
+              status: failed ? "failed" : "completed",
+              detail: textFromContent(message?.content).slice(0, 500),
+              timestamp: Date.now(),
+            }
+            backendEvents.push(toolEvent)
+            setAgentEvents((prev) => [...prev, backendToolToAgentEvent(toolEvent)].slice(-6))
+            return
+          }
+          if (agentEvent.type === "turn/end") {
+            const reason = asRecord(data.reason)
+            if (reason?.kind === "error") {
+              const error = asRecord(reason.error)
+              turnFailure = typeof error?.message === "string"
+                ? error.message
+                : t("chat.agent.turnFailed")
+            addAgentActivity({
+                stage: "tool_result",
+                status: "error",
+                message: turnFailure ?? t("chat.agent.turnFailed"),
+                timestamp: Date.now(),
+            })
+            }
+          }
         })
-        if (!isCurrentRun()) return
-
-        const backendReferences = (backendResponse.references ?? []).map(backendReferenceToMessageReference)
-        const backendSteps = (backendResponse.toolEvents ?? []).map(backendToolToAgentStep)
-        const backendEvents = (backendResponse.toolEvents ?? []).map(backendToolToAgentEvent)
-        setAgentEvents(backendEvents.slice(-6))
-        lastQueryPages = backendReferences
-          .filter((ref) => ref.kind === "wiki")
-          .map((ref) => ({ title: ref.title, path: ref.path }))
-
-        if (backendResponse.userInputRequest) {
-          finalized = true
-          finalizeStreamForConversation(
-            convId,
-            backendResponse.message
-              ? backendResponseText(backendResponse)
-              : (backendResponse.userInputRequest.description ?? t("chat.userInputRequiredDescription", { defaultValue: "Please provide the requested information to continue." })),
-            backendReferences,
-            backendSteps,
-            backendResponse.userInputRequest,
-          )
-          setAgentEvents([])
-          setStreamingConversationId(null)
-          abortRef.current = null
-          activeRunSessionIdRef.current = null
-          activeRunIdRef.current = null
-          return
-        }
-
-        const contextText = [
-          "You have access to the current Athenaeum project context below. Use it as retrieved evidence when it is relevant.",
-          "",
-          backendResponseText(backendResponse),
-          "",
-          `User request: ${text}`,
-        ].join("\n")
-        const userContent: string | ContentBlock[] = images.length > 0
-          ? [
-              { type: "text", text: contextText },
-              ...images.map((image) => ({
-                type: "image" as const,
-                mediaType: image.mediaType,
-                dataBase64: image.dataBase64,
-              })),
-            ]
-          : contextText
-        const finalMessages: LlmChatMessage[] = [
-          {
-            role: "system",
-            content: "Answer using the provided Athenaeum context and references. If the context is insufficient, say what is missing instead of inventing details.",
-          },
-          ...(sendOptions.historyOverride ?? chatMessagesToLLM(priorMessages)),
-          { role: "user", content: userContent },
-        ]
-
-        let accumulated = ""
-        let thinkingOpen = false
-
-        const appendReasoning = (token: string) => {
-          if (!token) return
-          if (!thinkingOpen) {
-            thinkingOpen = true
-            accumulated += "<think>"
-            appendStreamToken("<think>")
-          }
-          accumulated += token
-          appendStreamToken(token)
-        }
-
-        const closeReasoning = () => {
-          if (!thinkingOpen) return
-          thinkingOpen = false
-          accumulated += "</think>"
-          appendStreamToken("</think>")
-        }
-
-        const streamFinalAnswer = async (reasoningOff: boolean) => {
-          let streamError: Error | null = null
-          await streamChat(
-            llmConfig,
-            finalMessages,
-            {
-              onToken: (token) => {
-                if (!isCurrentRun()) return
-                closeReasoning()
-                accumulated += token
-                appendStreamToken(token)
-              },
-              onReasoningToken: (token) => {
-                if (!isCurrentRun()) return
-                if (reasoningOff) return
-                appendReasoning(token)
-              },
-              onDone: () => {},
-              onError: (err) => {
-                streamError = err
-              },
-            },
-            controller.signal,
-            reasoningOff ? { reasoning: { mode: "off" } } : undefined,
-          )
-          if (streamError) throw streamError
-        }
 
         try {
-          await streamFinalAnswer(false)
-        } catch (err) {
+          const selectedFiles = sendOptions.contextFiles
+          const promptText = selectedFiles.length > 0
+          ? `${text}\n\nPlease inspect these user-selected workspace files first:\n${selectedFiles.map((path) => `- ${path}`).join("\n")}`
+            : text
+          const contentBlocks = [
+            { type: "text", text: promptText },
+            ...images.map((image) => ({
+              type: "image",
+              data: image.dataBase64,
+              mimeType: image.mediaType,
+            })),
+          ]
+          const response = await invoke<HarnessTurnResult>("harness_start_turn_stream", {
+            projectPath: project.path,
+            sessionId: convId,
+            runId: backendRunId,
+            contentBlocks,
+          })
           if (!isCurrentRun()) return
-          if (isReasoningOnlyResponseError(err)) {
-            accumulated = ""
-            thinkingOpen = false
-            useChatStore.setState({ streamingContent: "" })
-            await streamFinalAnswer(true)
-          } else {
-            throw err
+          if (!response.finalResponse.trim() && turnFailure) throw new Error(turnFailure)
+          const steps = backendEvents.map(backendToolToAgentStep)
+          if (response.finalResponse) {
+            appendStreamToken(response.finalResponse)
           }
+          finalized = true
+          finalizeStreamForConversation(convId, response.finalResponse, [], steps)
+          lastQueryPages = []
+          setAgentEvents([])
+          setStreamingConversationId(null)
+          abortRef.current = null
+          activeRunSessionIdRef.current = null
+          activeRunIdRef.current = null
+        } finally {
+          unlisten()
         }
-
-        if (!isCurrentRun()) return
-        closeReasoning()
-        finalized = true
-        finalizeStreamForConversation(convId, accumulated, backendReferences, backendSteps)
-        autoOpenSingleGeneratedOutput(convId, backendReferences)
-        setAgentEvents([])
-        setStreamingConversationId(null)
-        abortRef.current = null
-        activeRunSessionIdRef.current = null
-        activeRunIdRef.current = null
-        // save-worthy detection removed — user has direct "Save to Wiki" button on each message
+        return
       } catch (err) {
         if (!finalized) {
           if (isAbortLikeError(err) || runIdRef.current !== runId) {
@@ -1240,7 +790,7 @@ export function ChatPanel() {
         activeRunIdRef.current = null
       }
     },
-    [project, llmConfig, searchApiConfig, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, maxHistoryMessages, t, availableSkills, autoOpenSingleGeneratedOutput],
+    [project, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, t],
   )
 
   const handleStop = useCallback(() => {
@@ -1248,10 +798,8 @@ export function ChatPanel() {
     const sessionId = activeRunSessionIdRef.current
     const backendRunId = activeRunIdRef.current
     if (sessionId) {
-      void invoke("agent_cancel_turn", {
-        projectId: project?.id ?? "current",
-        sessionId,
-        runId: backendRunId ?? undefined,
+      void invoke("harness_cancel_turn", {
+        runId: backendRunId ?? "",
       }).catch(() => {})
     }
     abortRef.current?.abort()
@@ -1261,7 +809,7 @@ export function ChatPanel() {
     setStreaming(false)
     setAgentEvents([])
     setStreamingConversationId(null)
-  }, [project, setStreaming])
+  }, [setStreaming])
 
   const handleNewConversation = useCallback(() => {
     handleStop()
@@ -1406,6 +954,12 @@ export function ChatPanel() {
   const hasAssistantMessages = activeMessages.some((m) => m.role === "assistant")
   const showWriteButton = mode === "ingest" && !activeStreaming && hasAssistantMessages
 
+  const runtimeLabel = harnessStatus.state === "checking"
+    ? t("chat.agent.checking")
+    : harnessStatus.state === "ready"
+      ? t("chat.agent.ready", { provider: harnessStatus.provider, model: harnessStatus.model })
+      : t("chat.agent.offline")
+
   return (
     <div className="flex h-full flex-row overflow-hidden">
       <ConversationSidebar
@@ -1414,6 +968,41 @@ export function ChatPanel() {
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        {mode === "chat" && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/20 px-3 py-2 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5" title={project?.path ?? t("chat.agent.noWorkspace")}>
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="truncate font-medium">{project?.path ?? t("chat.agent.noWorkspace")}</span>
+            </span>
+            <span
+              className={`flex min-w-0 items-center gap-1.5 ${harnessStatus.state === "offline" ? "text-destructive" : "text-muted-foreground"}`}
+              role="status"
+              aria-live="polite"
+              title={harnessStatus.state === "offline" ? harnessStatus.message : runtimeLabel}
+            >
+              {harnessStatus.state === "checking"
+                ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                : harnessStatus.state === "ready"
+                  ? <CircleCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
+                  : <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+              <span className="truncate">{harnessStatus.state === "offline"
+                ? `${runtimeLabel}: ${harnessStatus.message}`
+                : runtimeLabel}</span>
+            </span>
+            <span className="hidden min-w-0 flex-1 truncate text-muted-foreground lg:inline" title={t("chat.agent.proposalReminder")}>
+              {t("chat.agent.proposalReminder")}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-7 shrink-0 gap-1.5 px-2 text-xs"
+              onClick={() => setActiveView("review")}
+            >
+              <ClipboardCheck className="h-3.5 w-3.5" aria-hidden />
+              {t("chat.agent.reviewProposals")}
+            </Button>
+          </div>
+        )}
         {!activeConversationId ? (
           <div className="flex flex-1 items-center justify-center text-muted-foreground">
             <div className="text-center">
@@ -1442,7 +1031,7 @@ export function ChatPanel() {
                         onOpenReferencePreview={handleOpenReferencePreview}
                         onOpenContextDetails={handleOpenContextDetails}
                         onApproveShellCommand={
-                          isLastAssistant && approvingShellMessageId !== msg.id
+                          mode !== "chat" && isLastAssistant && approvingShellMessageId !== msg.id
                             ? handleApproveShellCommand
                             : undefined
                         }
@@ -1491,6 +1080,7 @@ export function ChatPanel() {
           onSelectedContextFilesChange={setSelectedContextFiles}
           anyTxtAvailable={anyTxtAvailable}
           imageInputAvailable={imageInputAvailable}
+          harnessManaged={mode === "chat"}
           placeholder={
             mode === "ingest"
               ? t("chat.ingestPlaceholder")

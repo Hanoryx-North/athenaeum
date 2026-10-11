@@ -88,9 +88,13 @@ providers, streaming, tools, permissions and sessions, with
 [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the bundle
 that plugs this library into it. Athenaeum exposes a versioned, storage-independent
 Wiki contract for that, and the agent reaches the library through nothing else.
-The desktop chat client still needs a Harness SDK connection; the current Tauri build does
-not register agent turn commands. Use the [`athenaeum_agent` setup](https://github.com/Hanoryx-North/athenaeum_agent#installing)
-for agent sessions until that client is wired and verified.
+Install the runtime and its Athenaeum profile with the [`athenaeum_agent` installer](https://github.com/Hanoryx-North/athenaeum_agent#installing).
+The desktop chat launches that profile through
+the public Harness SDK, uses the currently open project as its workspace, and shows session and
+tool events while a turn runs. Wiki curation tools leave proposals in the local review queue;
+accepting one in Review is what writes its Markdown page. See [the agent integration notes](docs/agent-integration.md)
+for the bridge boundary and [the desktop chat notes](docs/porting-llm-wiki.md#desktop-chat) for the
+runtime details and remaining permission limitation.
 
 ---
 
