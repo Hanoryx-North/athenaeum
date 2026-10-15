@@ -21,7 +21,7 @@
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync, copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, rmdirSync,
-  symlinkSync, unlinkSync, writeFileSync, lstatSync, readlinkSync,
+  symlinkSync, unlinkSync, writeFileSync, lstatSync, readlinkSync, readFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -245,8 +245,18 @@ export function uninstall(args, { env = process.env, home = homedir(), platform 
     throw new Error(`${prefix} has no install.json, so it was not made by this installer. Nothing removed.`)
   }
   // Undo the agents' settings first, while the integration still exists to do it exactly.
+  const record = JSON.parse(readFileSync(l.manifest, 'utf8'))
+  if (platform === 'darwin' && record.shellProfile) {
+    // Only remove the exact managed PATH entry, preserving other shell settings.
+    const { path, block } = record.shellProfile
+    if (typeof path === 'string' && typeof block === 'string' && existsSync(path)) {
+      const text = readFileSync(path, 'utf8')
+      writeFileSync(path, text.replace(block, ''))
+    }
+  }
   try { run(process.execPath, [l.bundle, 'disconnect']) } catch { console.log('  (could not remove the agent settings; run `athenaeum-integrations disconnect` if they remain)') }
-  for (const [name, target] of LINKS(l)) {
+  const agentName = platform === 'win32' ? 'athenaeum-agent.cmd' : 'athenaeum-agent'
+  for (const [name, target] of [...LINKS(l), ['athenaeum-agent', join(l.bin, agentName)]]) {
     const link = join(home, '.local', 'bin', name)
     try {
       // Remove a link only if it is ours: a file the person put there themselves is theirs.

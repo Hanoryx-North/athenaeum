@@ -94,7 +94,7 @@ pub enum CliJob {
         #[serde(default)]
         library: Option<String>,
         #[serde(default)]
-        auto_sync: bool,
+        auto_sync: Option<bool>,
         /// Which agents; empty means the ones installed.
         #[serde(default)]
         agents: Vec<String>,
@@ -138,8 +138,10 @@ impl CliJob {
                         args.push(server.clone());
                     }
                 }
-                if *auto_sync {
-                    args.push("--auto-sync".into());
+                match auto_sync {
+                    Some(true) => args.push("--auto-sync".into()),
+                    Some(false) => args.push("--no-auto-sync".into()),
+                    None => {}
                 }
                 if *no_agents {
                     args.push("--no-agents".into());
@@ -177,6 +179,7 @@ pub struct CliStatus {
     pub found: bool,
     pub path: Option<String>,
     pub version: Option<String>,
+    pub agent_installed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -222,6 +225,12 @@ fn run_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Installer children (npm, pnpm, Harness setup) must stop together.
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -303,11 +312,15 @@ fn run_process(
 pub async fn cli_status() -> Result<CliStatus, String> {
     run_guarded_async("cli_status", async {
         tauri::async_runtime::spawn_blocking(|| {
+            let agent_installed = default_prefix()
+                .map(|p| p.join("agent").join("install.json").is_file())
+                .unwrap_or(false);
             let Some(path) = locate_cli() else {
                 return CliStatus {
                     found: false,
                     path: None,
                     version: None,
+                    agent_installed,
                 };
             };
             let version = Command::new(&path)
@@ -321,6 +334,7 @@ pub async fn cli_status() -> Result<CliStatus, String> {
                 found: true,
                 path: Some(path.display().to_string()),
                 version,
+                agent_installed,
             }
         })
         .await
@@ -366,41 +380,59 @@ pub fn cli_cancel(state: State<'_, CliRun>) -> bool {
     match child {
         Some(child) => child
             .lock()
-            .map(|mut child| child.kill().is_ok())
+            .map(|mut child| {
+                #[cfg(unix)]
+                if Command::new("/bin/kill")
+                    .args(["-TERM", &format!("-{}", child.id())])
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    if Command::new("taskkill.exe")
+                        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                        .creation_flags(0x0800_0000)
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                    {
+                        return true;
+                    }
+                }
+                child.kill().is_ok()
+            })
             .unwrap_or(false),
         None => false,
     }
 }
 
-/// Run the installer bundled with the app: the same script a terminal user runs, so the two
-/// paths cannot drift. It fetches the matching command-line tool and the agent integration.
+/// Install packaged tools with the bundled Node runtime. No shell bootstrap or
+/// system Node; the optional agent delegates to athenaeum_agent's own installer.
 #[tauri::command]
 pub async fn cli_install_tools(
     app: AppHandle,
     state: State<'_, CliRun>,
+    agent: Option<bool>,
 ) -> Result<JobResult, String> {
     let state = state.inner().clone();
     run_guarded_async("cli_install_tools", async move {
         let dir = installer_dir(&app)?;
+        let tools = app.path().resolve("tools", BaseDirectory::Resource)
+            .map_err(|e| e.to_string())?;
+        let node = tools.join("node").join(if cfg!(windows) { "node.exe" } else { "bin/node" });
+        if !node.is_file() {
+            return Err("installer_missing: this development build has no packaged tools. Install a native Athenaeum release to use guided setup.".into());
+        }
         tauri::async_runtime::spawn_blocking(move || {
-            let mut command;
-            if cfg!(windows) {
-                command = Command::new("powershell.exe");
-                command
-                    .args([
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                    ])
-                    .arg(dir.join("install.ps1"));
-            } else {
-                command = Command::new("sh");
-                command.arg(dir.join("install.sh"));
+            let mut command = Command::new(node);
+            command.arg(dir.join("native.mjs"));
+            if agent.unwrap_or(false) {
+                command.arg("--agent");
             }
-            // The bundled copy is the one that runs; only the CLI and integration are downloaded.
-            command.env("ATHENAEUM_INSTALL_MJS", dir.join("install.mjs"));
             run_process(&app, &state, command, "install", true)
         })
         .await

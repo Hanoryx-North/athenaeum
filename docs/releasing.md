@@ -16,8 +16,8 @@ needs, and what to do when it fails.
    | Platform | Installer people download | Update bundle the app installs from |
    | --- | --- | --- |
    | Windows x64 | `Athenaeum_<v>_x64-setup.exe` (NSIS wizard) | the same `.exe` |
-   | macOS, Apple silicon | `Athenaeum_<v>_aarch64.dmg` | `Athenaeum_aarch64.app.tar.gz` |
-   | macOS, Intel | `Athenaeum_<v>_x64.dmg` | `Athenaeum_x64.app.tar.gz` |
+   | macOS, Apple silicon | `Athenaeum_<v>_aarch64.pkg` wizard, plus `.dmg` | `Athenaeum_aarch64.app.tar.gz` |
+   | macOS, Intel | `Athenaeum_<v>_x64.pkg` wizard, plus `.dmg` | `Athenaeum_x64.app.tar.gz` |
    | Linux x64 | `.AppImage`, `.deb` | the `.AppImage` |
    | Linux arm64 | `.AppImage`, `.deb` | the `.AppImage` |
 
@@ -40,13 +40,32 @@ no network), the button opens the download page instead of doing nothing.
 
 ### The installer and the agent integration
 
-Each release also carries `install.sh`, `install.ps1`, `install.mjs` and `athenaeum-integrations.mjs`: the
-one-line installer for coding agents and the single-file bundle it installs
-([installing.md](installing.md)). The bundle is built, by the `integrations` job, from
-`athenaeum_integrations` at the revision named in `integrations.pin.json`, next to
-`athenaeum_protocol`. Merge the repositories in that order (protocol, integrations, then this one) so the pins
-resolve. `ATHENAEUM_PROTOCOL_TOKEN` must be able to read **both** `athenaeum_protocol` and
-`athenaeum_integrations`. The release is not published unless all four files are attached.
+Every desktop package carries the architecture-matched CLI archive, a checksum-pinned private
+Node (including npm), the single-file MCP integration, and the Athenaeum Agent bundle and
+installer. `package-tools.mjs` stages them under `src-tauri/tools/` before Tauri bundles them.
+The guided setup runs Node directly, without `sh`, a PowerShell bootstrap, or a system Node.
+Base setup works offline; the optional agent setup installs its pinned Harness runtime from npm.
+
+The `integrations` job builds `athenaeum_integrations`; `agent-package` builds the MIT agent
+adapter against its pinned, unmodified upstream Harness. `package-agent.mjs` bundles the MIT
+protocol dependency into the adapter tarball so the installed package needs no sibling checkout.
+These stay separate artifacts and processes; no GPL engine code goes into either MIT adapter.
+Revisions come from `integrations.pin.json`.
+
+`ATHENAEUM_PROTOCOL_TOKEN` must read `athenaeum_protocol`, `athenaeum_integrations`, and
+`athenaeum_agent`. The platform jobs wait for both adapters and download their workflow artifacts.
+Merge protocol and adapter changes before updating the app's pins.
+
+On macOS, `package-macos.mjs` uses Apple's `pkgbuild` and `productbuild` to wrap the built
+`.app` in a native Installer wizard with welcome and completion instructions. The `.dmg`
+and updater archive remain available. The `.pkg` installs the app into `/Applications`;
+per-user CLI and agent setup happens in the app, without running installer scripts as root.
+On Windows the existing NSIS wizard carries the same setup resources. Publishing checks for
+both Mac `.pkg` architectures and the Windows setup executable as well as all CLI archives.
+
+Releases also retain `install.sh`, `install.ps1`, `install.mjs` and
+`athenaeum-integrations.mjs` for advanced or CLI-only installs. They are optional alternatives,
+not the Mac/Windows onboarding path.
 
 ### Versions
 
@@ -94,6 +113,20 @@ from `main` releases without a push.
 To try one platform rather than all five, give **only** a target triple (for example
 `aarch64-unknown-linux-gnu`). A run that publishes always builds everything.
 
+### Checking packaged setup locally
+
+The packaging smoke tests live in `athenaeum_validation`, not this repository. With the
+architecture-matched `src-tauri/tools` directory staged by `package-tools.mjs`, run:
+
+```sh
+cd ../athenaeum_validation
+ATHENAEUM_NATIVE_TOOLS=/absolute/path/to/athenaeum/src-tauri/tools python3 verify_all.py --only native-packaging
+```
+
+This verifies offline base installation and update, self-contained adapter packaging, real
+agent SDK initialization without a model call, and the Mac `.pkg` structure on macOS.
+Use the release workflow's target dry runs to verify the full Windows NSIS and Mac app bundles.
+
 ### What a release costs
 
 A full release is five builds, the Windows one taking over an hour. **In a private repository
@@ -122,7 +155,11 @@ Both are optional secrets; the workflow uses them when present and never fails w
 - **macOS** needs an Apple Developer ID (US$99/year): set `APPLE_CERTIFICATE`
   (base64 of the `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
   `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and `APPLE_TEAM_ID`. The app is then
-  signed and notarized and opens with no prompt.
+  signed and notarized. For the `.pkg`, also set `APPLE_INSTALLER_SIGNING_IDENTITY` to a
+  **Developer ID Installer** identity, plus `APPLE_INSTALLER_CERTIFICATE` (base64 of its
+  `.p12`) and `APPLE_INSTALLER_CERTIFICATE_PASSWORD`. Packaging imports this into a separate
+  temporary keychain and deletes it after signing. The package is signed
+  and, when Apple account credentials are present, notarized and stapled separately.
 - **Windows** needs a code-signing certificate. [SignPath Foundation](https://signpath.org/)
   signs open-source projects for free; adding it is a change to the build step, not yet
   made here.
@@ -140,8 +177,8 @@ Both are optional secrets; the workflow uses them when present and never fails w
 
 ## What this does not cover
 
-- **The agent.** The in-app chat does not yet drive `athenaeum_agent`; that wiring is the
-  first open item in [porting-llm-wiki.md](porting-llm-wiki.md#status). The CLI archives
-  here are what that layer's installer fetches.
+- **Agent runtime updates during app auto-update.** The app carries updated setup resources;
+  run guided setup again to apply them to the separately installed agent. The app chat uses
+  that installed runtime through the public Harness SDK.
 - **Linux package repositories.** `.deb` installs do not self-update; AppImage does.
 - **Windows on ARM.**

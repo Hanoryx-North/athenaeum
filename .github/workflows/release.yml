@@ -139,7 +139,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.label }}
-    needs: plan
+    needs: [plan, integrations, agent-package]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -202,6 +202,16 @@ jobs:
 
       - run: npm ci
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer-and-integration
+          path: packaged-integration
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-package
+          path: packaged-agent
+
       - name: Updater signing key
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -236,6 +246,7 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -243,7 +254,7 @@ jobs:
           # An unset secret arrives as an empty string, which Tauri would read as
           # "configured", so export only what is really there.
           if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_INSTALLER_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
               if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
             done
             echo "Signing with the configured Developer ID."
@@ -266,8 +277,23 @@ jobs:
             --version "$VERSION" --target "$TARGET" --updater \
             ${PUBKEY_FILE:+--pubkey-file "$PUBKEY_FILE"}
 
+      - name: Build the CLI and stage the native setup resources
+        run: |
+          cargo build --release -p athenaeum-cli --target "$TARGET"
+          node scripts/release/package-tools.mjs "$TARGET" packaged-integration/athenaeum-integrations.mjs packaged-agent
+          cp packaged-integration/LICENSE-integrations src-tauri/tools/
+
       - name: Build the installers
         run: npm run tauri -- build --target "$TARGET" --config src-tauri/tauri.release.conf.json
+
+      - name: Build the native macOS installer wizard
+        if: runner.os == 'macOS'
+        env:
+          ARCH: ${{ matrix.arch }}
+          APPLE_INSTALLER_CERTIFICATE: ${{ secrets.APPLE_INSTALLER_CERTIFICATE }}
+          APPLE_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_PASSWORD }}
+          APPLE_INSTALLER_SIGNING_IDENTITY: ${{ secrets.APPLE_INSTALLER_SIGNING_IDENTITY }}
+        run: node scripts/release/package-macos.mjs "target/$TARGET/release/bundle/macos/Athenaeum.app" "$VERSION" "$ARCH" dist-release
 
       - name: Collect the release assets and check their signatures
         env:
@@ -389,13 +415,14 @@ jobs:
           mkdir release-extra
           cp athenaeum_integrations/dist/athenaeum-integrations.mjs release-extra/
           cp athenaeum/install/install.sh athenaeum/install/install.ps1 athenaeum/install/install.mjs release-extra/
+          cp athenaeum/install/NOTICE-MIT.txt release-extra/LICENSE-integrations
+          if [ -f athenaeum_integrations/LICENSE ]; then cp athenaeum_integrations/LICENSE release-extra/LICENSE-integrations; fi
 
       - name: Attach to the draft release
         if: env.PUBLISH == 'true'
         run: gh release upload "$TAG" release-extra/* --clobber --repo "$GITHUB_REPOSITORY"
 
-      - name: Keep the files (dry run)
-        if: env.PUBLISH != 'true'
+      - name: Share the integration with native installer builds
         uses: actions/upload-artifact@v4
         with:
           name: installer-and-integration
@@ -403,9 +430,85 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  agent-package:
+    name: Package Athenaeum Agent for guided setup
+    needs: plan
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: athenaeum
+
+      - name: Read the agent revision
+        id: agent
+        working-directory: athenaeum
+        run: |
+          echo "repo=$(node -p "require('./integrations.pin.json').agent.repository")" >> "$GITHUB_OUTPUT"
+          echo "ref=$(node -p "require('./integrations.pin.json').agent.ref")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.agent.outputs.repo }}
+          ref: ${{ steps.agent.outputs.ref }}
+          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+          path: athenaeum_agent
+
+      - name: Read the upstream runtime pin
+        id: harness
+        working-directory: athenaeum_agent
+        run: |
+          echo "tag=$(node -p "require('./harness.pin.json').gitTag")" >> "$GITHUB_OUTPUT"
+          echo "pnpm=$(node -p "require('./harness.pin.json').pnpm")" >> "$GITHUB_OUTPUT"
+          echo "protocol_repo=$(node -p "require('../athenaeum/integrations.pin.json').protocol.repository")" >> "$GITHUB_OUTPUT"
+          echo "protocol_ref=$(node -p "require('../athenaeum/integrations.pin.json').protocol.ref")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ steps.harness.outputs.tag }}
+          path: deepseek-harness
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.harness.outputs.protocol_repo }}
+          ref: ${{ steps.harness.outputs.protocol_ref }}
+          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+          path: athenaeum_protocol
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ steps.harness.outputs.pnpm }}
+
+      - name: Build the unmodified upstream and the adapter
+        run: |
+          cd deepseek-harness
+          pnpm install --frozen-lockfile
+          pnpm run build:native-system
+          pnpm run build:lib
+          cd ../athenaeum_agent
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm build
+          cd ../athenaeum_protocol
+          npm ci
+          npm run build
+          cd ../athenaeum
+          node scripts/release/package-agent.mjs ../athenaeum_agent ../athenaeum_protocol ../agent-package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-package
+          path: agent-package/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish the release
-    needs: [plan, build, integrations]
+    needs: [plan, build, integrations, agent-package]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-22.04
     env:
@@ -429,6 +532,16 @@ jobs:
             exit 1
           fi
 
+      - name: Check the native installer wizards arrived
+        run: |
+          for suffix in _aarch64.pkg _x64.pkg _x64-setup.exe; do
+            n=$(gh release view "$TAG" --json assets --jq "[.assets[].name | select(endswith(\"$suffix\"))] | length")
+            if [ "$n" != "1" ]; then
+              echo "::error::Expected one native installer ending in $suffix, found $n."
+              exit 1
+            fi
+          done
+
       - name: Check the installer and the integration arrived
         run: |
           for f in install.sh install.ps1 install.mjs athenaeum-integrations.mjs; do
@@ -442,19 +555,16 @@ jobs:
             echo "## Install"
             echo
             echo "- **Windows:** run \`Athenaeum_${VERSION}_x64-setup.exe\`. It installs for your user (no administrator prompt) and sets up WebView2 if your PC lacks it."
-            echo "- **macOS:** open the \`.dmg\` for your Mac (\`aarch64\` is Apple silicon, \`x64\` is Intel) and drag Athenaeum to Applications. The first launch needs a one-time approval; see [docs/releasing.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/releasing.md#first-launch-on-macos-and-windows)."
+            echo "- **macOS:** open the \`.pkg\` wizard for your Mac (\`aarch64\` is Apple silicon, \`x64\` is Intel). A drag-and-drop \`.dmg\` is also available. The first launch needs a one-time approval; see [docs/releasing.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/releasing.md#first-launch-on-macos-and-windows)."
             echo "- **Linux:** \`chmod +x\` the \`.AppImage\` and run it, or install the \`.deb\`."
             echo
             echo "Athenaeum updates itself: when a newer release appears, the app offers **Update and restart**."
             echo
-            echo "### For your coding agents (Claude Code, Codex, Cursor)"
+            echo "### Set up your coding agent"
             echo
-            echo "Installs the \`athenaeum\` command and connects your agents to it, with no admin rights:"
+            echo "Open a project and go to **Knowledge → Library**. Guided setup installs the CLI and lets you choose Athenaeum Agent (app chat and the athenaeum-agent command), or connect your existing Codex, Claude Code or Cursor through MCP. No terminal installer command is required."
             echo
-            echo "- **macOS / Linux:** \`curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh | sh\`"
-            echo "- **Windows:** \`irm https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.ps1 | iex\`"
-            echo
-            echo "Then run \`athenaeum setup\` in a project. The \`athenaeum-cli-*\` archives and \`athenaeum-integrations.mjs\` are what that installer fetches."
+            echo "Connect Athenaeum Library if you want to sync shared, accepted wiki pages. Agent runtime setup needs internet access; CLI and MCP setup use packaged resources."
             echo
             echo "## Changes"
             echo

@@ -102,7 +102,7 @@ export function isValidUpdaterPubkey(value) {
  * tauri.conf.json stays buildable by anyone with no PDFium download and no
  * signing key; everything that only a release needs lives here.
  */
-export function buildReleaseConfig({ version, target, updater, pubkey }) {
+export function buildReleaseConfig({ version, target, updater, pubkey, tools = false }) {
   const pdfium = PDFIUM_BY_TARGET[target]
   if (!pdfium) throw new Error(`No PDFium build is pinned for target "${target}"`)
 
@@ -113,6 +113,7 @@ export function buildReleaseConfig({ version, target, updater, pubkey }) {
   const bundle = {
     targets: target.includes("windows") ? ["nsis"] : target.includes("apple") ? ["app", "dmg"] : ["appimage", "deb"],
   }
+  if (tools) bundle.resources = { "tools/": "tools/" }
   if (updater) bundle.createUpdaterArtifacts = true
 
   const bundled = `pdfium/${pdfium.file}`
@@ -120,7 +121,7 @@ export function buildReleaseConfig({ version, target, updater, pubkey }) {
     // Lands in Contents/Frameworks, where the app looks first on macOS.
     bundle.macOS = { frameworks: [bundled] }
   } else {
-    bundle.resources = { [bundled]: bundled }
+    bundle.resources = { ...bundle.resources, [bundled]: bundled }
   }
 
   const config = { version, bundle }

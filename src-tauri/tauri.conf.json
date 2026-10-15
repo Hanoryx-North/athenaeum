@@ -39,8 +39,7 @@
     "targets": "all",
     "resources": {
       "resources/harness-driver.mjs": "harness-driver.mjs",
-      "../install/install.sh": "install/install.sh",
-      "../install/install.ps1": "install/install.ps1",
+      "../install/native.mjs": "install/native.mjs",
       "../install/install.mjs": "install/install.mjs"
     },
     "category": "DeveloperTool",

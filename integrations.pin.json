@@ -1,5 +1,15 @@
 {
-  "comment": "The agent integration shipped with each Athenaeum release is built from these revisions. Merge order: athenaeum_protocol, athenaeum_integrations, then athenaeum.",
-  "integrations": { "repository": "Hanoryx-North/athenaeum_integrations", "ref": "main" },
-  "protocol": { "repository": "Hanoryx-North/athenaeum_protocol", "ref": "main" }
+  "comment": "Packaged adapters are built in their own repositories and shipped as separate artifacts. Merge order: protocol, integrations/agent, then athenaeum.",
+  "agent": {
+    "repository": "Hanoryx-North/athenaeum_agent",
+    "ref": "49a91c9f98384aec08744efab6714a1859a919a5"
+  },
+  "integrations": {
+    "repository": "Hanoryx-North/athenaeum_integrations",
+    "ref": "d1fc09d09a1328d41a23eaac1458700e54030c3e"
+  },
+  "protocol": {
+    "repository": "Hanoryx-North/athenaeum_protocol",
+    "ref": "ec8f211b346f7697c35714f0caa4a72dd03e8a18"
+  }
 }

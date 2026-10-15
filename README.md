@@ -30,27 +30,31 @@ Download the installer for your system from the
 
 - **Windows:** `Athenaeum_<version>_x64-setup.exe`. A normal setup wizard; it installs for your
   user (no administrator prompt) and installs WebView2 for you if your PC lacks it.
-- **macOS:** the `.dmg` (`aarch64` for Apple silicon, `x64` for Intel). Drag Athenaeum to
-  Applications.
+- **macOS:** the `.pkg` setup wizard (`aarch64` for Apple silicon, `x64` for Intel).
+  A drag-and-drop `.dmg` is also available.
 - **Linux:** the `.AppImage` (make it executable and run it) or the `.deb`.
 
 Windows and macOS ask for a one-time approval on first launch because the installers are not yet
 signed with a paid certificate: [what to click](docs/releasing.md#first-launch-on-macos-and-windows).
 
-### For your coding agents (Claude Code, Codex, Cursor)
+### Choose your coding agent
 
-One command installs the `athenaeum` command and connects your agents to your project's wiki, with no
-administrator prompt:
+Open a project, go to **Knowledge → Library**, and use the guided setup:
 
-```sh
-curl -fsSL https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.sh | sh      # macOS, Linux
-irm https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.ps1 | iex            # Windows (PowerShell)
-cd your-project && athenaeum setup                                                                    # per project; add --library to back it up online
-```
+- **Use your existing agent:** connect installed Codex, Claude Code or Cursor through MCP.
+  Keep coding in your usual app; it can recall knowledge and propose wiki pages.
+- **Use Athenaeum Agent:** install its runtime for the app chat and the
+  `athenaeum-agent` CLI. The runtime is DeepSeek Harness, with Athenaeum's wiki bundle.
 
-Then use Claude Code or Codex as usual. They recall what the wiki knows, and propose what they learn for
-you to review in the app. [docs/installing.md](docs/installing.md) has the whole workflow, what it
-changes in your agents' settings, and how to check it (`athenaeum doctor`) or remove it.
+Both routes use the same local wiki and `athenaeum` CLI. You review proposals before
+accepting them as Markdown pages. Optionally connect **Athenaeum Library** to sync
+shared, accepted wiki text online. Claude Code supports optional end-of-turn sync;
+Codex, Cursor and Athenaeum Agent use explicit sync.
+
+Release installers carry the CLI, private Node and MCP integration. No terminal install
+command or preinstalled developer tools are needed. Selecting Athenaeum Agent downloads
+its pinned runtime and needs a model API key for coding. See [docs/installing.md](docs/installing.md)
+for the workflow, platform limitations and advanced command-line installation.
 
 Athenaeum then **updates itself**. A new release is built automatically whenever `main` changes;
 the app notices, offers **Update and restart**, and installs it in place. How that works, and the
@@ -103,7 +107,8 @@ providers, streaming, tools, permissions and sessions, with
 [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the bundle
 that plugs this library into it. Athenaeum exposes a versioned, storage-independent
 Wiki contract for that, and the agent reaches the library through nothing else.
-Install the runtime and its Athenaeum profile with the [`athenaeum_agent` installer](https://github.com/Hanoryx-North/athenaeum_agent#installing).
+Install the runtime and its Athenaeum profile through guided setup in **Knowledge → Library**.
+The app delegates installation to the installer packaged by `athenaeum_agent`.
 The desktop chat launches that profile through
 the public Harness SDK, uses the currently open project as its workspace, and shows session and
 tool events while a turn runs. Wiki curation tools leave proposals in the local review queue;

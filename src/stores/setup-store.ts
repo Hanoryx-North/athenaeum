@@ -39,8 +39,8 @@ interface SetupState {
   deviceCode: DeviceCode | null
   error: string | null
   check: (workspace: string) => Promise<void>
-  install: (workspace: string | null) => Promise<void>
-  setup: (workspace: string, job: Extract<CliJob, { job: "setup" }>) => Promise<void>
+  install: (workspace: string | null, agent?: boolean) => Promise<boolean>
+  setup: (workspace: string, job: Extract<CliJob, { job: "setup" }>) => Promise<boolean>
   sync: (workspace: string) => Promise<void>
   syncStatus: (workspace: string) => Promise<void>
   cancel: () => Promise<void>
@@ -107,29 +107,35 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     }
   },
 
-  install: async (workspace) => {
-    if (get().busy) return
+  install: async (workspace, agent = false) => {
+    if (get().busy) return false
     set({ busy: "install" })
+    let ok = false
     try {
-      const result = await withProgress(set, get, installTools)
+      const result = await withProgress(set, get, () => installTools(agent))
+      ok = result.exitCode === 0
       if (result.exitCode !== 0) {
         set({ error: result.stderr[result.stderr.length - 1] ?? "The installer did not finish." })
       }
       set({ cli: await cliStatus() })
     } catch (cause) {
+      ok = false
       set({ error: message(cause) })
     } finally {
       set({ busy: null })
     }
-    if (workspace) await get().check(workspace)
+    if (ok && workspace) await get().check(workspace)
+    return ok
   },
 
   setup: async (workspace, job) => {
-    if (get().busy) return
+    if (get().busy) return false
     set({ busy: "setup" })
+    let ok = false
     try {
       const result = await withProgress(set, get, () => runCli(workspace, job))
       const report = parseSetup(result.output)
+      ok = result.exitCode === 0 && report?.ok === true
       set({ lastSetup: report })
       if (!report) set({ error: result.stderr[result.stderr.length - 1] ?? "Setup gave no report." })
     } catch (cause) {
@@ -137,7 +143,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     } finally {
       set({ busy: null })
     }
-    await get().check(workspace)
+    if (ok) await get().check(workspace)
+    return ok
   },
 
   syncStatus: async (workspace) => {

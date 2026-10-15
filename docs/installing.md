@@ -12,29 +12,36 @@ install once ──▶ athenaeum setup (per project) ──▶ use your agent as
                        you accept proposals in the app ──▶ pages ──▶ (optionally) the Library
 ```
 
-## 1. Install
+## 1. Install with the native wizard
 
-**macOS and Linux**
+Download the package for your system from the
+[latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest):
 
-```sh
-curl -fsSL https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.sh | sh
-```
+- **Windows:** open `Athenaeum_<version>_x64-setup.exe`, the native NSIS setup wizard.
+- **macOS:** open `Athenaeum_<version>_aarch64.pkg` (Apple silicon) or
+  `Athenaeum_<version>_x64.pkg` (Intel) in Apple's Installer. It installs the app in
+  Applications; macOS may request administrator authorization. A `.dmg` is also available.
+- **Linux:** install the `.deb` or run the `.AppImage`.
 
-**Windows** (PowerShell, no administrator prompt)
+Open Athenaeum, open a project, then go to **Knowledge → Library**. Guided setup lets you
+choose **Use my existing agent** (Codex, Claude Code or Cursor) or **Use Athenaeum Agent**
+(the app chat and `athenaeum-agent` command). Both routes build the same local wiki.
+You can connect Athenaeum Library during setup or leave that until later.
 
-```powershell
-irm https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.ps1 | iex
-```
+The package contains the matching `athenaeum` CLI, a private checksum-verified Node runtime,
+and the MCP integration. Base setup copies these resources locally and works offline.
+You do not need Node, Rust, a terminal installer command, or a downloaded shell script.
+The app invokes its packaged Node entry point directly.
 
-Open a new terminal afterwards. This installs the command line tool and the agent integration, and
-connects whichever of Claude Code, Codex and Cursor you have. It does not need Node, Rust or anything
-else installed first: it brings its own private Node and checks its checksum.
+Selecting Athenaeum Agent additionally runs `athenaeum_agent`'s own packaged installer to
+install its pinned DeepSeek Harness runtime from npm and mount the packaged wiki bundle.
+This step needs internet access. Its `athenaeum-agent` launcher starts the unmodified
+Harness with the `athenaeum` profile; coding needs a model API key (`DEEPSEEK_API_KEY`).
+The app's chat uses this same installed profile through the Harness SDK.
 
-**Prefer the app?** Download the installer for your system from the
-[latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest) (see the
-[README](../README.md#install)). Open a project, go to **Knowledge → Library**, and press
-**Install the command-line tool**: that runs the same installer, so the app and the terminal
-cannot drift apart.
+Open a new terminal after setup. On macOS, setup adds a marked PATH entry to the login
+profile for zsh (or bash when it is the user's configured shell). Windows uses the user PATH.
+Setup shows progress and errors, can be cancelled, and is safe to retry.
 
 ### What it puts where
 
@@ -52,7 +59,7 @@ The directory is `%LOCALAPPDATA%\Athenaeum` on Windows, `~/Library/Application S
 and `~/.local/share/athenaeum` on Linux. On macOS and Linux the three commands are linked into
 `~/.local/bin`; on Windows `bin` is added to your user `PATH`.
 
-Options (after `sh -s --` for the shell installer; as `ATHENAEUM_INSTALL_ARGS` on Windows):
+Advanced script options (after `sh -s --` for the shell installer; as `ATHENAEUM_INSTALL_ARGS` on Windows):
 `--prefix DIR`, `--agents claude,codex,cursor`, `--capture off|instruct|nudge`, `--auto-sync`,
 `--no-agents`, `--no-link`, and `--cli PATH|URL` / `--integrations PATH|URL` to install builds you
 already have.
@@ -67,7 +74,7 @@ athenaeum setup
 `setup` is safe to repeat. It creates the project's knowledge base and its `athenaeum.json` identity,
 indexes the project's files and symbols (no model is involved), adds `.athenaeum/` to `.gitignore` in a
 Git project, and re-checks that your agents are connected. Add `--library` to back the wiki up online
-(below). In the app, opening a project and pressing **Connect my coding agents** does the same.
+(below). The guided setup in the app does the same project setup after installing the chosen tools.
 
 ## 3. Use your coding agent as usual
 
@@ -124,8 +131,9 @@ thing to do about any that is broken. `athenaeum setup` repairs what `doctor` re
 
 ## Updating
 
-Run the installer again. It replaces the command and the integration and re-points your agents at them,
-and it leaves your projects and credentials alone. The desktop app updates itself.
+The desktop app updates itself, including its packaged setup resources. Run **Configure coding agents**
+in Knowledge → Library again to update the installed CLI and integrations. Choose Athenaeum Agent to
+also update its installed bundle and runtime. Project wikis and credentials are preserved.
 
 ## Removing
 
@@ -153,14 +161,32 @@ valid JSON, or a hand-written `[mcp_servers.athenaeum]` in Codex's config, is re
 ## Requirements
 
 - Windows 10 or later, macOS 11 or later, or Linux (glibc), x64 or arm64.
-- Access to github.com and nodejs.org while installing.
+- Native base setup needs no network. Athenaeum Agent runtime setup needs the npm registry;
+  connecting or syncing Athenaeum Library needs its server. Advanced script installation also needs GitHub and nodejs.org.
 - **While the `athenaeum` repository is private** the release files cannot be downloaded without signing
   in, so the one-liners return a 404. Download the release assets (`athenaeum-cli-<target>.tar.gz` or
   `.zip`, and `athenaeum-integrations.mjs`) and install them with
   `node install.mjs --cli <archive> --integrations <file>`.
 
+## Advanced command-line installation
+
+The existing `install.sh`, `install.ps1` and `install.mjs` remain available for Linux,
+automation and CLI-only installs. They are optional alternatives to the native wizards:
+
+```sh
+curl -fsSL https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.sh | sh
+```
+
+```powershell
+irm https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.ps1 | iex
+```
+
+These install the engine CLI and external-agent integration. To install Athenaeum Agent
+without the desktop, use that repository's own installer. No agent runtime is implemented here.
+
 ## Not covered
 
 - **Codex and Cursor hooks.** Their MCP tools work; automatic recall and end-of-turn upkeep are Claude Code only.
-- **Code signing.** The scripts are fetched over HTTPS from a GitHub release and the private Node is checksum-pinned,
-  but the scripts themselves are not signed.
+- **Platform signing credentials.** Updater signatures are separate from OS code signing.
+  Apple app/installer signing and notarization require release credentials; Windows certificate
+  signing is not configured. See [releasing.md](releasing.md).

@@ -13,6 +13,7 @@ export interface CliStatus {
   found: boolean
   path: string | null
   version: string | null
+  agentInstalled: boolean
 }
 
 export type CliJob =
@@ -62,7 +63,7 @@ export function runCli(workspace: string, job: CliJob): Promise<JobResult> {
     workspace,
     // Rust's serde names are snake_case; the closed enum is the contract.
     job: job.job === "setup"
-      ? { job: "setup", library: job.library, auto_sync: job.autoSync ?? false, agents: job.agents ?? [], no_agents: job.noAgents ?? false }
+      ? { job: "setup", library: job.library, auto_sync: job.autoSync, agents: job.agents ?? [], no_agents: job.noAgents ?? false }
       : job,
   })
 }
@@ -71,8 +72,8 @@ export function cancelCli(): Promise<boolean> {
   return invoke<boolean>("cli_cancel")
 }
 
-export function installTools(): Promise<JobResult> {
-  return invoke<JobResult>("cli_install_tools")
+export function installTools(agent = false): Promise<JobResult> {
+  return invoke<JobResult>("cli_install_tools", { agent })
 }
 
 export function onCliProgress(handler: (progress: CliProgress) => void): Promise<UnlistenFn> {

@@ -64,6 +64,22 @@ Markdown on disk, and answers every client through one versioned contract.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Product entry points and installation
+
+People can code with Athenaeum Agent (desktop chat or `athenaeum-agent` CLI), or keep
+using Codex, Claude Code or Cursor with the local MCP integration. Both routes recall from
+and propose into the same local wiki through the bridge. A person reviews proposals;
+accepted Markdown pages can then sync to Athenaeum Library. MCP alone does not guarantee
+that an external agent records every turn; hooks and documented client instructions belong
+to `athenaeum_integrations`.
+
+macOS and Windows must have native installer wizards and packaged dependencies. A shell
+or PowerShell one-liner is an optional advanced path, never the required onboarding flow.
+The desktop guides agent selection, project setup and optional Library connection. It may
+orchestrate `athenaeum_agent`'s installer for the agent CLI/profile, while the runtime and
+agent implementation stay in their owning repositories. Base CLI/MCP setup works offline;
+agent-runtime installation and Library connection may require internet access.
+
 ## Athenaeum owns
 
 - The desktop shell and every pixel of the app's UI, including the agent chat client.

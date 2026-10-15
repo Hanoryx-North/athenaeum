@@ -149,7 +149,7 @@ const commands = {
 
     await downloadPdfium(target)
 
-    const config = buildReleaseConfig({ version, target, updater, pubkey })
+    const config = buildReleaseConfig({ version, target, updater, pubkey, tools: true })
     writeFileSync(path("src-tauri", "tauri.release.conf.json"), JSON.stringify(config, null, 2) + "\n")
     console.log(`Prepared ${version} for ${target} (updater artifacts: ${updater})`)
   },

@@ -11,6 +11,7 @@ import { openUrl } from "@tauri-apps/plugin-opener"
 import { Button } from "@/components/ui/button"
 import { useSetupStore } from "@/stores/setup-store"
 import { useWikiStore } from "@/stores/wiki-store"
+import { useKnowledgeViewStore } from "@/stores/knowledge-view-store"
 import { normalizePath } from "@/lib/path-utils"
 import { cn } from "@/lib/utils"
 
@@ -56,6 +57,9 @@ export function SetupBanner() {
           : "Your coding agents aren't connected to this wiki yet."}{" "}
         Finish in the <span className="font-medium">Library</span> tab.
       </span>
+      <Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => useKnowledgeViewStore.getState().setTab("library")}>
+        Finish setup
+      </Button>
       <button
         type="button"
         className="rounded p-0.5 hover:bg-muted"
@@ -79,7 +83,21 @@ export function SetupCard() {
   const workspace = useWorkspace()
   const { cli, doctor, busy, progress, deviceCode, error, lastSetup, syncPosition, syncMessage } = useSetupStore()
   const { check, install, setup, sync, syncStatus, cancel } = useSetupStore.getState()
-  const { cliMissing, agentsPending, libraryLinked } = usePending()
+  const { agentsPending, libraryLinked } = usePending()
+  const [route, setRoute] = useState<"external" | "athenaeum">("external")
+  const [connectLibrary, setConnectLibrary] = useState(false)
+  const [autoSync, setAutoSync] = useState(false)
+  const [configuring, setConfiguring] = useState(true)
+  const [step, setStep] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      setConfiguring(!localStorage.getItem(`athenaeum.setup.complete:${workspace}`))
+    } catch {
+      setConfiguring(true)
+    }
+    setStep(null)
+  }, [workspace])
 
   useEffect(() => {
     if (workspace && !useSetupStore.getState().cli) void check(workspace)
@@ -89,14 +107,37 @@ export function SetupCard() {
   }, [workspace, libraryLinked, syncStatus])
 
   if (!workspace) return null
-  const working = busy !== null
+  const working = busy !== null || step !== null
+
+  const configure = async () => {
+    setStep("Installing your tools…")
+    try {
+      if (!await install(null, route === "athenaeum")) return
+      setStep("Setting up this project's wiki…")
+      const ok = await setup(workspace, {
+        job: "setup", noAgents: route === "athenaeum",
+        ...(connectLibrary && !libraryLinked ? { library: "" } : {}),
+        ...(route === "external" ? { autoSync: autoSync && (connectLibrary || libraryLinked) } : {}),
+      })
+      if (ok && route === "external" && useSetupStore.getState().lastSetup?.steps.some((s) => s.id === "agents" && s.status === "skipped")) {
+        useSetupStore.setState({ error: "No supported coding agent was found. Install Codex, Claude Code or Cursor, or choose Athenaeum Agent, then retry setup." })
+        return
+      }
+      if (ok) {
+        setConfiguring(false)
+        try { localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1") } catch { /* setup still succeeded */ }
+      }
+    } finally {
+      setStep(null)
+    }
+  }
 
   return (
     <section className="rounded-md border p-3 text-sm" aria-label="Set up Athenaeum">
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-2 font-medium">
           <PlugZap className="h-4 w-4" aria-hidden />
-          Coding agents and Library
+          Set up your wiki
         </h3>
         <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={working} onClick={() => void check(workspace)}>
           {busy === "check" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <RefreshCw className="mr-1 h-3 w-3" aria-hidden />}
@@ -106,18 +147,58 @@ export function SetupCard() {
 
       {cli === null && busy === "check" && <p className="mt-2 text-xs text-muted-foreground">Looking for the command-line tool…</p>}
 
-      {cliMissing && (
-        <div className="mt-2 text-xs">
-          <p className="text-muted-foreground">
-            The command-line tool is what lets Claude Code, Codex and Cursor use this wiki, and what syncs it with the Library. It
-            installs for your user only, with no administrator prompt.
-          </p>
-          <Button size="sm" className="mt-2 h-7 text-xs" disabled={working} onClick={() => void install(workspace)}>
-            {busy === "install" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <Download className="mr-1 h-3 w-3" aria-hidden />}
-            Install the command-line tool
-          </Button>
+      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+        Your coding agent recalls project knowledge and proposes what it learns. Review proposals to build your local Markdown wiki,
+        then share accepted pages with Athenaeum Library.
+      </p>
+
+      {configuring ? (
+        <div className="mt-4 space-y-4">
+          <fieldset disabled={working} className="space-y-2 text-xs">
+            <legend className="mb-2 font-medium">Choose how you code</legend>
+            <label className="flex cursor-pointer items-start gap-2 rounded-md p-2 hover:bg-muted has-[:checked]:bg-muted">
+              <input className="mt-0.5 accent-primary" type="radio" name="coding-agent" checked={route === "external"} onChange={() => setRoute("external")} />
+              <span><span className="block font-medium">Use my existing agent</span>
+                <span className="mt-1 block leading-relaxed text-muted-foreground">Connect installed Codex, Claude Code or Cursor through MCP. Keep coding in your usual app.</span></span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2 rounded-md p-2 hover:bg-muted has-[:checked]:bg-muted">
+              <input className="mt-0.5 accent-primary" type="radio" name="coding-agent" checked={route === "athenaeum"} onChange={() => setRoute("athenaeum")} />
+              <span><span className="block font-medium">Use Athenaeum Agent</span>
+                <span className="mt-1 block leading-relaxed text-muted-foreground">Install the coding agent for the app chat and the <code>athenaeum-agent</code> command. Setup downloads its runtime; coding needs a model API key.</span></span>
+            </label>
+          </fieldset>
+          <fieldset disabled={working} className="space-y-2 border-t pt-3 text-xs">
+            <legend className="sr-only">Library connection</legend>
+            {!libraryLinked && (
+              <label className="flex cursor-pointer items-start gap-2">
+                <input className="mt-0.5 accent-primary" type="checkbox" checked={connectLibrary} onChange={(event) => setConnectLibrary(event.target.checked)} />
+                <span>Connect Athenaeum Library<span className="mt-1 block text-muted-foreground">Sign in through your browser and link a private wiki repository. You can also do this later.</span></span>
+              </label>
+            )}
+            {route === "external" && (connectLibrary || libraryLinked) && (
+              <label className="flex cursor-pointer items-start gap-2">
+                <input className="mt-0.5 accent-primary" type="checkbox" checked={autoSync} onChange={(event) => setAutoSync(event.target.checked)} />
+                <span>Sync shared, accepted pages after Claude Code turns<span className="mt-1 block text-muted-foreground">Optional. Codex and Cursor use the Sync button. Sync stops at conflicts.</span></span>
+              </label>
+            )}
+          </fieldset>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" disabled={working || cli === null} onClick={() => void configure()}>
+              {working ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <Download className="mr-1 h-3 w-3" aria-hidden />}
+              {step ?? "Set up this project"}
+            </Button>
+            {!working && <Button variant="ghost" size="sm" onClick={() => setConfiguring(false)}>Later</Button>}
+            {working && busy !== "check" && <Button variant="ghost" size="sm" onClick={() => void cancel()}>Cancel setup</Button>}
+          </div>
+          {route === "external" && <p className="text-xs text-muted-foreground">Claude Code can recall wiki context through hooks. Codex and Cursor decide when to call the wiki tools.</p>}
+        </div>
+      ) : (
+        <div className="mt-3 text-xs">
+          {lastSetup?.ok && <p role="status">Your wiki is ready. {route === "athenaeum" ? "Use the app chat or run athenaeum-agent in this project." : "Reopen your coding agent in this project, then review its wiki proposals in Athenaeum."}</p>}
+          <Button variant="outline" size="sm" className="mt-2" disabled={working} onClick={() => setConfiguring(true)}>Configure coding agents</Button>
         </div>
       )}
+      {cli?.agentInstalled && <p className="mt-2 text-xs text-muted-foreground">Athenaeum Agent is installed for app chat and the terminal.</p>}
 
       {doctor && (
         <ul className="mt-2 flex flex-col gap-1 text-xs">
@@ -137,7 +218,7 @@ export function SetupCard() {
         </ul>
       )}
 
-      {cli?.found && (
+      {cli?.found && !configuring && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {agentsPending && (
             <Button size="sm" className="h-7 text-xs" disabled={working} onClick={() => void setup(workspace, { job: "setup" })}>
