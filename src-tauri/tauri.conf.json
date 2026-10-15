@@ -38,11 +38,14 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "resources/harness-driver.mjs": "harness-driver.mjs"
+      "resources/harness-driver.mjs": "harness-driver.mjs",
+      "../install/install.sh": "install/install.sh",
+      "../install/install.ps1": "install/install.ps1",
+      "../install/install.mjs": "install/install.mjs"
     },
     "category": "DeveloperTool",
     "shortDescription": "A local knowledge graph for a codebase.",
-    "longDescription": "Athenaeum keeps a persistent, navigable network of project knowledge — decisions, gotchas, symbols, evidence — so a coding agent stops rediscovering the same things every session.",
+    "longDescription": "Athenaeum keeps a persistent, navigable network of project knowledge \u2014 decisions, gotchas, symbols, evidence \u2014 so a coding agent stops rediscovering the same things every session.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

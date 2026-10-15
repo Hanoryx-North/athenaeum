@@ -516,16 +516,72 @@ pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
     Ok(Outcome::Ok)
 }
 
+/// Link `project` to a Library repository: an existing one (`remote`), or a new one (`create`),
+/// private unless `public`. The repository's identity file supplies the id of a new one, so
+/// creating twice from the same project cannot make two hosted repositories.
+pub fn link_repository(
+    project: &Path,
+    server: &str,
+    remote: Option<&str>,
+    create: Option<&str>,
+    public: bool,
+    description: Option<&str>,
+) -> Result<(RemoteRepository, SyncState)> {
+    let client = client_for(server)?;
+    let repository = match (remote, create) {
+        (Some(remote), None) => client.resolve(remote)?,
+        (None, Some(name)) => {
+            let (manifest, _) = RepositoryManifest::read_or_init(project, &default_name(project))?;
+            client.create_repository(&CreateRepository {
+                id: Some(manifest.repository_id),
+                name: name.to_string(),
+                visibility: if public { "public" } else { "private" }.to_string(),
+                description: description.map(str::to_string),
+            })?
+        }
+        _ => {
+            return Err(portable_error(
+                "invalid_request",
+                "choose --remote <owner/name|id> to link an existing repository, or --create <name> to make one",
+            ))
+        }
+    };
+    let linked = sync::link(project, &client.server(), &repository)?;
+    Ok((repository, linked))
+}
+
+/// Who `server` knows this machine as: the stored credential if it still works, otherwise a fresh
+/// browser sign-in. The flag says whether a sign-in was needed.
+pub fn ensure_signed_in(server: &str) -> Result<(String, String, bool)> {
+    let client = LibraryClient::for_server(server)?;
+    let server = client.server();
+    if let Ok(who) = client.whoami() {
+        return Ok((server, who.username, false));
+    }
+    let fresh = LibraryClient::new(&server, None)?;
+    let (token, username) = device_login(&fresh)?;
+    credentials::store(&server, &token, Some(&username))?;
+    Ok((server, username, true))
+}
+
 fn device_login(client: &LibraryClient) -> Result<(String, String)> {
     let started = client.start_device_flow()?;
     let uri = started
         .verification_uri_complete
         .clone()
         .unwrap_or_else(|| started.verification_uri.clone());
-    eprintln!("To connect, open this address in a browser where you are signed in to the Library:");
-    eprintln!("\n    {uri}\n");
-    eprintln!("and confirm the code  {}", started.user_code);
-    eprintln!("Waiting for approval (Ctrl-C to cancel)…");
+    if std::env::var("ATHENAEUM_PROGRESS").is_ok_and(|mode| mode == "json") {
+        // A program driving this command (the desktop app) shows the code itself.
+        eprintln!(
+            "{}",
+            serde_json::json!({ "event": "device_code", "url": uri, "code": started.user_code, "expiresIn": started.expires_in })
+        );
+    } else {
+        eprintln!("To connect, open this address in a browser where you are signed in to the Library:");
+        eprintln!("\n    {uri}\n");
+        eprintln!("and confirm the code  {}", started.user_code);
+        eprintln!("Waiting for approval (Ctrl-C to cancel)…");
+    }
     let deadline = Instant::now() + Duration::from_secs(started.expires_in);
     let mut interval = Duration::from_secs(started.interval.max(1));
     while Instant::now() < deadline {
@@ -587,26 +643,14 @@ pub fn sync(
     match command {
         Some(SyncCommand::Link { server, remote, create, public, description }) => {
             let server = server_arg(server.as_deref(), state.as_ref())?;
-            let client = client_for(&server)?;
-            let repository = match (remote, create) {
-                (Some(remote), None) => client.resolve(remote)?,
-                (None, Some(name)) => {
-                    let (manifest, _) = RepositoryManifest::read_or_init(&project, &default_name(&project))?;
-                    client.create_repository(&CreateRepository {
-                        id: Some(manifest.repository_id),
-                        name: name.clone(),
-                        visibility: if *public { "public" } else { "private" }.to_string(),
-                        description: description.clone(),
-                    })?
-                }
-                _ => {
-                    return Err(portable_error(
-                        "invalid_request",
-                        "choose --remote <owner/name|id> to link an existing repository, or --create <name> to make one",
-                    ))
-                }
-            };
-            let linked = sync::link(&project, &client.server(), &repository)?;
+            let (repository, linked) = link_repository(
+                &project,
+                &server,
+                remote.as_deref(),
+                create.as_deref(),
+                *public,
+                description.as_deref(),
+            )?;
             emit(json, &linked, || {
                 println!("linked to {} ({}) on {}", repository.name, repository.id, linked.server);
                 Ok(())

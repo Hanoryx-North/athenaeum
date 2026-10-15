@@ -75,6 +75,9 @@ Markdown on disk, and answers every client through one versioned contract.
   proposal lifecycle (propose → review → accept into Markdown), and the derived SQLite
   index. It is rebuildable from the vault with `athenaeum index-vault`.
 - The **auto wiki builder**: ingest, analysis, page generation, lint, review, deep research.
+- The **installer** (`install/`) and `athenaeum setup` / `athenaeum doctor`: one install that puts the CLI
+  and the agent integration on a machine and checks the wiring. They *orchestrate*; the agents' own
+  configuration files are written by `athenaeum_integrations`, which `setup` runs.
 - The `athenaeum` CLI, the **bridge** (`athenaeum bridge`, and the same code in-process for
   the desktop) and the **sync client** (`athenaeum library …`, `athenaeum sync …`).
 - Repository indexing: files, symbols, local imports, Git history. Deterministic, no model.
@@ -129,7 +132,10 @@ Consequences worth stating outright:
 6. **The cloud is text only.** Sync sends explicitly shared wiki Markdown and the metadata
    needed for repository identity and revision history. It never sends raw sources,
    code repositories, SQLite databases, embeddings, indexes, agent sessions, logs,
-   credentials or other local state, and it never runs in the background. Sync refuses
+   credentials or other local state, and it never runs as a background process. Sync happens
+   when a person asks for it: `athenaeum sync`, the app's sync button, or — only if they chose
+   `--auto-sync` when connecting their agents — in the foreground at the end of a turn in their own
+   agent session, at most once a minute, only for a linked repository that is out of step. Sync refuses
    unsafe paths and non-wiki local state, checks content hashes, detects a stale head and
    conflicting edits, and never overwrites local work silently. Local use needs no network.
 7. **GPL boundary.** Athenaeum is GPL-3.0; the other repositories are MIT. Cross the boundary
@@ -159,6 +165,7 @@ Consequences worth stating outright:
 | `docs/porting-llm-wiki.md` | The upstream port: what to copy, adapt, and refuse. Current. |
 | `docs/agent-integration.md` | The bridge contract, Athenaeum's half. Current. |
 | `docs/releasing.md` | How a push to `main` becomes installers and an auto-update. Current. |
+| `docs/installing.md` | The one install, `athenaeum setup`, what connecting agents changes, and how to remove it. Current. |
 | `docs/portable-format.md` | The portable repository format and the Library sync protocol. Current; the status banner in it says exactly what is built. |
 | `docs/vision/build-plan.md` | **Cross-repo product vision. NOT this repository's backlog.** |
 

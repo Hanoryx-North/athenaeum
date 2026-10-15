@@ -16,6 +16,7 @@ mod library;
 mod portable_cmd;
 mod product_cmd;
 mod render;
+mod setup_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -56,6 +57,18 @@ struct Cli {
 enum Command {
     /// Create `.athenaeum/` in the project directory.
     Init,
+    /// Set up Athenaeum for this project and connect your coding agents. Safe to repeat.
+    ///
+    /// Creates the knowledge base and the repository's identity, indexes the project, optionally
+    /// connects the hosted Library (`--library`), and wires Claude Code, Codex and Cursor to the
+    /// knowledge base so they recall it and propose what they learn.
+    Setup(setup_cmd::SetupArgs),
+    /// Check every link: the engine, this project, the Library and your coding agents.
+    Doctor {
+        /// Where athenaeum-integrations is (a launcher, or its `.mjs` bundle).
+        #[arg(long, value_name = "PATH")]
+        integrations: Option<PathBuf>,
+    },
     /// Show what the knowledge base contains.
     Stats,
     /// Add a node.
@@ -601,6 +614,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
     // These work on a directory that has no workspace yet, or create the one they work in.
     match &cli.command {
+        Command::Setup(args) => return setup_cmd::setup(cli.json, &cwd, cli.project.is_some(), args),
+        Command::Doctor { integrations } => return setup_cmd::doctor(cli.json, &cwd, integrations.as_deref()),
         Command::Repo { command: RepoCommand::Init { name } } => {
             return portable_cmd::repo_init(cli.json, &cwd, name.as_deref());
         }
@@ -978,7 +993,12 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
         Command::Sources { limit } => return product_cmd::sources(cli.json, &store, *limit),
 
-        Command::Repo { .. } | Command::Import { .. } | Command::Library { .. } | Command::Sync { .. } => {
+        Command::Repo { .. }
+        | Command::Import { .. }
+        | Command::Library { .. }
+        | Command::Sync { .. }
+        | Command::Setup(_)
+        | Command::Doctor { .. } => {
             unreachable!("handled before the workspace is opened")
         }
 

@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useEngineStore } from "@/stores/engine-store"
+import { SetupCard } from "@/components/setup/setup-card"
 import { formatTimestamp } from "@/lib/engine-present"
 import { cn } from "@/lib/utils"
 
@@ -86,7 +87,7 @@ export function LibraryPanel() {
         <div>
           <h2 className="text-sm font-semibold">Library</h2>
           <p className="text-xs text-muted-foreground">
-            The hosted store for accepted wiki text. This window never contacts it.
+            The hosted store for accepted wiki text. This window never contacts it; the command-line tool does, when you ask.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -106,6 +107,8 @@ export function LibraryPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex max-w-2xl flex-col gap-4">
+          <SetupCard />
+
           {libraryState.kind === "loading" && (
             <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -143,8 +146,9 @@ export function LibraryPanel() {
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 This project keeps everything locally: the Markdown vault is the source of truth,
-                and there is nothing to be offline from. If you want this wiki published, the CLI
-                links it — the desktop cannot, because the Library client lives there.
+                and there is nothing to be offline from. To publish it, use "Connect to the
+                Library" above — it runs the command-line tool, which holds the Library client and
+                your credentials. Or do it yourself:
               </p>
               <CommandLine command="athenaeum library login --server https://your-library.example" />
               <CommandLine command="athenaeum sync link --create my-wiki" />

@@ -328,9 +328,84 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The agent integration (MCP server, hooks, connect) is MIT and lives in its own repository.
+  # It ships inside this release as one file, so installing Athenaeum is installing one thing.
+  integrations:
+    name: Build the agent integration
+    needs: plan
+    runs-on: ubuntu-22.04
+    env:
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: athenaeum
+
+      - name: Read the pinned revisions
+        id: pin
+        working-directory: athenaeum
+        run: |
+          echo "integrations_repo=$(node -p "require('./integrations.pin.json').integrations.repository")" >> "$GITHUB_OUTPUT"
+          echo "integrations_ref=$(node -p "require('./integrations.pin.json').integrations.ref")" >> "$GITHUB_OUTPUT"
+          echo "protocol_repo=$(node -p "require('./integrations.pin.json').protocol.repository")" >> "$GITHUB_OUTPUT"
+          echo "protocol_ref=$(node -p "require('./integrations.pin.json').protocol.ref")" >> "$GITHUB_OUTPUT"
+
+      # The integration depends on the protocol by relative path, so they sit side by side.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.integrations_repo }}
+          ref: ${{ steps.pin.outputs.integrations_ref }}
+          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+          path: athenaeum_integrations
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.protocol_repo }}
+          ref: ${{ steps.pin.outputs.protocol_ref }}
+          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
+          path: athenaeum_protocol
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the single-file bundle
+        working-directory: athenaeum_integrations
+        run: |
+          npm ci
+          npm run verify
+          node dist/athenaeum-integrations.mjs --help
+
+      - name: Check the installer scripts parse
+        working-directory: athenaeum
+        run: |
+          sh -n install/install.sh
+          node --check install/install.mjs
+
+      - name: Collect
+        run: |
+          mkdir release-extra
+          cp athenaeum_integrations/dist/athenaeum-integrations.mjs release-extra/
+          cp athenaeum/install/install.sh athenaeum/install/install.ps1 athenaeum/install/install.mjs release-extra/
+
+      - name: Attach to the draft release
+        if: env.PUBLISH == 'true'
+        run: gh release upload "$TAG" release-extra/* --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Keep the files (dry run)
+        if: env.PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-and-integration
+          path: release-extra/*
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
     name: Publish the release
-    needs: [plan, build]
+    needs: [plan, build, integrations]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-22.04
     env:
@@ -354,6 +429,12 @@ jobs:
             exit 1
           fi
 
+      - name: Check the installer and the integration arrived
+        run: |
+          for f in install.sh install.ps1 install.mjs athenaeum-integrations.mjs; do
+            gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$f" || { echo "::error::$f is missing from $TAG."; exit 1; }
+          done
+
       - name: Write the release notes
         run: |
           prev=$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_SHA^" 2>/dev/null || true)
@@ -366,7 +447,14 @@ jobs:
             echo
             echo "Athenaeum updates itself: when a newer release appears, the app offers **Update and restart**."
             echo
-            echo "The \`athenaeum-cli-*\` archives are the command line tool the agent layer talks to."
+            echo "### For your coding agents (Claude Code, Codex, Cursor)"
+            echo
+            echo "Installs the \`athenaeum\` command and connects your agents to it, with no admin rights:"
+            echo
+            echo "- **macOS / Linux:** \`curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh | sh\`"
+            echo "- **Windows:** \`irm https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.ps1 | iex\`"
+            echo
+            echo "Then run \`athenaeum setup\` in a project. The \`athenaeum-cli-*\` archives and \`athenaeum-integrations.mjs\` are what that installer fetches."
             echo
             echo "## Changes"
             echo

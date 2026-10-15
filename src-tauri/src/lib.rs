@@ -13,6 +13,7 @@
 //! Harness, reached through `athenaeum_agent` over the `athenaeum bridge` protocol.
 //! See `AGENTS.md` and `docs/porting-athenaeum.md`.
 
+mod cli_tools;
 mod commands;
 mod core_bridge;
 mod engine;
@@ -121,6 +122,7 @@ pub fn run() {
             }
             app.manage(commands::file_sync::FileSyncState::default());
             app.manage(harness::HarnessChatState::default());
+            app.manage(cli_tools::CliRun::default());
             app.manage(knowledge::AppState::default());
             app.manage(CloseBehaviorState(Mutex::new("minimize".to_string())));
             app.manage(TrayAvailabilityState(Mutex::new(false)));
@@ -227,6 +229,10 @@ pub fn run() {
             engine::engine_accept,
             engine::engine_reject,
             engine::library_link,
+            cli_tools::cli_status,
+            cli_tools::cli_run,
+            cli_tools::cli_cancel,
+            cli_tools::cli_install_tools,
             harness::harness_check,
             harness::harness_start_turn_stream,
             harness::harness_cancel_turn,

@@ -37,6 +37,21 @@ Download the installer for your system from the
 Windows and macOS ask for a one-time approval on first launch because the installers are not yet
 signed with a paid certificate: [what to click](docs/releasing.md#first-launch-on-macos-and-windows).
 
+### For your coding agents (Claude Code, Codex, Cursor)
+
+One command installs the `athenaeum` command and connects your agents to your project's wiki, with no
+administrator prompt:
+
+```sh
+curl -fsSL https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.sh | sh      # macOS, Linux
+irm https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.ps1 | iex            # Windows (PowerShell)
+cd your-project && athenaeum setup                                                                    # per project; add --library to back it up online
+```
+
+Then use Claude Code or Codex as usual. They recall what the wiki knows, and propose what they learn for
+you to review in the app. [docs/installing.md](docs/installing.md) has the whole workflow, what it
+changes in your agents' settings, and how to check it (`athenaeum doctor`) or remove it.
+
 Athenaeum then **updates itself**. A new release is built automatically whenever `main` changes;
 the app notices, offers **Update and restart**, and installs it in place. How that works, and the
 one-time key setup it needs, is in [docs/releasing.md](docs/releasing.md).

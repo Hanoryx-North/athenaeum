@@ -38,6 +38,16 @@ Installed copies check at launch and every hour after, show **Update and restart
 banner, and install in place. If an in-place install is not possible (a `.deb` install,
 no network), the button opens the download page instead of doing nothing.
 
+### The installer and the agent integration
+
+Each release also carries `install.sh`, `install.ps1`, `install.mjs` and `athenaeum-integrations.mjs`: the
+one-line installer for coding agents and the single-file bundle it installs
+([installing.md](installing.md)). The bundle is built, by the `integrations` job, from
+`athenaeum_integrations` at the revision named in `integrations.pin.json`, next to
+`athenaeum_protocol`. Merge the repositories in that order (protocol, integrations, then this one) so the pins
+resolve. `ATHENAEUM_PROTOCOL_TOKEN` must be able to read **both** `athenaeum_protocol` and
+`athenaeum_integrations`. The release is not published unless all four files are attached.
+
 ### Versions
 
 `MAJOR.MINOR` come from `version` in `package.json`. The patch is the number of commits on

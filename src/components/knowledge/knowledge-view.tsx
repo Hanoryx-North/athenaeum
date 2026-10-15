@@ -23,6 +23,7 @@ import { KnowledgeHealth } from "./knowledge-health"
 import { KnowledgeSources } from "./knowledge-sources"
 import { KnowledgeBrief } from "./knowledge-brief"
 import { LibraryPanel } from "./library-panel"
+import { SetupBanner } from "@/components/setup/setup-card"
 
 const TABS: { id: KnowledgeTab; label: string; icon: typeof Activity; description: string }[] = [
   {
@@ -124,6 +125,8 @@ export function KnowledgeView() {
           project ? () => void openProjectFolder(normalizePath(project.path)) : undefined
         }
       />
+
+      <SetupBanner />
 
       {staleResponseDropped && (
         <p role="status" className="border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">

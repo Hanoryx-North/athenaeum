@@ -125,6 +125,16 @@ operations, closed vocabularies and retrieval budgets supported by the build.
 It works even before a project has initialized a knowledge base. Do not
 duplicate the vocabularies in Repository 2.
 
+## Coding agents (Claude Code, Codex, Cursor)
+
+People's own coding agents are clients of the same bridge, through `athenaeum_integrations`: an MCP server
+(`wiki_*` tools) and, for Claude Code, hooks that recall knowledge for each prompt and tidy up when a turn
+ends. Athenaeum installs and wires them with `athenaeum setup` (see [installing.md](installing.md)); the
+configuration it writes into each agent's settings is owned by `athenaeum_integrations`. Nothing about the
+contract changes: they call `context`, `search`, `open`, and, with the person's grant, `create` (which only
+proposes). They are never given `accept`, `reject` or sync by default, and a hook that cannot reach the bridge
+stays silent so the agent carries on as an ordinary coding agent.
+
 ## Operations
 
 | Method | Purpose | Mutates knowledge |

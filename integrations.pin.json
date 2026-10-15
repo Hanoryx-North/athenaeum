@@ -1,0 +1,5 @@
+{
+  "comment": "The agent integration shipped with each Athenaeum release is built from these revisions. Merge order: athenaeum_protocol, athenaeum_integrations, then athenaeum.",
+  "integrations": { "repository": "Hanoryx-North/athenaeum_integrations", "ref": "main" },
+  "protocol": { "repository": "Hanoryx-North/athenaeum_protocol", "ref": "main" }
+}
