@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -24,6 +25,58 @@ use uuid::Uuid;
 const DRIVER_NAME: &str = "harness-driver.mjs";
 const DEFAULT_PROFILE: &str = "athenaeum";
 const STDERR_TAIL_LIMIT: usize = 80;
+/// The per-launch profile patch that registers a Settings-chosen route, under the app data dir.
+const ROUTE_PATCH_FILE: &str = "harness-chat-route.cordis.yml";
+/// The only variables a Settings key may be placed in: the one the generated patch names, and
+/// the one the harness's own DeepSeek adapter reads. Anything else (PATH, DSH_HOME, ...) is refused.
+const ROUTE_KEY_ENVS: [&str; 2] = ["ATHENAEUM_LLM_API_KEY", "DEEPSEEK_API_KEY"];
+
+/// The chat agent's model route as Settings describes it; see `src/lib/harness-route.ts`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessRoute {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    api_key_env: Option<String>,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    pi_provider: Option<Value>,
+}
+
+impl HarnessRoute {
+    fn validate(&self) -> Result<(), String> {
+        let route_id = !self.provider.is_empty()
+            && self
+                .provider
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !route_id {
+            return Err(format!("Chat route \"{}\" is not a harness route id.", self.provider));
+        }
+        if self.model.trim().is_empty() {
+            return Err("Chat route has no model.".to_string());
+        }
+        if let Some(name) = &self.api_key_env {
+            if !ROUTE_KEY_ENVS.contains(&name.as_str()) {
+                return Err(format!("Chat route may not set the {name} variable."));
+            }
+        }
+        Ok(())
+    }
+
+    /// What decides whether a running runtime still serves this route. The key is reduced to
+    /// a digest so a changed key restarts the runtime without the identity holding the key.
+    fn identity(&self) -> String {
+        let key = self
+            .api_key
+            .as_deref()
+            .map(|key| format!("{:x}", Sha256::digest(key.as_bytes())))
+            .unwrap_or_default();
+        json!([self.provider, self.model, self.api_key_env, self.pi_provider, key]).to_string()
+    }
+}
 
 #[derive(Default)]
 pub struct HarnessChatState {
@@ -32,6 +85,8 @@ pub struct HarnessChatState {
 
 struct HarnessRuntime {
     workspace: PathBuf,
+    /// [`HarnessRoute::identity`] of the route it was launched with; empty for the defaults.
+    route: String,
     stdin: StdMutex<ChildStdin>,
     child: StdMutex<Child>,
     pending: Arc<StdMutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>,
@@ -68,7 +123,12 @@ impl HarnessChatState {
         &self,
         app: &AppHandle,
         workspace: &Path,
+        route: Option<&HarnessRoute>,
     ) -> Result<Arc<HarnessRuntime>, String> {
+        if let Some(route) = route {
+            route.validate()?;
+        }
+        let identity = route.map(HarnessRoute::identity).unwrap_or_default();
         let workspace = workspace
             .canonicalize()
             .map(plain_path)
@@ -82,12 +142,12 @@ impl HarnessChatState {
             .lock()
             .map_err(|_| "The Harness client state is unavailable.".to_string())?;
         if let Some(runtime) = slot.as_ref() {
-            if runtime.workspace == workspace && runtime.is_running() {
+            if runtime.workspace == workspace && runtime.route == identity && runtime.is_running() {
                 return Ok(runtime.clone());
             }
             if runtime.has_pending_turn() {
                 return Err(
-                    "A Harness turn is still running. Stop it before switching projects."
+                    "A Harness turn is still running. Stop it before switching projects or models."
                         .to_string(),
                 );
             }
@@ -95,7 +155,7 @@ impl HarnessChatState {
             *slot = None;
         }
 
-        let runtime = Arc::new(HarnessRuntime::launch(app, workspace)?);
+        let runtime = Arc::new(HarnessRuntime::launch(app, workspace, route, identity)?);
         *slot = Some(runtime.clone());
         Ok(runtime)
     }
@@ -114,7 +174,12 @@ impl HarnessChatState {
 }
 
 impl HarnessRuntime {
-    fn launch(app: &AppHandle, workspace: PathBuf) -> Result<Self, String> {
+    fn launch(
+        app: &AppHandle,
+        workspace: PathBuf,
+        route: Option<&HarnessRoute>,
+        identity: String,
+    ) -> Result<Self, String> {
         let (manifest_path, prefix, manifest) = locate_install()?;
         let dsh_home = manifest
             .dsh_home
@@ -192,6 +257,9 @@ impl HarnessRuntime {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         prepend_agent_path(&mut command, &prefix);
+        if let Some(route) = route {
+            apply_route(app, &mut command, route)?;
+        }
 
         let mut child = command.spawn().map_err(|error| {
             format!("Could not start the installed Athenaeum Agent runtime: {error}")
@@ -229,6 +297,7 @@ impl HarnessRuntime {
 
         Ok(Self {
             workspace,
+            route: identity,
             stdin: StdMutex::new(stdin),
             child: StdMutex::new(child),
             pending,
@@ -476,6 +545,40 @@ fn private_node_path(prefix: &Path) -> Option<PathBuf> {
     Some(path)
 }
 
+/// Point the driver at `route`: its id and model, its `llm-pi-ai` registration as a
+/// per-launch profile patch, and its key in the one variable the route reads.
+///
+/// The patch names the key's variable and never holds the key, which exists only in the
+/// runtime's own environment.
+fn apply_route(app: &AppHandle, command: &mut Command, route: &HarnessRoute) -> Result<(), String> {
+    command
+        .env("ATHENAEUM_AGENT_PROVIDER", &route.provider)
+        .env("ATHENAEUM_AGENT_MODEL", route.model.trim())
+        .env_remove("ATHENAEUM_AGENT_PATCH");
+    if let Some(profile) = &route.pi_provider {
+        let directory = app
+            .path()
+            .app_data_dir()
+            .map(plain_path)
+            .map_err(|error| format!("Could not locate the app data folder: {error}"))?;
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("Could not create {}: {error}", directory.display()))?;
+        let patch = directory.join(ROUTE_PATCH_FILE);
+        // A patch is a YAML array of loader entries; JSON is YAML, so serde writes it exactly.
+        let entries = json!([{
+            "id": "llm-pi-ai",
+            "config": { "providers": { route.provider.as_str(): profile } },
+        }]);
+        fs::write(&patch, entries.to_string())
+            .map_err(|error| format!("Could not write the chat route patch: {error}"))?;
+        command.env("ATHENAEUM_AGENT_PATCH", &patch);
+    }
+    if let (Some(name), Some(key)) = (&route.api_key_env, &route.api_key) {
+        command.env(name, key);
+    }
+    Ok(())
+}
+
 /// `path` without Windows' `\\?\` extended-length prefix on a drive path.
 ///
 /// Tauri's resource directory and `canonicalize` both return that form, and Node cannot
@@ -519,8 +622,9 @@ pub async fn harness_check(
     app: AppHandle,
     state: State<'_, HarnessChatState>,
     project_path: String,
+    route: Option<HarnessRoute>,
 ) -> Result<HarnessStatus, String> {
-    let runtime = state.runtime_for(&app, Path::new(&project_path))?;
+    let runtime = state.runtime_for(&app, Path::new(&project_path), route.as_ref())?;
     let response = runtime
         .request(json!({
             "type": "check",
@@ -540,8 +644,9 @@ pub async fn harness_start_turn_stream(
     session_id: String,
     run_id: String,
     content_blocks: Vec<Value>,
+    route: Option<HarnessRoute>,
 ) -> Result<HarnessTurnResult, String> {
-    let runtime = state.runtime_for(&app, Path::new(&project_path))?;
+    let runtime = state.runtime_for(&app, Path::new(&project_path), route.as_ref())?;
     let response = runtime
         .request(json!({
             "type": "run",

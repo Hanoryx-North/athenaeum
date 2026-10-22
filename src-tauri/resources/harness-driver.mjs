@@ -25,6 +25,9 @@ const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`)
 const defaultProvider = process.env.ATHENAEUM_AGENT_PROVIDER || 'deepseek-official'
 const defaultModel = process.env.ATHENAEUM_AGENT_MODEL || 'deepseek-v4-flash'
+// The desktop writes this when the chat route chosen in Settings needs registering with the
+// harness's multi-provider adapter; it names the key's variable, never the key.
+const routePatch = process.env.ATHENAEUM_AGENT_PATCH || null
 let harness = null
 let workspace = null
 let activeRun = null
@@ -48,6 +51,7 @@ async function ensureHarness(projectPath) {
       dshBin,
       cwd,
       processCwd: cwd,
+      ...(routePatch ? { patches: [routePatch] } : {}),
       provider: defaultProvider,
       model: defaultModel,
     })

@@ -9,6 +9,7 @@ import { ChatInput, type ChatSendOptions, type ChatSkillOption } from "./chat-in
 import { useChatStore, type MessageImage, type MessageReference } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
+import { harnessRouteFor } from "@/lib/harness-route"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, openPathInProject, readFile } from "@/commands/fs"
@@ -420,6 +421,8 @@ export function ChatPanel() {
   )
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
+  // The chat agent follows the provider chosen in Settings for chat.
+  const chatRoute = useMemo(() => harnessRouteFor(llmConfig), [llmConfig])
   const imageInputAvailable = mode === "chat" || supportsImageInput(llmConfig)
   const availableContextFiles = useMemo(() => {
     if (!project) return []
@@ -580,8 +583,12 @@ export function ChatPanel() {
       setHarnessStatus({ state: "offline", message: t("chat.agent.noWorkspace") })
       return
     }
+    if (!chatRoute.ok) {
+      setHarnessStatus({ state: "offline", message: chatRoute.reason })
+      return
+    }
     setHarnessStatus({ state: "checking" })
-    invoke<HarnessStatus>("harness_check", { projectPath: project.path })
+    invoke<HarnessStatus>("harness_check", { projectPath: project.path, route: chatRoute.route })
       .then((status) => {
         if (!cancelled) setHarnessStatus({ state: "ready", provider: status.provider, model: status.model })
       })
@@ -594,7 +601,7 @@ export function ChatPanel() {
         }
       })
     return () => { cancelled = true }
-  }, [mode, project?.path, t])
+  }, [mode, project?.path, chatRoute, t])
 
   const handleSend = useCallback(
     async (
@@ -640,6 +647,7 @@ export function ChatPanel() {
         if (!project?.path) {
           throw new Error(t("chat.agent.noWorkspace"))
         }
+        if (!chatRoute.ok) throw new Error(chatRoute.reason)
 
         setAgentEvents([{
           stage: "understanding",
@@ -750,6 +758,7 @@ export function ChatPanel() {
             sessionId: convId,
             runId: backendRunId,
             contentBlocks,
+            route: chatRoute.route,
           })
           if (!isCurrentRun()) return
           if (!response.finalResponse.trim() && turnFailure) throw new Error(turnFailure)
@@ -790,7 +799,7 @@ export function ChatPanel() {
         activeRunIdRef.current = null
       }
     },
-    [project, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, t],
+    [project, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, chatRoute, t],
   )
 
   const handleStop = useCallback(() => {
