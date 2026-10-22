@@ -22,6 +22,13 @@ import { parseFrontmatter } from "@/lib/frontmatter"
 import { getFileCategory, getFileExtension, isTextReadable } from "@/lib/file-types"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { ReferenceKnowledgeGraph } from "@/components/chat/reference-knowledge-graph"
+import {
+  describeToolCall,
+  describeToolResult,
+  forgetHarnessSessions,
+  harnessSessionFor,
+  historyPreamble,
+} from "@/lib/harness-chat"
 
 type InternalChatSendOptions = ChatSendOptions & {
   suppressUserMessage?: boolean
@@ -289,6 +296,14 @@ function normalizeBackendToolName(tool: string) {
   if (normalized === "anytxt_search") return "anytxt_search" as const
   if (normalized === "shell_exec") return "shell_exec" as const
   if (normalized === "deep_research_run") return "project_file_read" as const
+  // DeepSeek Harness tools, as `tool/call` names them.
+  if (normalized === "pwsh" || normalized === "bash") return "shell_exec" as const
+  if (normalized === "write" || normalized === "edit") return "project_files" as const
+  if (["read", "read_image", "glob", "grep", "skill", "wiki_open", "wiki_evidence", "wiki_history"].includes(normalized)) {
+    return "project_file_read" as const
+  }
+  if (normalized === "wiki_navigate" || normalized === "wiki_related") return "graph_search" as const
+  if (normalized === "web_fetch") return "web_search" as const
   return "unknown_tool" as const
 }
 
@@ -646,6 +661,16 @@ export function ChatPanel() {
           status: "running",
           message: t("chat.agent.connecting"),
         }])
+        // The harness keeps the conversation while its runtime lives; a conversation
+        // the current runtime has not seen starts a fresh session with its history.
+        const { sessionId: harnessSessionId, fresh } = harnessSessionFor(project.path, convId)
+        const priorMessages = useChatStore.getState().messages
+          .filter((m) => m.conversationId === convId && (m.role === "user" || m.role === "assistant"))
+        const history = sendOptions.historyOverride
+          ?? (sendOptions.suppressUserMessage ? priorMessages : priorMessages.slice(0, -1))
+            .slice(-maxHistoryMessages)
+            .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+        const preamble = fresh ? historyPreamble(history) : ""
         let turnFailure: string | null = null
         const backendEvents: BackendAgentToolEvent[] = []
         const toolsByCallId = new Map<string, string>()
@@ -658,7 +683,7 @@ export function ChatPanel() {
           const notification = payload.notification
           const params = notification.params
           if (notification.method === "session.status") {
-            if (params.sessionId !== convId) return
+            if (params.sessionId !== harnessSessionId) return
             if (params.status === "running") {
               addAgentActivity({
                 stage: "understanding",
@@ -669,7 +694,7 @@ export function ChatPanel() {
             }
             return
           }
-          if (notification.method !== "session.event" || params.sessionId !== convId) return
+          if (notification.method !== "session.event" || params.sessionId !== harnessSessionId) return
           const agentEvent = asRecord(params.event)
           if (!agentEvent || typeof agentEvent.type !== "string") return
           const data = asRecord(agentEvent.data) ?? {}
@@ -691,7 +716,7 @@ export function ChatPanel() {
             const toolEvent: BackendAgentToolEvent = {
               tool: name,
               status: "started",
-              detail,
+              detail: describeToolCall(name, detail),
               timestamp: Date.now(),
             }
             backendEvents.push(toolEvent)
@@ -708,7 +733,7 @@ export function ChatPanel() {
             const toolEvent: BackendAgentToolEvent = {
               tool: name,
               status: failed ? "failed" : "completed",
-              detail: textFromContent(message?.content).slice(0, 500),
+              detail: describeToolResult(name, textFromContent(message?.content), failed),
               timestamp: Date.now(),
             }
             backendEvents.push(toolEvent)
@@ -738,19 +763,28 @@ export function ChatPanel() {
           ? `${text}\n\nPlease inspect these user-selected workspace files first:\n${selectedFiles.map((path) => `- ${path}`).join("\n")}`
             : text
           const contentBlocks = [
-            { type: "text", text: promptText },
+            { type: "text", text: preamble + promptText },
             ...images.map((image) => ({
               type: "image",
               data: image.dataBase64,
               mimeType: image.mediaType,
             })),
           ]
-          const response = await invoke<HarnessTurnResult>("harness_start_turn_stream", {
-            projectPath: project.path,
-            sessionId: convId,
-            runId: backendRunId,
-            contentBlocks,
-          })
+          let response: HarnessTurnResult
+          try {
+            response = await invoke<HarnessTurnResult>("harness_start_turn_stream", {
+              projectPath: project.path,
+              sessionId: harnessSessionId,
+              runId: backendRunId,
+              contentBlocks,
+            })
+          } catch (err) {
+            // A failed run may have taken the runtime with it (a driver crash, a
+            // stopped turn); start every conversation afresh rather than reuse an id
+            // a new runtime would refuse.
+            forgetHarnessSessions()
+            throw err
+          }
           if (!isCurrentRun()) return
           if (!response.finalResponse.trim() && turnFailure) throw new Error(turnFailure)
           const steps = backendEvents.map(backendToolToAgentStep)
@@ -790,7 +824,7 @@ export function ChatPanel() {
         activeRunIdRef.current = null
       }
     },
-    [project, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, t],
+    [project, addMessageToConversation, setStreaming, appendStreamToken, finalizeStreamForConversation, createConversation, maxHistoryMessages, t],
   )
 
   const handleStop = useCallback(() => {
@@ -798,6 +832,8 @@ export function ChatPanel() {
     const sessionId = activeRunSessionIdRef.current
     const backendRunId = activeRunIdRef.current
     if (sessionId) {
+      // Cancelling closes the runtime, and its sessions with it.
+      forgetHarnessSessions()
       void invoke("harness_cancel_turn", {
         runId: backendRunId ?? "",
       }).catch(() => {})
