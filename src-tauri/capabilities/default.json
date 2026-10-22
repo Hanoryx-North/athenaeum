@@ -1,14 +1,45 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions granted to the main window. Least privilege: every entry here has a caller in src/api.ts.",
+  "description": "Permissions granted to the main window. Least privilege runs both ways: every entry here has a caller, and every plugin registered in lib.rs that the frontend calls has an entry. A plugin registered without its permission fails at runtime, not at build time, so the second half is the one that bites.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-set-theme",
+    "core:window:allow-set-background-color",
     "dialog:default",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "store:allow-load",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-delete",
+    "store:allow-save",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "autostart:default",
+    {
+      "comment": "open_path checks the path against Entry::Path scope entries only; the URL entries from allow-default-urls never match a path, so without this the system-app buttons in file-preview.tsx always fail. The vault directory is chosen at runtime, so no narrower static scope is possible here.",
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "comment": "The port must be written explicitly: an unspecified port in a URLPattern matches only the scheme default, so `http://**` would reject Ollama on :11434, a local MinerU on :8000 and every self-hosted gateway on a non-default port.",
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "http://*:*"
+        },
+        {
+          "url": "https://*:*"
+        }
+      ]
+    }
   ]
 }
