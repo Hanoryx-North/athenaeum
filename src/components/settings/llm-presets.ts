@@ -65,92 +65,99 @@ export const LLM_PRESETS: LlmPreset[] = [
     label: "Anthropic (Claude)",
     hint: "Official Claude API",
     provider: "anthropic",
-    defaultModel: "claude-sonnet-4-5-20250929",
-    // Cross-referenced with hermes-agent/hermes_cli/models.py:233-242.
-    // Both shortened and dated aliases work on api.anthropic.com.
+    defaultModel: "claude-sonnet-5-5",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
+    // Sonnet 5.5 / Haiku 5.5 are newer than that catalog.
     suggestedModels: [
-      "claude-opus-4-7",
-      "claude-opus-4-6",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-fable-5-1",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-opus-4-8",
       "claude-sonnet-4-6",
-      "claude-sonnet-4-5-20250929",
-      "claude-haiku-4-5-20251001",
-      "claude-opus-4-5-20251101",
-      "claude-sonnet-4-20250514",
-      "claude-3-5-sonnet-20241022",
-      "claude-3-5-haiku-20241022",
+      "claude-haiku-4-5",
     ],
-    suggestedContextSize: 200000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "claude-code-cli",
     label: "Claude Code CLI (local)",
     hint: "Uses the local `claude` binary — no API key needed",
     provider: "claude-code",
-    defaultModel: "claude-sonnet-4-6",
-    // Mirrors anthropic preset; the CLI forwards to the same Anthropic
-    // backend, so model ids are identical. Users with a subscription
-    // can pick Opus/Sonnet/Haiku here without paying an API key bill.
+    defaultModel: "claude-sonnet-5-5",
+    // Same ids as the Anthropic preset: the CLI forwards to the same backend.
     suggestedModels: [
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-sonnet-4-5-20250929",
-      "claude-haiku-4-5-20251001",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-fable-5-1",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-opus-4-8",
     ],
-    suggestedContextSize: 200000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "codex-cli",
     label: "Codex CLI (local)",
     hint: "Uses the local `codex` binary — no API key needed",
     provider: "codex-cli",
-    defaultModel: "gpt-5.4-mini",
+    defaultModel: "gpt-5.5",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first. (openai-codex)
     suggestedModels: [
-      "gpt-5.4-mini",
-      "gpt-5.4",
-      "gpt-5.3-codex",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
       "gpt-5.3-codex-spark",
-      "gpt-5.2",
     ],
-    suggestedContextSize: 200000,
+    suggestedContextSize: 272000,
   },
   {
     id: "openai",
     label: "OpenAI (GPT)",
     hint: "Official OpenAI API",
     provider: "openai",
-    defaultModel: "gpt-4o",
-    // Current public GPT models on api.openai.com. Reasoning models and
-    // the 4.1 family are both exposed under the chat/completions route.
+    defaultModel: "gpt-5.5",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
     suggestedModels: [
-      "gpt-4o",
-      "gpt-4o-mini",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-6-astra",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
       "gpt-4.1",
-      "gpt-4.1-mini",
-      "gpt-4.1-nano",
-      "o3",
-      "o3-mini",
-      "o1",
-      "o1-mini",
-      "gpt-4-turbo",
+      "gpt-4o-mini",
     ],
-    suggestedContextSize: 128000,
+    suggestedContextSize: 272000,
   },
   {
     id: "google",
     label: "Google (Gemini)",
     hint: "Generative Language API",
     provider: "google",
-    defaultModel: "gemini-2.5-flash",
-    // 2.5 generation is the current stable; 2.0 kept as fallback.
+    defaultModel: "gemini-3.8-flash",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
+    // The 2.x line is closed to new API keys ("no longer available to new users").
     suggestedModels: [
-      "gemini-2.5-pro",
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
-      "gemini-2.0-flash-lite",
-      "gemini-1.5-pro",
-      "gemini-1.5-flash",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-pro-preview",
+      "gemini-3-flash-preview",
+      "gemini-flash-latest",
+      "gemini-flash-lite-latest",
     ],
     suggestedContextSize: 1000000,
   },
@@ -172,17 +179,14 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "https://api.deepseek.com/v1",
     defaultModel: "deepseek-v4-flash",
     apiMode: "chat_completions",
-    // `deepseek-chat` and `deepseek-reasoner` remain selectable for
-    // existing users, but DeepSeek has announced deprecation on
-    // 2026-07-24. Keep chip values as exact model ids so clicking a
-    // suggestion can be copied directly into the request body.
+    // deepseek-flash is V4.1 Flash. deepseek-chat / deepseek-reasoner were retired on
+    // 2026-07-24; type either id in if a gateway still serves it.
     suggestedModels: [
       "deepseek-v4-flash",
+      "deepseek-flash",
       "deepseek-v4-pro",
-      "deepseek-chat",
-      "deepseek-reasoner",
     ],
-    suggestedContextSize: 64000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "atlascloud",
@@ -221,17 +225,14 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "https://api.groq.com/openai/v1",
     defaultModel: "llama-3.3-70b-versatile",
     apiMode: "chat_completions",
-    // Groq hosts open-weight models; list stays current-practical picks.
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
     suggestedModels: [
       "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
-      "llama-3.1-70b-versatile",
-      "mixtral-8x7b-32768",
-      "gemma2-9b-it",
-      "moonshotai/kimi-k2-instruct",
       "openai/gpt-oss-120b",
       "openai/gpt-oss-20b",
-      "qwen/qwen3-32b",
+      "qwen/qwen3.8-27b",
+      "qwen/qwen3.6-27b",
     ],
     suggestedContextSize: 128000,
   },
@@ -241,19 +242,16 @@ export const LLM_PRESETS: LlmPreset[] = [
     hint: "api.x.ai",
     provider: "custom",
     baseUrl: "https://api.x.ai/v1",
-    defaultModel: "grok-3",
+    defaultModel: "grok-4.7",
     apiMode: "chat_completions",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
     suggestedModels: [
-      "grok-4-latest",
-      "grok-4",
-      "grok-3",
-      "grok-3-mini",
-      "grok-3-fast",
-      "grok-3-mini-fast",
-      "grok-code-fast-1",
-      "grok-2-vision-1212",
+      "grok-4.7",
+      "grok-4.6",
+      "grok-4.5",
+      "grok-4.3",
     ],
-    suggestedContextSize: 131072,
+    suggestedContextSize: 500000,
   },
   {
     id: "nvidia-nim",
@@ -268,27 +266,21 @@ export const LLM_PRESETS: LlmPreset[] = [
     // per-user from build.nvidia.com. Full catalog is huge and
     // changes often — this is a practical subset; users can type any
     // other id into the custom input.
-    defaultModel: "meta/llama-3.3-70b-instruct",
+    defaultModel: "nvidia/nemotron-3-super-120b-a12b",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
+    // The hosted catalog rotates; any other id can be typed in.
     suggestedModels: [
-      // NVIDIA's own reasoning / agentic models
-      "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "nvidia/nemotron-3-ultra-550b-a55b",
       "nvidia/nemotron-3-super-120b-a12b",
-      "nvidia/nemotron-3-nano-30b-a3b",
-      // Meta Llama family
-      "meta/llama-3.3-70b-instruct",
-      "meta/llama-3.1-405b-instruct",
-      "meta/llama-3.1-70b-instruct",
-      // Popular third-party agentic / open-weight
-      "deepseek-ai/deepseek-v3.2",
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "moonshotai/kimi-k3",
       "moonshotai/kimi-k2.6",
-      "qwen/qwen3.5-397b-a17b",
-      "minimaxai/minimax-m2.7",
-      "minimaxai/minimax-m2.5",
-      "z-ai/glm5",
-      "openai/gpt-oss-120b",
-      // Mistral family
-      "mistralai/mixtral-8x22b-instruct",
-      "mistralai/mistral-large-2-instruct",
+      "z-ai/glm-5.3",
+      "z-ai/glm-5.3-flash",
+      "openai/gpt-oss-20b",
+      "meta/llama-3.2-90b-vision-instruct",
     ],
     suggestedContextSize: 128000,
   },
@@ -298,19 +290,16 @@ export const LLM_PRESETS: LlmPreset[] = [
     hint: "api.moonshot.ai",
     provider: "custom",
     baseUrl: "https://api.moonshot.ai/v1",
-    defaultModel: "kimi-k2.6",
+    defaultModel: "kimi-k3",
     apiMode: "chat_completions",
-    // Current Moonshot lineup. The older `moonshot-v1-*` and
-    // `kimi-k2-0905-preview` / `-turbo-preview` ids are being
-    // deprecated on 2026-05-25 and dropped from the picker already —
-    // users who still need them can type the id into the custom input.
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
     suggestedModels: [
+      "kimi-k3",
+      "kimi-k2.7-code",
+      "kimi-k2.7-code-highspeed",
       "kimi-k2.6",
-      "kimi-k2.5",
-      "kimi-k2-thinking",
-      "kimi-for-coding",
     ],
-    suggestedContextSize: 256000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "kimi-cn",
@@ -318,15 +307,15 @@ export const LLM_PRESETS: LlmPreset[] = [
     hint: "api.moonshot.cn",
     provider: "custom",
     baseUrl: "https://api.moonshot.cn/v1",
-    defaultModel: "kimi-k2.6",
+    defaultModel: "kimi-k3",
     apiMode: "chat_completions",
     suggestedModels: [
+      "kimi-k3",
+      "kimi-k2.7-code",
+      "kimi-k2.7-code-highspeed",
       "kimi-k2.6",
-      "kimi-k2.5",
-      "kimi-k2-thinking",
-      "kimi-for-coding",
     ],
-    suggestedContextSize: 256000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "kimi-coding-plan",
@@ -336,13 +325,16 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "https://api.kimi.com/coding/",
     defaultModel: "kimi-for-coding",
     apiMode: "chat_completions",
-    // Kimi Coding Plan is a separate subscription service from the
-    // Moonshot open platform. It supports both OpenAI-compatible
-    // (chat_completions) and Anthropic-compatible (anthropic_messages)
-    // wires on the same base URL. The Anthropic wire requires Bearer
-    // auth (see requiresBearerAuth in llm-providers.ts).
-    suggestedModels: ["kimi-for-coding"],
-    suggestedContextSize: 256000,
+    // Kimi Coding Plan is a separate subscription from the Moonshot open platform,
+    // with both OpenAI- and Anthropic-compatible wires on this base URL (the Anthropic
+    // wire needs Bearer auth; see requiresBearerAuth in llm-providers.ts). Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
+    suggestedModels: [
+      "kimi-for-coding",
+      "kimi-for-coding-highspeed",
+      "k3",
+      "k3-256k",
+    ],
+    suggestedContextSize: 1000000,
   },
   {
     id: "zhipu",
@@ -350,35 +342,20 @@ export const LLM_PRESETS: LlmPreset[] = [
     hint: "open.bigmodel.cn",
     provider: "custom",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    defaultModel: "glm-4.6",
+    defaultModel: "glm-5.3",
     apiMode: "chat_completions",
-    // Current Zhipu BigModel lineup on /api/paas/v4/chat/completions.
-    // Vision-capable models use the same OpenAI-compatible image_url
-    // content blocks as our generic chat-completions wire.
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first. (zai)
+    // Older glm-4.x / glm-5 / glm-5.1 ids still work if typed in.
     suggestedModels: [
-      "glm-5.1",
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.3-highspeed",
+      "glm-5.2",
+      "glm-5.2-highspeed",
       "glm-5-turbo",
-      "glm-5",
-      "glm-5v-turbo",
       "glm-4.7",
-      "glm-4.7-flash",
-      "glm-4.7-flashx",
-      "glm-4.6",
-      "glm-4.6v",
-      "glm-4.5",
-      "glm-4.5v",
-      "glm-4.5-air",
-      "glm-4.5-airx",
-      "glm-4.5-flash",
-      "glm-4-flash-250414",
-      "glm-4-flashx-250414",
-      "glm-4-plus",
-      "glm-4-air",
-      "glm-4-flash",
-      "glm-4v-plus",
-      "glm-zero-preview",
     ],
-    suggestedContextSize: 128000,
+    suggestedContextSize: 1000000,
   },
   {
     id: "minimax-global",
@@ -388,12 +365,13 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "https://api.minimax.io/anthropic",
     defaultModel: "MiniMax-M3",
     apiMode: "anthropic_messages",
-    // M3 is the current-gen default; M2.7 stays as a fallback for users
-    // pinned to it. Older M2.5 / M2.1 / M2 are legacy and have been
-    // dropped — users who still need them can type the id into the
-    // custom input.
-    suggestedModels: ["MiniMax-M3", "MiniMax-M2.7"],
-    suggestedContextSize: 200000,
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
+    suggestedModels: [
+      "MiniMax-M3",
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
+    ],
+    suggestedContextSize: 1000000,
   },
   {
     id: "minimax-cn",
@@ -403,8 +381,12 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "https://api.minimaxi.com/anthropic",
     defaultModel: "MiniMax-M3",
     apiMode: "anthropic_messages",
-    suggestedModels: ["MiniMax-M3", "MiniMax-M2.7"],
-    suggestedContextSize: 200000,
+    suggestedModels: [
+      "MiniMax-M3",
+      "MiniMax-M2.7",
+      "MiniMax-M2.7-highspeed",
+    ],
+    suggestedContextSize: 1000000,
   },
   {
     id: "bailian-coding",
@@ -455,13 +437,14 @@ export const LLM_PRESETS: LlmPreset[] = [
     // gateways above. MiMo V2.5 Pro / Omni advertise 1M context;
     // Flash remains the low-cost 256K option. Older v2 ids stay
     // selectable for existing users and gateway deployments.
-    defaultModel: "mimo-v2.5-pro",
+    defaultModel: "mimo-v2.6-pro",
+    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first.
     suggestedModels: [
+      "mimo-v2.6-pro",
+      "mimo-v2.6-flash",
+      "mimo-v2.6-pro-ultraspeed",
       "mimo-v2.5-pro",
       "mimo-v2.5",
-      "mimo-v2-flash",
-      "mimo-v2-pro",
-      "mimo-v2-omni",
     ],
     suggestedContextSize: 1000000,
   },
