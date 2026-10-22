@@ -71,6 +71,7 @@ impl HarnessChatState {
     ) -> Result<Arc<HarnessRuntime>, String> {
         let workspace = workspace
             .canonicalize()
+            .map(plain_path)
             .map_err(|error| format!("Could not open the selected project workspace: {error}"))?;
         if !workspace.is_dir() {
             return Err("The selected project workspace is not a directory.".to_string());
@@ -164,7 +165,7 @@ impl HarnessRuntime {
             .path()
             .resource_dir()
             .ok()
-            .map(|directory| directory.join(DRIVER_NAME))
+            .map(|directory| plain_path(directory.join(DRIVER_NAME)))
             .filter(|path| path.is_file())
             .unwrap_or_else(|| {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -473,6 +474,19 @@ fn private_node_path(prefix: &Path) -> Option<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let path = prefix.join("node").join("bin").join("node");
     Some(path)
+}
+
+/// `path` without Windows' `\\?\` extended-length prefix on a drive path.
+///
+/// Tauri's resource directory and `canonicalize` both return that form, and Node cannot
+/// start a script given one: resolving its main module stats the bare drive (`A:`) and
+/// fails with EISDIR. A `\\?\UNC\` network path keeps its prefix.
+fn plain_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 fn resolve_from(prefix: &Path, path: &Path) -> PathBuf {
