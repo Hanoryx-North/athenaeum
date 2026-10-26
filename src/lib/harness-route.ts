@@ -17,7 +17,19 @@ export interface HarnessRoute {
   apiKeyEnv?: string
   apiKey?: string
   /** A `llm-pi-ai` provider profile to register under `provider`; absent for built-in routes. */
-  piProvider?: Record<string, unknown>
+  piProvider?: PiProviderProfile
+}
+
+/**
+ * The profile fields this app sets. The backend accepts exactly these (`PiProvider` in
+ * `src-tauri/src/harness.rs`) and refuses any other key variable or wire protocol.
+ */
+export interface PiProviderProfile {
+  displayName?: string
+  api?: "openai-completions" | "anthropic-messages"
+  baseURL?: string
+  apiKeyEnv?: string
+  models: { id: string }[]
 }
 
 export type HarnessRouteResult =
@@ -44,7 +56,7 @@ function withKey(route: HarnessRoute, apiKey: string): HarnessRoute {
 }
 
 /** Hand-declared route for an endpoint the harness catalog does not describe. */
-function declaredRoute(model: string, api: string, baseURL: string, apiKey: string): HarnessRoute {
+function declaredRoute(model: string, api: NonNullable<PiProviderProfile["api"]>, baseURL: string, apiKey: string): HarnessRoute {
   const keyed = apiKey.trim().length > 0
   return withKey({
     provider: SETTINGS_ROUTE_ID,

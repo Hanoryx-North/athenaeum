@@ -21,15 +21,6 @@
     "opener:allow-default-urls",
     "autostart:default",
     {
-      "comment": "open_path checks the path against Entry::Path scope entries only; the URL entries from allow-default-urls never match a path, so without this the system-app buttons in file-preview.tsx always fail. The vault directory is chosen at runtime, so no narrower static scope is possible here.",
-      "identifier": "opener:allow-open-path",
-      "allow": [
-        {
-          "path": "**"
-        }
-      ]
-    },
-    {
       "comment": "The port must be written explicitly: an unspecified port in a URLPattern matches only the scheme default, so `http://**` would reject Ollama on :11434, a local MinerU on :8000 and every self-hosted gateway on a non-default port.",
       "identifier": "http:default",
       "allow": [

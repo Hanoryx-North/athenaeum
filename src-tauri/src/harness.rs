@@ -42,7 +42,42 @@ pub struct HarnessRoute {
     #[serde(default)]
     api_key: Option<String>,
     #[serde(default)]
-    pi_provider: Option<Value>,
+    pi_provider: Option<PiProvider>,
+}
+
+/// The `llm-pi-ai` provider profile a route registers. Typed rather than passed through, so
+/// the webview cannot set profile fields this app never writes, or name another variable for
+/// the runtime to send as a key.
+#[derive(Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PiProvider {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api: Option<String>,
+    #[serde(rename = "baseURL", default, skip_serializing_if = "Option::is_none")]
+    base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_key_env: Option<String>,
+    models: Vec<PiModel>,
+}
+
+#[derive(Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct PiModel {
+    id: String,
+}
+
+/// The wire protocols `src/lib/harness-route.ts` declares a route with.
+const ROUTE_APIS: [&str; 2] = ["openai-completions", "anthropic-messages"];
+
+fn check_key_env(name: Option<&str>) -> Result<(), String> {
+    match name {
+        Some(name) if !ROUTE_KEY_ENVS.contains(&name) => {
+            Err(format!("Chat route may not set the {name} variable."))
+        }
+        _ => Ok(()),
+    }
 }
 
 impl HarnessRoute {
@@ -53,14 +88,44 @@ impl HarnessRoute {
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
         if !route_id {
-            return Err(format!("Chat route \"{}\" is not a harness route id.", self.provider));
+            return Err(format!(
+                "Chat route \"{}\" is not a harness route id.",
+                self.provider
+            ));
         }
         if self.model.trim().is_empty() {
             return Err("Chat route has no model.".to_string());
         }
-        if let Some(name) = &self.api_key_env {
-            if !ROUTE_KEY_ENVS.contains(&name.as_str()) {
-                return Err(format!("Chat route may not set the {name} variable."));
+        check_key_env(self.api_key_env.as_deref())?;
+        if let Some(profile) = &self.pi_provider {
+            check_key_env(profile.api_key_env.as_deref())?;
+            if let Some(api) = &profile.api {
+                if !ROUTE_APIS.contains(&api.as_str()) {
+                    return Err(format!("Chat route uses an unknown API \"{api}\"."));
+                }
+            }
+            if let Some(url) = &profile.base_url {
+                let scheme = url.to_ascii_lowercase();
+                if !(scheme.starts_with("http://") || scheme.starts_with("https://")) {
+                    return Err(format!(
+                        "Chat route endpoint \"{url}\" is not an http(s) URL."
+                    ));
+                }
+                // An endpoint the route names may only be sent the key the route supplies.
+                if profile.api_key_env != self.api_key_env
+                    || (profile.api_key_env.is_some() && self.api_key.is_none())
+                {
+                    return Err(
+                        "Chat route endpoint must use the API key set in Settings.".to_string()
+                    );
+                }
+            }
+            if profile
+                .models
+                .iter()
+                .any(|model| model.id.trim().is_empty())
+            {
+                return Err("Chat route lists a model with no id.".to_string());
             }
         }
         Ok(())
@@ -74,7 +139,14 @@ impl HarnessRoute {
             .as_deref()
             .map(|key| format!("{:x}", Sha256::digest(key.as_bytes())))
             .unwrap_or_default();
-        json!([self.provider, self.model, self.api_key_env, self.pi_provider, key]).to_string()
+        json!([
+            self.provider,
+            self.model,
+            self.api_key_env,
+            self.pi_provider,
+            key
+        ])
+        .to_string()
     }
 }
 
@@ -84,6 +156,9 @@ pub struct HarnessChatState {
 }
 
 struct HarnessRuntime {
+    /// Changes whenever a new runtime is launched, so the chat can tell that the sessions it
+    /// created on the previous one are gone.
+    id: String,
     workspace: PathBuf,
     /// [`HarnessRoute::identity`] of the route it was launched with; empty for the defaults.
     route: String,
@@ -93,7 +168,9 @@ struct HarnessRuntime {
     serial: AtomicU64,
 }
 
+/// `install.json` as `athenaeum_agent`'s installer writes it, in camelCase.
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct InstallManifest {
     #[serde(default)]
     node: Option<PathBuf>,
@@ -106,6 +183,9 @@ struct InstallManifest {
 #[derive(Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessStatus {
+    /// [`HarnessRuntime::id`]; set here, not by the driver.
+    #[serde(default)]
+    runtime_id: String,
     workspace: String,
     provider: String,
     model: String,
@@ -296,6 +376,7 @@ impl HarnessRuntime {
             .map_err(|error| format!("Could not start the Harness diagnostics reader: {error}"))?;
 
         Ok(Self {
+            id: Uuid::new_v4().to_string(),
             workspace,
             route: identity,
             stdin: StdMutex::new(stdin),
@@ -549,12 +630,22 @@ fn private_node_path(prefix: &Path) -> Option<PathBuf> {
 /// per-launch profile patch, and its key in the one variable the route reads.
 ///
 /// The patch names the key's variable and never holds the key, which exists only in the
-/// runtime's own environment.
+/// runtime's own environment. A route with its own endpoint does not inherit the key
+/// variables from the app's environment, so a key set outside Settings never reaches it.
 fn apply_route(app: &AppHandle, command: &mut Command, route: &HarnessRoute) -> Result<(), String> {
     command
         .env("ATHENAEUM_AGENT_PROVIDER", &route.provider)
         .env("ATHENAEUM_AGENT_MODEL", route.model.trim())
         .env_remove("ATHENAEUM_AGENT_PATCH");
+    if route
+        .pi_provider
+        .as_ref()
+        .is_some_and(|profile| profile.base_url.is_some())
+    {
+        for name in ROUTE_KEY_ENVS {
+            command.env_remove(name);
+        }
+    }
     if let Some(profile) = &route.pi_provider {
         let directory = app
             .path()
@@ -632,8 +723,10 @@ pub async fn harness_check(
             "projectPath": project_path,
         }))
         .await?;
-    serde_json::from_value(response)
-        .map_err(|error| format!("The Harness runtime returned an invalid status: {error}"))
+    let mut status: HarnessStatus = serde_json::from_value(response)
+        .map_err(|error| format!("The Harness runtime returned an invalid status: {error}"))?;
+    status.runtime_id = runtime.id.clone();
+    Ok(status)
 }
 
 #[tauri::command]

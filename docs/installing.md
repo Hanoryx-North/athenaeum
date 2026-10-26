@@ -37,7 +37,8 @@ Selecting Athenaeum Agent additionally runs `athenaeum_agent`'s own packaged ins
 install its pinned DeepSeek Harness runtime from npm and mount the packaged wiki bundle.
 This step needs internet access. Its `athenaeum-agent` launcher starts the unmodified
 Harness with the `athenaeum` profile; coding needs a model API key (`DEEPSEEK_API_KEY`).
-The app's chat uses this same installed profile through the Harness SDK.
+The app's chat uses this same installed profile through the Harness SDK, on the provider,
+model and API key chosen for chat in Settings; it needs no environment variable.
 
 Open a new terminal after setup. On macOS, setup adds a marked PATH entry to the login
 profile for zsh (or bash when it is the user's configured shell). Windows uses the user PATH.

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { convertFileSrc } from "@tauri-apps/api/core"
-import { openPath } from "@tauri-apps/plugin-opener"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
@@ -23,7 +22,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from "pdfjs-dist"
-import { getFileSize, readFileAsBase64 } from "@/commands/fs"
+import { getFileSize, openPathInProject, readFileAsBase64 } from "@/commands/fs"
 import {
   getFileCategory,
   getCodeLanguage,
@@ -45,6 +44,18 @@ import { FileHistoryButton } from "@/components/editor/file-history-panel"
 interface FilePreviewProps {
   filePath: string
   textContent: string
+}
+
+/**
+ * Hand a previewed file to its system app. Goes through the backend so only files inside
+ * the open project can be opened; the webview holds no path-wide opener permission.
+ */
+function openWithSystem(filePath: string): void {
+  const projectPath = useWikiStore.getState().project?.path
+  if (!projectPath) return
+  void openPathInProject(projectPath, filePath).catch((err) => {
+    console.error("[preview] failed to open with system app:", err)
+  })
 }
 
 export function FilePreview({ filePath, textContent }: FilePreviewProps) {
@@ -202,7 +213,7 @@ function PdfPreview({ filePath, content }: { filePath: string; content: string }
       <span className="min-w-0 flex-1 truncate" title={filePath}>{filePath}</span>
       <button type="button" className="rounded border px-2 py-1 hover:bg-muted" onClick={() => setShowText((value) => !value)}>{showText ? t("preview.pdfDocument") : t("preview.pdfText")}</button>
       {!showText && <><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.max(50, value - 25))}><Minus className="h-3.5 w-3.5" /></button><span className="w-10 text-center">{zoom}%</span><button type="button" className="rounded p-1 hover:bg-muted" onClick={() => setZoom((value) => Math.min(300, value + 25))}><Plus className="h-3.5 w-3.5" /></button><label className="ml-1 flex items-center gap-1">{t("preview.pdfPage")}<input value={page} min={1} max={pageCount || undefined} type="number" onChange={(event) => setPage(clampPdfPage(Number(event.target.value) || 1, pageCount))} className="w-14 rounded border bg-background px-1 py-0.5" /></label><span>/ {pageCount || "–"}</span></>}
-      <button type="button" onClick={() => void openPath(filePath)} className="rounded p-1 hover:bg-muted" title={t("preview.openWithSystem")} aria-label={t("preview.openWithSystem")}><ExternalLink className="h-3.5 w-3.5" /></button>
+      <button type="button" onClick={() => openWithSystem(filePath)} className="rounded p-1 hover:bg-muted" title={t("preview.openWithSystem")} aria-label={t("preview.openWithSystem")}><ExternalLink className="h-3.5 w-3.5" /></button>
     </div>
     <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-white">
       {showText ? <TextPreview filePath={filePath} content={content} label="PDF text" /> : loading ? (
@@ -299,7 +310,7 @@ function HtmlPreview({
         )}
         <button
           type="button"
-          onClick={() => void openPath(filePath)}
+          onClick={() => openWithSystem(filePath)}
           className="rounded p-1 hover:bg-accent hover:text-foreground"
           title={t("preview.openWithSystem")}
           aria-label={t("preview.openWithSystem")}
@@ -653,7 +664,7 @@ function BinaryPlaceholder({
         </button>
         <button
           type="button"
-          onClick={() => void openPath(filePath)}
+          onClick={() => openWithSystem(filePath)}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent"
         >
           <ExternalLink className="h-3.5 w-3.5" />

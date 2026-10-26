@@ -2,10 +2,11 @@
  * Chat-side bookkeeping for the DeepSeek Harness runtime the desktop driver owns.
  *
  * A harness session id can be created once: the runtime persists each session and
- * refuses the same id again after it restarts. The driver keeps one runtime and
- * replaces it on Stop (the SDK's only cancel), on a project switch, and when it
- * crashes, so a conversation gets a fresh session per runtime and carries its
- * earlier messages into it. Nothing here decides anything about a turn.
+ * refuses the same id again after it restarts. The backend replaces the runtime on a
+ * project or route switch and after a crash, reporting a new runtime id; the driver
+ * also restarts the harness inside it on Stop (the SDK's only cancel). So a
+ * conversation gets a fresh session per runtime and carries its earlier messages
+ * into it. Nothing here decides anything about a turn.
  */
 
 export interface HarnessHistoryMessage {
@@ -14,16 +15,16 @@ export interface HarnessHistoryMessage {
 }
 
 const sessions = new Map<string, string>()
-let sessionsProject: string | null = null
+let sessionsRuntime: string | null = null
 
 /**
- * The conversation's session on the current runtime, and whether it is new.
- * Asking for another project means the driver replaced the runtime.
+ * The conversation's session on the runtime `harness_check` reported, and whether it
+ * is new. Another runtime id means the backend replaced the runtime.
  */
-export function harnessSessionFor(projectPath: string, conversationId: string): { sessionId: string; fresh: boolean } {
-  if (sessionsProject !== projectPath) {
+export function harnessSessionFor(runtimeId: string, conversationId: string): { sessionId: string; fresh: boolean } {
+  if (sessionsRuntime !== runtimeId) {
     sessions.clear()
-    sessionsProject = projectPath
+    sessionsRuntime = runtimeId
   }
   const existing = sessions.get(conversationId)
   if (existing) return { sessionId: existing, fresh: false }
@@ -32,7 +33,7 @@ export function harnessSessionFor(projectPath: string, conversationId: string): 
   return { sessionId, fresh: true }
 }
 
-/** Forget every session: the runtime that held them was, or may have been, replaced. */
+/** Forget every session: the harness that held them was, or may have been, restarted. */
 export function forgetHarnessSessions(): void {
   sessions.clear()
 }

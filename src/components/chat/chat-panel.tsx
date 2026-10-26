@@ -52,6 +52,7 @@ interface HarnessNotificationPayload {
 }
 
 interface HarnessStatus {
+  runtimeId: string
   workspace: string
   provider: string
   model: string
@@ -438,15 +439,6 @@ export function ChatPanel() {
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
   // The chat agent follows the provider chosen in Settings for chat.
   const chatRoute = useMemo(() => harnessRouteFor(llmConfig), [llmConfig])
-  // A new route restarts the runtime, and a restarted runtime refuses the session ids
-  // the old one held, so every conversation starts afresh (carrying its history).
-  const chatRouteKey = chatRoute.ok ? JSON.stringify(chatRoute.route) : ""
-  const lastChatRouteKey = useRef(chatRouteKey)
-  useEffect(() => {
-    if (lastChatRouteKey.current === chatRouteKey) return
-    lastChatRouteKey.current = chatRouteKey
-    forgetHarnessSessions()
-  }, [chatRouteKey])
   const imageInputAvailable = mode === "chat" || supportsImageInput(llmConfig)
   const availableContextFiles = useMemo(() => {
     if (!project) return []
@@ -680,7 +672,21 @@ export function ChatPanel() {
         }])
         // The harness keeps the conversation while its runtime lives; a conversation
         // the current runtime has not seen starts a fresh session with its history.
-        const { sessionId: harnessSessionId, fresh } = harnessSessionFor(project.path, convId)
+        // Checking first (re)starts the runtime for this project and route and names it.
+        // Its outcome also updates the header: it may have relaunched the runtime, or
+        // reached a different answer than the header's own check.
+        let runtime: HarnessStatus
+        try {
+          runtime = await invoke<HarnessStatus>("harness_check", { projectPath: project.path, route: chatRoute.route })
+        } catch (err) {
+          if (isCurrentRun()) {
+            setHarnessStatus({ state: "offline", message: err instanceof Error ? err.message : String(err) })
+          }
+          throw err
+        }
+        if (!isCurrentRun()) return
+        setHarnessStatus({ state: "ready", provider: runtime.provider, model: runtime.model })
+        const { sessionId: harnessSessionId, fresh } = harnessSessionFor(runtime.runtimeId, convId)
         const priorMessages = useChatStore.getState().messages
           .filter((m) => m.conversationId === convId && (m.role === "user" || m.role === "assistant"))
         const history = sendOptions.historyOverride

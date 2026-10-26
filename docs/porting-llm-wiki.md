@@ -189,7 +189,10 @@ Steps 1–7 and step 9 of the order above are done:
 ## Desktop chat
 
 The app launches `@deepseek-ai/dsh-sdk-client` from the installed Athenaeum Agent
-profile, using the current project directory and a stable session id for each chat.
+profile, using the current project directory and the model route chosen in Settings.
+Each chat has one Harness session per runtime: a relaunched runtime (new project, new
+route, a crash) or a restarted harness (Stop, a failed turn) opens a fresh session that
+starts with the conversation's earlier messages.
 The driver only translates a small newline-delimited control protocol; Harness owns
 agent execution. The panel reports Harness status, session activity and tool results,
 and Stop closes the runtime because the SDK has no per-turn cancellation method.

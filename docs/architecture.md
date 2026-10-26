@@ -363,7 +363,7 @@ the knowledge belongs to the user.
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
 | 5 — Agent + wiki integration | **Done on both sides:** protocol v1, typed service and CLI bridge here; the `athenaeum_agent` bundle consumes them as a harness capability seam |
 | 6 — Verification: anchor relocation, staleness, contradictions | **Deterministic relocation and review done:** exact, symbol, fingerprint and stale outcomes are searched and persisted, and `review::sweep` makes disputes, contradictions, lost anchors, unsupported rules and unaccepted proposals visible; semantic/model revalidation remains external |
-| 7 — Obsidian-style app | **Shell and chat client wired:** the desktop launches the installed Harness SDK profile in the selected project, relays session/tool events, and links directly to proposal review |
+| 7 — Obsidian-style app | **Shell and chat client wired:** the desktop launches the installed Harness SDK profile in the selected project on the model route chosen in Settings, relays session/tool events, and links directly to proposal review |
 
 Phase 5 was the real product milestone, and it is met without this repository
 absorbing runtime responsibilities. The runtime negotiates capabilities,
@@ -376,6 +376,18 @@ loads that installed package and relays notifications between Tauri and the SDK.
 The Harness profile owns the turn, tools, permissions and session. The UI shows
 session/tool progress and the final committed response; the SDK has no per-turn
 cancel operation, so Stop closes the runtime and the next turn starts a fresh one.
+
+The provider, model and key Settings resolves for chat choose the runtime's route
+(`src/lib/harness-route.ts`). The backend validates that route against a fixed shape
+(`HarnessRoute` in `src-tauri/src/harness.rs`), registers it as a per-launch profile
+patch in the app data folder that names the key's variable but never holds the key,
+and places the key in that variable of the runtime's own environment, which may only
+be `ATHENAEUM_LLM_API_KEY` or `DEEPSEEK_API_KEY`. A route with its own endpoint is sent
+only the key Settings supplies, never one inherited from the app's environment. A changed
+project or route relaunches the runtime under a new runtime id. A harness session id
+can be created only once, so the chat opens a fresh session per runtime id, and after
+Stop or a failed turn, and carries the conversation's earlier messages into that
+session's first turn.
 The app keeps local knowledge usable without this runtime, a model or a network.
 
 Wiki curation calls create proposals and only a person accepting one in Review
