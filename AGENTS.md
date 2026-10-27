@@ -81,10 +81,13 @@ a person reviews proposals before they become accepted Markdown pages.
 
 macOS and Windows must have native installer wizards and packaged dependencies. A shell
 or PowerShell one-liner is an optional advanced path, never the required onboarding flow.
+During current local development, use `wiki start` to launch the compiled app and
+`wiki start --build` to refresh it. Do not create or install native installer packages
+or desktop shortcuts for local iteration. Packaging is an explicit release task;
+ordinary launches reuse the existing release executable and Cargo cache.
 The desktop guides existing-agent selection, project setup and optional Library
 connection. Advanced agent CLI/profile installation remains in its owning repository.
-Base CLI/MCP setup works offline;
-agent-runtime installation and Library connection may require internet access.
+Base CLI/MCP setup works offline;agent-runtime installation and Library connection may require internet access.
 
 ## Athenaeum owns
 

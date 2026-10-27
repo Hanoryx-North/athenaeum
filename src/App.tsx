@@ -18,6 +18,9 @@ import { useGlobalShortcut } from "@/hooks/use-global-shortcut"
 import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
+import { FirstLaunch } from "@/components/project/first-launch"
+import { QuickStartGuide } from "@/components/project/quick-start-guide"
+import { loadOnboardingComplete, saveOnboardingComplete } from "@/lib/project-store"
 import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
 
@@ -35,6 +38,14 @@ function App() {
   const zoomLevel = useZoomStore((s) => s.level)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [firstLaunch, setFirstLaunch] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+
+  async function completeOnboarding() {
+    await saveOnboardingComplete()
+    setFirstLaunch(false)
+    setShowGuide(true)
+  }
 
   function isCurrentProject(proj: WikiProject): boolean {
     const current = useWikiStore.getState().project
@@ -312,6 +323,16 @@ function App() {
   // Auto-open last project on startup
   useEffect(() => {
     async function init() {
+      // Existing installations keep opening their projects without a new gate.
+      try {
+        const [complete, recent, last] = await Promise.all([
+          loadOnboardingComplete(), getRecentProjects(), getLastProject(),
+        ])
+        setFirstLaunch(!complete && recent.length === 0 && !last)
+      } catch (cause) {
+        console.warn("[startup] failed to load onboarding state:", cause)
+        setFirstLaunch(true)
+      }
       try {
         const savedZoom = await loadZoomLevel()
         applyDocumentZoom(savedZoom)
@@ -638,6 +659,8 @@ function App() {
     )
   }
 
+  if (firstLaunch) return <FirstLaunch onComplete={completeOnboarding} />
+
   if (!project) {
     return (
       <>
@@ -645,7 +668,10 @@ function App() {
           onCreateProject={() => setShowCreateDialog(true)}
           onOpenProject={handleOpenProject}
           onSelectProject={handleSelectRecent}
+          onAccount={() => setFirstLaunch(true)}
+          onQuickStart={() => setShowGuide(true)}
         />
+        <QuickStartGuide open={showGuide} onOpenChange={setShowGuide} />
         <CreateProjectDialog
           open={showCreateDialog}
           onOpenChange={setShowCreateDialog}
@@ -657,7 +683,8 @@ function App() {
 
   return (
     <>
-      <AppLayout onSwitchProject={handleSwitchProject} />
+      <AppLayout onSwitchProject={handleSwitchProject} onQuickStart={() => setShowGuide(true)} />
+      <QuickStartGuide open={showGuide} onOpenChange={setShowGuide} />
       <CreateProjectDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}

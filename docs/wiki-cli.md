@@ -7,6 +7,28 @@ knowledge operations. Agent/MCP launchers and source builds use their own runtim
 
 ## Install and start
 
+For local development, launch the compiled desktop from the command line:
+
+```sh
+wiki start                 # build once if missing, otherwise just open the app
+wiki start --build         # refresh frontend + desktop using the existing cache
+wiki start --dry-run --json
+```
+
+This workflow creates no installer packages or desktop shortcuts. It uses one
+release build in `athenaeum/target/release` (or `CARGO_TARGET_DIR`), and ordinary
+starts run no compiler or development server. Source changes take effect after
+`wiki start --build` (quit the running desktop first on Windows). Keep the Cargo
+cache to reuse dependencies; no `cargo clean`
+or separate build directory is needed. The first build needs the normal desktop
+build prerequisites and dependencies (`wiki dev install desktop`).
+
+Run from the source workspace, pass `--root /path/to/parent`, or save
+`WIKI_DEV_ROOT` in your shell environment to launch from any directory.
+If Cargo config selects a custom target directory, set `CARGO_TARGET_DIR` to
+the same directory for the launcher. `wiki dev build desktop --release` also
+builds the frontend and native executable without bundling installers.
+
 The native installers and CLI archives include `wiki` alongside `athenaeum`.
 The CLI installer exposes both on PATH. To bootstrap from source:
 

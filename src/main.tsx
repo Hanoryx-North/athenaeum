@@ -5,11 +5,15 @@ import "./index.css";
 import "@/i18n";
 import { loadAndApplyTheme, watchSystemTheme } from "@/lib/theme";
 import { AppDialogHost } from "@/components/app-dialog-host";
+import { DesktopShell } from "@/components/layout/desktop-shell";
 
 function applyPlatformClass() {
   const isTauri = "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
   if (isTauri && navigator.userAgent.includes("Mac OS X")) {
     document.documentElement.classList.add("platform-macos");
+  }
+  if (isTauri && navigator.userAgent.includes("Windows")) {
+    document.documentElement.classList.add("platform-windows");
   }
 }
 
@@ -22,8 +26,10 @@ async function initApp() {
 
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <React.StrictMode>
-        <App />
-        <AppDialogHost />
+        <DesktopShell>
+          <App />
+          <AppDialogHost />
+        </DesktopShell>
       </React.StrictMode>
     );
   } catch (err) {

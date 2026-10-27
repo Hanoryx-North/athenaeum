@@ -13,6 +13,16 @@ async function getStore() {
   return load(STORE_NAME, { autoSave: true, defaults: {} })
 }
 
+export async function loadOnboardingComplete(): Promise<boolean> {
+  return (await (await getStore()).get<boolean>("onboardingComplete")) === true
+}
+
+export async function saveOnboardingComplete(): Promise<void> {
+  const store = await getStore()
+  await store.set("onboardingComplete", true)
+  await store.save()
+}
+
 export async function getRecentProjects(): Promise<WikiProject[]> {
   const store = await getStore()
   const projects = await store.get<WikiProject[]>(RECENT_PROJECTS_KEY)

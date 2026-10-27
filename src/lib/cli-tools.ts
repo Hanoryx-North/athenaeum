@@ -66,7 +66,7 @@ export function cliStatus(): Promise<CliStatus> {
   return invoke<CliStatus>("cli_status")
 }
 
-export function runCli(workspace: string, job: CliJob): Promise<JobResult> {
+export function runCli(workspace: string | null, job: CliJob): Promise<JobResult> {
   return invoke<JobResult>("cli_run", {
     workspace,
     // Rust's serde names are snake_case; the closed enum is the contract.

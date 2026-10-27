@@ -19,9 +19,10 @@ const LEFT_PANEL_COLLAPSED_KEY = "athenaeum:left-panel-collapsed"
 
 interface AppLayoutProps {
   onSwitchProject: () => void
+  onQuickStart: () => void
 }
 
-export function AppLayout({ onSwitchProject }: AppLayoutProps) {
+export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
@@ -113,7 +114,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
       <UpdateBanner />
       <SetupBanner />
       <div className="flex min-h-0 flex-1">
-        <IconSidebar onSwitchProject={onSwitchProject} />
+        <IconSidebar onSwitchProject={onSwitchProject} onQuickStart={onQuickStart} />
         <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">
           {showLeftPanel && !leftCollapsed && (
             <>

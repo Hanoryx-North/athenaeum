@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import {
-  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity,
+  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, CircleHelp,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -31,9 +31,10 @@ const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = 
 
 interface IconSidebarProps {
   onSwitchProject: () => void
+  onQuickStart: () => void
 }
 
-export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
+export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps) {
   const { t } = useTranslation()
   const activeView = useWikiStore((s) => s.activeView)
   const setActiveView = useWikiStore((s) => s.setActiveView)
@@ -152,6 +153,12 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
         </div>
         {/* Bottom: daemon status + settings + switch project */}
         <div className="flex flex-col items-center gap-1 pb-1">
+          <Tooltip>
+            <TooltipTrigger aria-label="Quick start guide" onClick={onQuickStart} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+              <CircleHelp className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent side="right">Quick start guide</TooltipContent>
+          </Tooltip>
           {/* Daemon status indicator */}
           <Tooltip>
             <TooltipTrigger aria-label="Web Clipper status" className="flex h-6 w-6 items-center justify-center">

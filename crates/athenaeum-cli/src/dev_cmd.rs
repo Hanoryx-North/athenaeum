@@ -186,7 +186,7 @@ impl Component {
     }
 }
 
-fn root(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
+pub(crate) fn root(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(root) = explicit
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os("WIKI_DEV_ROOT").map(PathBuf::from))
@@ -199,6 +199,15 @@ fn root(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
         }
     }
     Err(portable_error("source_not_found", "No Athenaeum source workspace here. Use wiki dev --root <parent-of-repositories>, or set WIKI_DEV_ROOT."))
+}
+
+/// Compile the frontend and native app together, without creating installers.
+pub(crate) fn desktop_build(root: &Path, release: bool) -> Result<Step> {
+    let mut args = vec!["build".into(), "--no-bundle".into()];
+    if !release {
+        args.push("--debug".into());
+    }
+    script(root, Component::Desktop, "tauri", &args)
 }
 
 fn selected(targets: &Targets) -> Vec<Component> {
@@ -448,7 +457,9 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                         }
                     }
                     DevCommand::Build { release, .. } => {
-                        if c.crate_name().is_some() {
+                        if c == Component::Desktop {
+                            steps.push(desktop_build(&root, *release)?);
+                        } else if c.crate_name().is_some() {
                             let mut step = native(&root, c, "build");
                             if *release {
                                 step.args.push("--release".into());

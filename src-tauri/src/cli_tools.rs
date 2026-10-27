@@ -503,12 +503,30 @@ pub async fn cli_status() -> Result<CliStatus, String> {
 pub async fn cli_run(
     app: AppHandle,
     state: State<'_, CliRun>,
-    workspace: String,
+    workspace: Option<String>,
     job: CliJob,
 ) -> Result<JobResult, String> {
     let state = state.inner().clone();
     run_guarded_async("cli_run", async move {
         let cli = locate_cli().ok_or("cli_missing: the athenaeum command is not installed")?;
+        // Account sign-in is available before the person has created a wiki.
+        // Only account jobs may use the app's own directory as their working folder.
+        let workspace = match workspace {
+            Some(workspace) => workspace,
+            None if matches!(
+                &job,
+                CliJob::LibraryLogin { .. } | CliJob::LibraryLogout { .. }
+            ) =>
+            {
+                let directory = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|error| error.to_string())?;
+                std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+                directory.to_string_lossy().into_owned()
+            }
+            None => return Err("invalid_request: this operation needs a project folder".into()),
+        };
         // Absolute only: a relative path could be read as a flag, and the window always has the full path.
         if !Path::new(&workspace).is_absolute() || !Path::new(&workspace).is_dir() {
             return Err(format!(

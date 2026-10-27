@@ -12,6 +12,7 @@ mod process;
 mod product_cmd;
 mod render;
 mod setup_cmd;
+mod start_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -51,6 +52,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open the compiled desktop app. Build once if missing; reuse it thereafter.
+    Start(start_cmd::StartArgs),
     /// List every command and option, generated from the actual parser.
     Commands,
     /// Generate shell completion (bash, elvish, fish, powershell, zsh).
@@ -647,6 +650,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
             return Ok(Outcome::Ok);
         }
         Command::Config(args) => return config_cmd::run(cli.json, args),
+        Command::Start(args) => return start_cmd::run(cli.json, &cwd, args),
         Command::Dev(args) => return dev_cmd::run(cli.json, &cwd, args),
         Command::Api(args) => return api_cmd::run(cli.json, args),
         Command::Agent { args } => return process::launch(cli.json, &cwd, "agent", args),
@@ -1052,6 +1056,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
         | Command::Commands
         | Command::Completions { .. }
         | Command::Config(_)
+        | Command::Start(_)
         | Command::Dev(_)
         | Command::Api(_)
         | Command::Agent { .. }

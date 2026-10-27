@@ -52,6 +52,15 @@ pub fn executable(name: &str) -> Option<PathBuf> {
 }
 
 pub fn run_steps(json_out: bool, dry_run: bool, steps: &[Step]) -> Result<Outcome> {
+    run_steps_inner(json_out, dry_run, steps, true)
+}
+
+/// Build as part of another command: all child output goes to stderr, with no report.
+pub fn run_build_steps(steps: &[Step]) -> Result<Outcome> {
+    run_steps_inner(true, false, steps, false)
+}
+
+fn run_steps_inner(json_out: bool, dry_run: bool, steps: &[Step], report: bool) -> Result<Outcome> {
     if steps.is_empty() {
         return Err(portable_error(
             "unsupported_task",
@@ -119,7 +128,7 @@ pub fn run_steps(json_out: bool, dry_run: bool, steps: &[Step]) -> Result<Outcom
             break;
         }
     }
-    if json_out {
+    if json_out && report {
         println!(
             "{}",
             json!({"ok": ok, "steps": reports, "planned": steps.len(), "executed": reports.len()})
