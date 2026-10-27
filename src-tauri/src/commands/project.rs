@@ -245,7 +245,14 @@ pub fn open_project(path: String) -> Result<WikiProject, String> {
     run_guarded("open_project", || {
         let root = Path::new(&path);
 
-        validate_wiki_project_root(root)?;
+        // A person may open an existing coding project before it has a wiki.
+        // Guided setup initializes its local knowledge through the canonical CLI.
+        if !root.is_absolute() || !root.is_dir() {
+            return Err(format!(
+                "Choose an existing project folder by its full path: '{}'",
+                root.display()
+            ));
+        }
 
         // Derive project name from the directory name
         let name = root
@@ -346,13 +353,18 @@ fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
         return Err(format!("Path is not a directory: '{}'", root.display()));
     }
 
-    if !root.join("schema.md").exists() {
+    // Hosted clones intentionally contain only accepted Markdown and repository identity.
+    // schema.md is local configuration, so it cannot be required to open a portable wiki.
+    let portable = athenaeum_core::portable::manifest::RepositoryManifest::read(root)
+        .map_err(|error| format!("Invalid repository identity: {error}"))?
+        .is_some();
+    if !root.join("schema.md").exists() && !portable {
         return Err(format!(
             "Not a valid wiki project (missing schema.md): '{}'",
             root.display()
         ));
     }
-    if !root.join("wiki").is_dir() {
+    if !root.join("wiki").is_dir() && !portable {
         return Err(format!(
             "Not a valid wiki project (missing wiki/ directory): '{}'",
             root.display()

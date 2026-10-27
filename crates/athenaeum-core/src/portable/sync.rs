@@ -321,6 +321,16 @@ pub enum Keep {
     Both,
 }
 
+/// Local snapshots for human conflict review. A missing side means that side deleted the file.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictPreview {
+    pub path: String,
+    pub base: Option<String>,
+    pub local: Option<String>,
+    pub remote: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // The engine.
 // ---------------------------------------------------------------------------
@@ -658,7 +668,12 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
         }
 
         let mut ledger = TrustLedger::load(self.root)?;
-        for path in pending.added.iter().chain(&pending.modified).chain(&pending.deleted) {
+        for path in pending
+            .added
+            .iter()
+            .chain(&pending.modified)
+            .chain(&pending.deleted)
+        {
             ledger.forget(path);
         }
         ledger.save(self.root)?;
@@ -673,6 +688,47 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
             nothing_to_push: false,
             revision: Some(revision.id),
             pushed: pending,
+        })
+    }
+
+    /// Inspect a conflict without contacting the Library or changing any files.
+    pub fn conflict(&self, path: &str) -> Result<ConflictPreview> {
+        let _lock = RepoLock::acquire(&self.workspace(), "vault")?;
+        let state = SyncState::require(self.root)?;
+        if !state.conflicts.iter().any(|p| p == path) {
+            return Err(portable_error(
+                "not_found",
+                format!("{path} is not in conflict"),
+            ));
+        }
+        syncset::validate_path(path).map_err(|r| portable_error("invalid_path", r))?;
+        let dir = self.conflict_dir(state.conflict_revision.as_deref().unwrap_or_default());
+        let read = |target: PathBuf| -> Result<Option<String>> {
+            use std::io::Read;
+            ensure_inside(self.root, &target)?;
+            let file = match std::fs::File::open(&target) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(error.into()),
+            };
+            let mut bytes = Vec::new();
+            file.take(self.limits.max_file_bytes + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > self.limits.max_file_bytes {
+                return Err(portable_error(
+                    "invalid_content",
+                    "conflict page exceeds the per-file limit",
+                ));
+            }
+            String::from_utf8(bytes)
+                .map(Some)
+                .map_err(|_| portable_error("invalid_content", "conflict page is not UTF-8"))
+        };
+        Ok(ConflictPreview {
+            path: path.to_string(),
+            local: read(self.root.join(path))?,
+            base: read(dir.join("base").join(path))?,
+            remote: read(dir.join("remote").join(path))?,
         })
     }
 
@@ -771,7 +827,11 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
                 merged: false,
             });
         }
-        let updated = plan.writes.iter().map(|w| w.path.clone()).collect::<Vec<_>>();
+        let updated = plan
+            .writes
+            .iter()
+            .map(|w| w.path.clone())
+            .collect::<Vec<_>>();
 
         // Files first, then the identity they carry, so the state lands under the right id.
         std::fs::create_dir_all(self.workspace())?;
@@ -829,7 +889,9 @@ impl<'a, R: Remote + ?Sized> SyncEngine<'a, R> {
             {
                 return Err(portable_error(
                     "invalid_content",
-                    format!("{MANIFEST_FILE} contains an unexpected identity, format, or extra fields"),
+                    format!(
+                        "{MANIFEST_FILE} contains an unexpected identity, format, or extra fields"
+                    ),
                 ));
             }
         }
@@ -1025,7 +1087,10 @@ fn verify_revision(revision: &RemoteRevision) -> Result<()> {
         syncset::validate_path(&entry.path).map_err(|reason| {
             portable_error(
                 "invalid_path",
-                format!("revision {} names an unsafe path {:?}: {reason}", revision.id, entry.path),
+                format!(
+                    "revision {} names an unsafe path {:?}: {reason}",
+                    revision.id, entry.path
+                ),
             )
         })?;
         if !syncset::has_sync_extension(&entry.path) {
@@ -1065,7 +1130,10 @@ fn ensure_inside(root: &Path, target: &Path) -> Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(portable_error(
                     "invalid_path",
-                    format!("{} is a symbolic link; refusing to write through it", cursor.display()),
+                    format!(
+                        "{} is a symbolic link; refusing to write through it",
+                        cursor.display()
+                    ),
                 ))
             }
             Ok(_) => {}

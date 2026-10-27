@@ -72,6 +72,7 @@ export function layout(prefix, platform = process.platform) {
     manifest: p('install.json'),
     work: p('.download'),
     cli: p('bin', win ? 'athenaeum.exe' : 'athenaeum'),
+    wiki: p('bin', win ? 'wiki.exe' : 'wiki'),
     bundle: p('lib', BUNDLE_NAME),
     integrations: shim('athenaeum-integrations'),
     mcp: shim('athenaeum-mcp'),
@@ -142,13 +143,21 @@ function removeFromWindowsPath(dir) {
   run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script])
 }
 
-const LINKS = (l) => [['athenaeum', l.cli], ['athenaeum-integrations', l.integrations], ['athenaeum-mcp', l.mcp]]
+const LINKS = (l) => [['wiki', l.wiki], ['athenaeum', l.cli], ['athenaeum-integrations', l.integrations], ['athenaeum-mcp', l.mcp]]
 
 function linkLaunchers(l, home) {
   const dir = join(home, '.local', 'bin')
   mkdirSync(dir, { recursive: true })
   for (const [name, target] of LINKS(l)) {
     const link = join(dir, name)
+    if (name === 'wiki') {
+      try {
+        if (!lstatSync(link).isSymbolicLink() || readlinkSync(link) !== target) {
+          console.log(`\n  ${link} already exists; kept it. The Wiki CLI is available at ${target}.`)
+          continue
+        }
+      } catch (error) { if (error.code !== 'ENOENT') throw error }
+    }
     try { unlinkSync(link) } catch { /* nothing there yet */ }
     symlinkSync(target, link)
   }
@@ -190,8 +199,11 @@ export async function install(args, { env = process.env, home = homedir(), platf
   const archive = join(l.work, 'athenaeum-cli.archive')
   await fetchTo(cliSource, archive)
   run(tarCommand(), ['-xf', archive, '-C', l.bin])
+  // Also supports older release archives which contain only athenaeum.
+  // Both names are the same engine and require no Node or npx to run.
+  copyFileSync(l.cli, l.wiki)
   rmSync(l.work, { recursive: true, force: true })
-  if (platform !== 'win32') chmodSync(l.cli, 0o755)
+  if (platform !== 'win32') { chmodSync(l.cli, 0o755); chmodSync(l.wiki, 0o755) }
 
   say('Fetching the agent integration (MCP server and hooks)')
   await fetchTo(bundleSource, l.bundle)
@@ -209,6 +221,7 @@ export async function install(args, { env = process.env, home = homedir(), platf
     schema: 1,
     prefix,
     athenaeum: l.cli,
+    wiki: l.wiki,
     integrations: l.integrations,
     bundle: l.bundle,
     node: nodeBin,

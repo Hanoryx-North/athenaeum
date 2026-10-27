@@ -28,6 +28,13 @@ export type CliJob =
     }
   | { job: "sync_status" }
   | { job: "sync" }
+  | { job: "disconnect_agents"; agents: string[] }
+  | { job: "library_login" | "library_logout"; server: string }
+  | { job: "sync_link"; server: string; name: string; public: boolean }
+  | { job: "sync_clone"; server: string; remote: string; destination: string }
+  | { job: "sync_push" | "sync_pull" | "sync_unlink" }
+  | { job: "sync_conflict"; path: string }
+  | { job: "sync_resolve"; path: string; keep: "local" | "remote" | "both" }
 
 export interface JobResult {
   exitCode: number | null

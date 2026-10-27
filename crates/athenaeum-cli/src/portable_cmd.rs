@@ -121,6 +121,8 @@ pub enum SyncCommand {
         #[arg(long, short)]
         message: Option<String>,
     },
+    /// Compare local, remote and base snapshots of a conflicted path. Works offline.
+    Conflict { path: String },
     /// Settle a conflicted path.
     Resolve {
         path: String,
@@ -166,16 +168,30 @@ fn reindex(store: &mut KnowledgeStore, project: &Path) -> Result<VaultIndexRepor
 pub fn repo_init(json: bool, cwd: &Path, name: Option<&str>) -> Result<Outcome> {
     let workspace = Workspace::init(cwd)?;
     workspace.open()?;
-    let name = name.map(str::to_string).unwrap_or_else(|| default_name(cwd));
+    let name = name
+        .map(str::to_string)
+        .unwrap_or_else(|| default_name(cwd));
     let (manifest, created) = RepositoryManifest::read_or_init(cwd, &name)?;
-    emit(json, &serde_json::json!({ "manifest": manifest, "created": created }), || {
-        if created {
-            println!("Created {} for {:?} ({})", athenaeum_core::portable::manifest::MANIFEST_FILE, manifest.name, manifest.repository_id);
-        } else {
-            println!("{:?} already has an identity: {}", manifest.name, manifest.repository_id);
-        }
-        Ok(())
-    })?;
+    emit(
+        json,
+        &serde_json::json!({ "manifest": manifest, "created": created }),
+        || {
+            if created {
+                println!(
+                    "Created {} for {:?} ({})",
+                    athenaeum_core::portable::manifest::MANIFEST_FILE,
+                    manifest.name,
+                    manifest.repository_id
+                );
+            } else {
+                println!(
+                    "{:?} already has an identity: {}",
+                    manifest.name, manifest.repository_id
+                );
+            }
+            Ok(())
+        },
+    )?;
     Ok(Outcome::Ok)
 }
 
@@ -246,16 +262,37 @@ pub fn repo_info(json: bool, cwd: &Path) -> Result<Outcome> {
     };
     emit(json, &info, || {
         println!("path         {}", info.path);
-        println!("workspace    {}", if info.initialized { "yes" } else { "no (run `athenaeum init`)" });
+        println!(
+            "workspace    {}",
+            if info.initialized {
+                "yes"
+            } else {
+                "no (run `athenaeum init`)"
+            }
+        );
         match (&info.name, &info.repository_id) {
             (Some(name), Some(id)) => println!("repository   {name} ({id})"),
-            _ => println!("repository   no athenaeum.json (a legacy vault; `athenaeum repo init` adds one)"),
+            _ => println!(
+                "repository   no athenaeum.json (a legacy vault; `athenaeum repo init` adds one)"
+            ),
         }
         if let Some(nodes) = info.nodes {
-            println!("nodes        {nodes} ({} proposal(s) awaiting a decision)", info.proposals.unwrap_or(0));
+            println!(
+                "nodes        {nodes} ({} proposal(s) awaiting a decision)",
+                info.proposals.unwrap_or(0)
+            );
         }
         match &info.remote {
-            Some(remote) => println!("library      {} ({}){}", remote.server, remote.remote_id, if remote.conflicts > 0 { format!(", {} conflict(s)", remote.conflicts) } else { String::new() }),
+            Some(remote) => println!(
+                "library      {} ({}){}",
+                remote.server,
+                remote.remote_id,
+                if remote.conflicts > 0 {
+                    format!(", {} conflict(s)", remote.conflicts)
+                } else {
+                    String::new()
+                }
+            ),
             None => println!("library      not linked"),
         }
         Ok(())
@@ -286,7 +323,12 @@ pub fn proposals(json: bool, store: &mut KnowledgeStore, limit: u32) -> Result<O
                 "{:<12} {:<40} proposed by {}  {}",
                 proposal.node.node_type,
                 crate::render::truncate(&proposal.node.title, 40),
-                proposal.node.provenance.detail.as_deref().unwrap_or("a model"),
+                proposal
+                    .node
+                    .provenance
+                    .detail
+                    .as_deref()
+                    .unwrap_or("a model"),
                 proposal.node.id
             );
         }
@@ -295,14 +337,25 @@ pub fn proposals(json: bool, store: &mut KnowledgeStore, limit: u32) -> Result<O
     Ok(Outcome::Ok)
 }
 
-pub fn accept(json: bool, store: &mut KnowledgeStore, reference: &str, by: &str) -> Result<Outcome> {
+pub fn accept(
+    json: bool,
+    store: &mut KnowledgeStore,
+    reference: &str,
+    by: &str,
+) -> Result<Outcome> {
     let node = crate::resolve(store, reference)?;
     let accepted = memory::accept(store, &node.id, by)?;
     emit(json, &accepted, || {
         if accepted.already_accepted {
-            println!("{:?} was already accepted: {}", accepted.node.title, accepted.page.path);
+            println!(
+                "{:?} was already accepted: {}",
+                accepted.node.title, accepted.page.path
+            );
         } else {
-            println!("accepted {:?} → {}", accepted.node.title, accepted.page.path);
+            println!(
+                "accepted {:?} → {}",
+                accepted.node.title, accepted.page.path
+            );
             if !accepted.relationships_left_local.is_empty() {
                 println!(
                     "  {} relationship(s) stay local until their other end is accepted: {}",
@@ -326,7 +379,10 @@ pub fn reject(
     let node = crate::resolve(store, reference)?;
     let rejected = memory::reject(store, &node.id, reason, by)?;
     emit(json, &rejected, || {
-        println!("rejected {:?}; it will not be offered again", rejected.title);
+        println!(
+            "rejected {:?}; it will not be offered again",
+            rejected.title
+        );
         Ok(())
     })?;
     Ok(Outcome::Ok)
@@ -335,7 +391,11 @@ pub fn reject(
 pub fn materialize(json: bool, store: &mut KnowledgeStore, apply: bool) -> Result<Outcome> {
     let report = memory::materialize(store, apply)?;
     emit(json, &report, || {
-        let verb = if report.dry_run { "would write" } else { "wrote" };
+        let verb = if report.dry_run {
+            "would write"
+        } else {
+            "wrote"
+        };
         for item in &report.written {
             println!("{verb} {}  ← {:?}", item.path, item.title);
         }
@@ -343,7 +403,10 @@ pub fn materialize(json: bool, store: &mut KnowledgeStore, apply: bool) -> Resul
             println!("left alone {:?}: {}", item.title, item.reason);
         }
         if report.dry_run {
-            println!("dry run: {} page(s) would be written; pass --apply to write them", report.written.len());
+            println!(
+                "dry run: {} page(s) would be written; pass --apply to write them",
+                report.written.len()
+            );
         }
         Ok(())
     })?;
@@ -357,7 +420,10 @@ pub fn materialize(json: bool, store: &mut KnowledgeStore, apply: bool) -> Resul
 pub fn export(json: bool, workspace: &Workspace, output: &Path) -> Result<Outcome> {
     let report = archive::export(project_of(workspace)?, output)?;
     emit(json, &report, || {
-        println!("exported {} file(s), {} bytes → {}", report.files, report.bytes, report.path);
+        println!(
+            "exported {} file(s), {} bytes → {}",
+            report.files, report.bytes, report.path
+        );
         Ok(())
     })?;
     Ok(Outcome::Ok)
@@ -368,20 +434,28 @@ pub fn import(json: bool, archive_path: &Path, destination: &Path) -> Result<Out
     let workspace = Workspace::init(destination)?;
     let mut store = workspace.open()?;
     let index = reindex(&mut store, destination)?;
-    emit(json, &serde_json::json!({ "import": report, "index": index }), || {
-        println!(
-            "imported {} file(s) into {} ({}); indexed {} page(s), {} node(s) created",
-            report.files, report.destination, report.repository_id, index.pages, index.nodes_created
-        );
-        if report.capped_files > 0 {
+    emit(
+        json,
+        &serde_json::json!({ "import": report, "index": index }),
+        || {
             println!(
-                "{} page(s) arrived from outside: their declared authority is capped at \
-                 imported_knowledge until you edit or `athenaeum trust adopt` them",
-                report.capped_files
+                "imported {} file(s) into {} ({}); indexed {} page(s), {} node(s) created",
+                report.files,
+                report.destination,
+                report.repository_id,
+                index.pages,
+                index.nodes_created
             );
-        }
-        Ok(())
-    })?;
+            if report.capped_files > 0 {
+                println!(
+                    "{} page(s) arrived from outside: their declared authority is capped at \
+                 imported_knowledge until you edit or `athenaeum trust adopt` them",
+                    report.capped_files
+                );
+            }
+            Ok(())
+        },
+    )?;
     Ok(Outcome::Ok)
 }
 
@@ -389,7 +463,12 @@ pub fn import(json: bool, archive_path: &Path, destination: &Path) -> Result<Out
 // trust
 // ---------------------------------------------------------------------------
 
-pub fn trust(json: bool, store: &mut KnowledgeStore, workspace: &Workspace, command: &TrustCommand) -> Result<Outcome> {
+pub fn trust(
+    json: bool,
+    store: &mut KnowledgeStore,
+    workspace: &Workspace,
+    command: &TrustCommand,
+) -> Result<Outcome> {
     let project = project_of(workspace)?;
     let mut ledger = TrustLedger::load(project)?;
     match command {
@@ -412,13 +491,19 @@ pub fn trust(json: bool, store: &mut KnowledgeStore, workspace: &Workspace, comm
                 paths.clone()
             };
             if targets.is_empty() {
-                return Err(portable_error("invalid_request", "name the pages to adopt, or pass --all"));
+                return Err(portable_error(
+                    "invalid_request",
+                    "name the pages to adopt, or pass --all",
+                ));
             }
             let adopted: Vec<&String> = targets.iter().filter(|p| ledger.forget(p)).collect();
             ledger.save(project)?;
             reindex(store, project)?;
             emit(json, &adopted, || {
-                println!("adopted {} page(s); their declared authority now applies", adopted.len());
+                println!(
+                    "adopted {} page(s); their declared authority now applies",
+                    adopted.len()
+                );
                 Ok(())
             })?;
         }
@@ -466,15 +551,19 @@ pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
                 None => device_login(&client)?,
             };
             let stored_in = credentials::store(&server, &token, Some(&username))?;
-            emit(json, &serde_json::json!({ "server": server, "username": username, "storedIn": stored_in }), || {
-                println!("connected to {server} as {username}");
-                eprintln!(
+            emit(
+                json,
+                &serde_json::json!({ "server": server, "username": username, "storedIn": stored_in }),
+                || {
+                    println!("connected to {server} as {username}");
+                    eprintln!(
                     "note: the token is stored in {} (readable only by you); this build does not use \
                      the operating system's credential store",
                     stored_in.display()
                 );
-                Ok(())
-            })?;
+                    Ok(())
+                },
+            )?;
         }
         LibraryCommand::Logout { server } => {
             let server = crate::library::normalize_server(&server_arg(server.as_deref(), None)?)?
@@ -482,10 +571,21 @@ pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
                 .trim_end_matches('/')
                 .to_string();
             let removed = credentials::forget(&server)?;
-            emit(json, &serde_json::json!({ "server": server, "removed": removed }), || {
-                println!("{}", if removed { "signed out" } else { "there was no stored credential" });
-                Ok(())
-            })?;
+            emit(
+                json,
+                &serde_json::json!({ "server": server, "removed": removed }),
+                || {
+                    println!(
+                        "{}",
+                        if removed {
+                            "signed out"
+                        } else {
+                            "there was no stored credential"
+                        }
+                    );
+                    Ok(())
+                },
+            )?;
         }
         LibraryCommand::Status { server } => {
             let servers: Vec<(String, Option<String>)> = match server {
@@ -494,12 +594,15 @@ pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
             };
             let mut rows = Vec::new();
             for (server, stored_user) in servers {
-                let (reachable, username, detail) = match LibraryClient::for_server(&server)
-                    .and_then(|client| client.whoami())
-                {
-                    Ok(who) => (true, Some(who.username), None),
-                    Err(error) => (!matches!(&error, Error::Portable { code, .. } if code == "offline"), stored_user, Some(error.to_string())),
-                };
+                let (reachable, username, detail) =
+                    match LibraryClient::for_server(&server).and_then(|client| client.whoami()) {
+                        Ok(who) => (true, Some(who.username), None),
+                        Err(error) => (
+                            !matches!(&error, Error::Portable { code, .. } if code == "offline"),
+                            stored_user,
+                            Some(error.to_string()),
+                        ),
+                    };
                 rows.push(serde_json::json!({ "server": server, "username": username, "reachable": reachable, "detail": detail }));
             }
             emit(json, &rows, || {
@@ -507,7 +610,12 @@ pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
                     println!("not connected to any Library; run `athenaeum library login --server <url>`");
                 }
                 for row in &rows {
-                    println!("{}  {}  {}", row["server"].as_str().unwrap_or(""), row["username"].as_str().unwrap_or("(unknown)"), row["detail"].as_str().unwrap_or("ok"));
+                    println!(
+                        "{}  {}  {}",
+                        row["server"].as_str().unwrap_or(""),
+                        row["username"].as_str().unwrap_or("(unknown)"),
+                        row["detail"].as_str().unwrap_or("ok")
+                    );
                 }
                 Ok(())
             })?;
@@ -577,7 +685,9 @@ fn device_login(client: &LibraryClient) -> Result<(String, String)> {
             serde_json::json!({ "event": "device_code", "url": uri, "code": started.user_code, "expiresIn": started.expires_in })
         );
     } else {
-        eprintln!("To connect, open this address in a browser where you are signed in to the Library:");
+        eprintln!(
+            "To connect, open this address in a browser where you are signed in to the Library:"
+        );
         eprintln!("\n    {uri}\n");
         eprintln!("and confirm the code  {}", started.user_code);
         eprintln!("Waiting for approval (Ctrl-C to cancel)…");
@@ -590,9 +700,11 @@ fn device_login(client: &LibraryClient) -> Result<(String, String)> {
             Ok(Some(token)) => {
                 let username = match token.username {
                     Some(username) => username,
-                    None => LibraryClient::new(&client.server(), Some(token.access_token.clone()))?
-                        .whoami()?
-                        .username,
+                    None => {
+                        LibraryClient::new(&client.server(), Some(token.access_token.clone()))?
+                            .whoami()?
+                            .username
+                    }
                 };
                 return Ok((token.access_token, username));
             }
@@ -600,7 +712,10 @@ fn device_login(client: &LibraryClient) -> Result<(String, String)> {
             Err(error) => return Err(error),
         }
     }
-    Err(portable_error("expired_token", "the code expired before it was approved; run login again"))
+    Err(portable_error(
+        "expired_token",
+        "the code expired before it was approved; run login again",
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -630,7 +745,12 @@ pub fn sync(
     default_message: Option<&str>,
 ) -> Result<Outcome> {
     // Commands that create the directory they work in cannot open a workspace first.
-    if let Some(SyncCommand::Clone { remote, destination, server }) = command {
+    if let Some(SyncCommand::Clone {
+        remote,
+        destination,
+        server,
+    }) = command
+    {
         return clone(json, remote, destination, server.as_deref());
     }
 
@@ -641,7 +761,13 @@ pub fn sync(
     let state = SyncState::load(&project).ok().flatten();
 
     match command {
-        Some(SyncCommand::Link { server, remote, create, public, description }) => {
+        Some(SyncCommand::Link {
+            server,
+            remote,
+            create,
+            public,
+            description,
+        }) => {
             let server = server_arg(server.as_deref(), state.as_ref())?;
             let (repository, linked) = link_repository(
                 &project,
@@ -652,7 +778,10 @@ pub fn sync(
                 description.as_deref(),
             )?;
             emit(json, &linked, || {
-                println!("linked to {} ({}) on {}", repository.name, repository.id, linked.server);
+                println!(
+                    "linked to {} ({}) on {}",
+                    repository.name, repository.id, linked.server
+                );
                 Ok(())
             })?;
             Ok(Outcome::Ok)
@@ -660,12 +789,24 @@ pub fn sync(
         Some(SyncCommand::Unlink) => {
             let removed = sync::unlink(&project)?;
             emit(json, &serde_json::json!({ "unlinked": removed }), || {
-                println!("{}", if removed { "unlinked" } else { "it was not linked" });
+                println!(
+                    "{}",
+                    if removed {
+                        "unlinked"
+                    } else {
+                        "it was not linked"
+                    }
+                );
                 Ok(())
             })?;
             Ok(Outcome::Ok)
         }
-        Some(SyncCommand::Status) | Some(SyncCommand::Pull) | Some(SyncCommand::Push { .. }) | Some(SyncCommand::Resolve { .. }) | None => {
+        Some(SyncCommand::Status)
+        | Some(SyncCommand::Pull)
+        | Some(SyncCommand::Push { .. })
+        | Some(SyncCommand::Resolve { .. })
+        | Some(SyncCommand::Conflict { .. })
+        | None => {
             let Some(state) = state else {
                 return Err(portable_error(
                     "not_linked",
@@ -673,16 +814,38 @@ pub fn sync(
                 ));
             };
             let client = client_for(&state.server)?;
-            let engine = SyncEngine::new(&project, &client).with_limits(limits_of(&client));
+            let limits = if matches!(
+                command,
+                Some(SyncCommand::Conflict { .. } | SyncCommand::Resolve { .. })
+            ) {
+                SyncLimits::default()
+            } else {
+                limits_of(&client)
+            };
+            let engine = SyncEngine::new(&project, &client).with_limits(limits);
             let mut store = workspace.open()?;
 
-            let result = run_sync(json, &engine, &mut store, &project, command, default_message);
+            let result = run_sync(
+                json,
+                &engine,
+                &mut store,
+                &project,
+                command,
+                default_message,
+            );
             match result {
-                Err(error) if describe_offline(&error) && !matches!(command, Some(SyncCommand::Status)) => {
-                    emit(json, &serde_json::json!({ "status": "offline", "message": error.to_string() }), || {
-                        eprintln!("offline: {error}");
-                        Ok(())
-                    })?;
+                Err(error)
+                    if describe_offline(&error)
+                        && !matches!(command, Some(SyncCommand::Status)) =>
+                {
+                    emit(
+                        json,
+                        &serde_json::json!({ "status": "offline", "message": error.to_string() }),
+                        || {
+                            eprintln!("offline: {error}");
+                            Ok(())
+                        },
+                    )?;
                     Ok(Outcome::BridgeError)
                 }
                 other => other,
@@ -706,21 +869,45 @@ fn run_sync(
             emit(json, &status, || {
                 match status.position {
                     SyncPosition::NotLinked => println!("not linked"),
-                    SyncPosition::Offline => println!("offline — {}", status.detail.as_deref().unwrap_or("the Library cannot be reached")),
-                    SyncPosition::Conflicted => println!("conflicted — resolve: {}", status.conflicts.join(", ")),
+                    SyncPosition::Offline => println!(
+                        "offline — {}",
+                        status
+                            .detail
+                            .as_deref()
+                            .unwrap_or("the Library cannot be reached")
+                    ),
+                    SyncPosition::Conflicted => {
+                        println!("conflicted — resolve: {}", status.conflicts.join(", "))
+                    }
                     SyncPosition::UpToDate => println!("up to date"),
-                    SyncPosition::Ahead => println!("ahead — {} local change(s) to push", status.pending.len()),
+                    SyncPosition::Ahead => {
+                        println!("ahead — {} local change(s) to push", status.pending.len())
+                    }
                     SyncPosition::Behind => println!("behind — the Library has changes to pull"),
-                    SyncPosition::Diverged => println!("diverged — {} local change(s), and the Library has changes to pull", status.pending.len()),
+                    SyncPosition::Diverged => println!(
+                        "diverged — {} local change(s), and the Library has changes to pull",
+                        status.pending.len()
+                    ),
                 }
-                for path in status.pending.added.iter() { println!("  + {path}"); }
-                for path in status.pending.modified.iter() { println!("  ~ {path}"); }
-                for path in status.pending.deleted.iter() { println!("  - {path}"); }
+                for path in status.pending.added.iter() {
+                    println!("  + {path}");
+                }
+                for path in status.pending.modified.iter() {
+                    println!("  ~ {path}");
+                }
+                for path in status.pending.deleted.iter() {
+                    println!("  - {path}");
+                }
                 for skipped in &status.skipped {
                     println!("  (stays local: {} — {})", skipped.path, skipped.reason);
                 }
                 Ok(())
             })?;
+            Ok(Outcome::Ok)
+        }
+        Some(SyncCommand::Conflict { path }) => {
+            let preview = engine.conflict(path)?;
+            println!("{}", serde_json::to_string_pretty(&preview)?);
             Ok(Outcome::Ok)
         }
         Some(SyncCommand::Resolve { path, keep }) => {
@@ -737,7 +924,12 @@ fn run_sync(
             after_pull(json, store, project, &outcome)
         }
         Some(SyncCommand::Push { message }) => {
-            let outcome = engine.push(message.as_deref().or(default_message).unwrap_or("Sync from athenaeum"))?;
+            let outcome = engine.push(
+                message
+                    .as_deref()
+                    .or(default_message)
+                    .unwrap_or("Sync from athenaeum"),
+            )?;
             emit(json, &outcome, || {
                 if outcome.nothing_to_push {
                     println!("nothing to push");
@@ -763,20 +955,30 @@ fn run_sync(
                 if json {
                     println!(
                         "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({ "pull": pulled, "index": index, "push": null }))?
+                        serde_json::to_string_pretty(
+                            &serde_json::json!({ "pull": pulled, "index": index, "push": null })
+                        )?
                     );
                 }
                 return Ok(Outcome::ProblemsFound);
             }
             let pushed = engine.push(default_message.unwrap_or("Sync from athenaeum"))?;
-            emit(json, &serde_json::json!({ "pull": pulled, "index": index, "push": pushed }), || {
-                if pushed.nothing_to_push {
-                    println!("nothing to push");
-                } else {
-                    println!("pushed {} change(s) as {}", pushed.pushed.len(), pushed.revision.as_deref().unwrap_or("?"));
-                }
-                Ok(())
-            })?;
+            emit(
+                json,
+                &serde_json::json!({ "pull": pulled, "index": index, "push": pushed }),
+                || {
+                    if pushed.nothing_to_push {
+                        println!("nothing to push");
+                    } else {
+                        println!(
+                            "pushed {} change(s) as {}",
+                            pushed.pushed.len(),
+                            pushed.revision.as_deref().unwrap_or("?")
+                        );
+                    }
+                    Ok(())
+                },
+            )?;
             Ok(Outcome::Ok)
         }
         _ => unreachable!("handled by the caller"),
@@ -810,7 +1012,10 @@ fn print_pull(outcome: &sync::PullOutcome, index: Option<&VaultIndexReport>) {
         outcome.deleted.len()
     );
     if let Some(index) = index {
-        println!("rebuilt the local index: {} page(s), {} node(s) created", index.pages, index.nodes_created);
+        println!(
+            "rebuilt the local index: {} page(s), {} node(s) created",
+            index.pages, index.nodes_created
+        );
     }
     if !outcome.updated.is_empty() {
         println!("pulled pages are capped at imported_knowledge until you edit or `athenaeum trust adopt` them");
@@ -828,11 +1033,18 @@ fn after_pull(
 ) -> Result<Outcome> {
     let index = reindex_after_pull(store, project, outcome)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "pull": outcome, "index": index }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({ "pull": outcome, "index": index }))?
+        );
     } else {
         print_pull(outcome, index.as_ref());
     }
-    Ok(if outcome.conflicts.is_empty() { Outcome::Ok } else { Outcome::ProblemsFound })
+    Ok(if outcome.conflicts.is_empty() {
+        Outcome::Ok
+    } else {
+        Outcome::ProblemsFound
+    })
 }
 
 fn clone(json: bool, remote: &str, destination: &Path, server: Option<&str>) -> Result<Outcome> {
@@ -842,7 +1054,10 @@ fn clone(json: bool, remote: &str, destination: &Path, server: Option<&str>) -> 
     if destination.exists() && std::fs::read_dir(destination)?.next().is_some() {
         return Err(portable_error(
             "conflict",
-            format!("{} is not empty; a clone never overwrites", destination.display()),
+            format!(
+                "{} is not empty; a clone never overwrites",
+                destination.display()
+            ),
         ));
     }
     std::fs::create_dir_all(destination)?;
@@ -852,17 +1067,21 @@ fn clone(json: bool, remote: &str, destination: &Path, server: Option<&str>) -> 
     let workspace = Workspace::init(destination)?;
     let mut store = workspace.open()?;
     let index = reindex(&mut store, destination)?;
-    emit(json, &serde_json::json!({ "repository": repository, "pull": outcome, "index": index }), || {
-        println!(
-            "cloned {} into {}: {} file(s); indexed {} page(s)",
-            repository.name,
-            destination.display(),
-            outcome.updated.len(),
-            index.pages
-        );
-        println!("cloned pages are capped at imported_knowledge until you edit or `athenaeum trust adopt` them");
-        Ok(())
-    })?;
+    emit(
+        json,
+        &serde_json::json!({ "repository": repository, "pull": outcome, "index": index }),
+        || {
+            println!(
+                "cloned {} into {}: {} file(s); indexed {} page(s)",
+                repository.name,
+                destination.display(),
+                outcome.updated.len(),
+                index.pages
+            );
+            println!("cloned pages are capped at imported_knowledge until you edit or `athenaeum trust adopt` them");
+            Ok(())
+        },
+    )?;
     Ok(Outcome::Ok)
 }
 
@@ -890,10 +1109,22 @@ pub fn import_legacy_core(json: bool, store: &mut KnowledgeStore, apply: bool) -
             println!("no retired athenaeum-core index (.athenaeum/local-core.db) here; nothing to import");
             return Ok(());
         }
-        let verb = if report.dry_run { "would import" } else { "imported" };
-        println!("{verb} {} pending proposal(s) from .athenaeum/local-core.db", report.imported.len());
+        let verb = if report.dry_run {
+            "would import"
+        } else {
+            "imported"
+        };
+        println!(
+            "{verb} {} pending proposal(s) from .athenaeum/local-core.db",
+            report.imported.len()
+        );
         for item in &report.imported {
-            println!("  {:<40} {} evidence, {} relationship(s)", crate::render::truncate(&item.title, 40), item.evidence, item.relationships);
+            println!(
+                "  {:<40} {} evidence, {} relationship(s)",
+                crate::render::truncate(&item.title, 40),
+                item.evidence,
+                item.relationships
+            );
         }
         for note in &report.left_alone {
             println!("  left alone: {note}");

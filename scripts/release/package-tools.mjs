@@ -23,7 +23,15 @@ const nodes = {
 try {
   if (!nodes[target] || !integration || !agentDir) throw new Error('Usage: package-tools.mjs TARGET INTEGRATION_FILE AGENT_ARTIFACT_DIR')
   const windows = target.includes('windows')
-  const cli = join(root, 'target', target, 'release', windows ? 'athenaeum.exe' : 'athenaeum')
+  let cli = join(root, 'target', target, 'release', windows ? 'athenaeum.exe' : 'athenaeum')
+  if (!existsSync(cli)) {
+    // A native cargo build omits the target triple directory. Never use that fallback
+    // for a cross-target package: the compiler must identify the exact requested host.
+    const host = /^host: (.+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))?.[1]?.trim()
+    if (host === target) cli = join(root, 'target', 'release', windows ? 'athenaeum.exe' : 'athenaeum')
+  }
+  const integrationLicense = [join(dirname(integration), 'LICENSE-integrations'), resolve(dirname(integration), '../LICENSE'), join(root, 'install', 'NOTICE-MIT.txt')].find(existsSync)
+  if (!integrationLicense) throw new Error('The MCP integration artifact must include its MIT LICENSE-integrations notice')
   for (const file of [cli, integration, ...['install.mjs', 'pins.json', 'athenaeum-agent.tgz', 'LICENSE'].map(f => join(agentDir, f))]) {
     if (!existsSync(file)) throw new Error(`Missing packaged component: ${file}`)
   }
@@ -31,6 +39,7 @@ try {
   rmSync(out, { recursive: true, force: true })
   mkdirSync(out, { recursive: true })
   cpSync(integration, join(out, 'athenaeum-integrations.mjs'))
+  cpSync(integrationLicense, join(out, 'LICENSE-integrations'))
   cpSync(agentDir, join(out, 'agent'), { recursive: true })
   // MIT components stay separate artifacts and retain their own licence.
   cpSync(join(root, 'LICENSE'), join(out, 'LICENSE-athenaeum'))
@@ -49,8 +58,12 @@ try {
     cpSync(join(work, name), join(out, 'node'), { recursive: true, verbatimSymlinks: true })
     mkdirSync(join(work, 'cli'))
     cpSync(cli, join(work, 'cli', windows ? 'athenaeum.exe' : 'athenaeum'))
+    cpSync(cli, join(work, 'cli', windows ? 'wiki.exe' : 'wiki'))
     cpSync(join(root, 'LICENSE'), join(work, 'cli', 'LICENSE'))
-    if (!windows) chmodSync(join(work, 'cli', 'athenaeum'), 0o755)
+    if (!windows) {
+      chmodSync(join(work, 'cli', 'athenaeum'), 0o755)
+      chmodSync(join(work, 'cli', 'wiki'), 0o755)
+    }
     const cliArchive = join(out, windows ? 'athenaeum-cli.zip' : 'athenaeum-cli.tar.gz')
     execFileSync(tar, windows ? ['-a', '-cf', cliArchive, '-C', join(work, 'cli'), '.'] : ['-czf', cliArchive, '-C', join(work, 'cli'), '.'], { stdio: 'inherit' })
     writeFileSync(join(out, 'components.json'), JSON.stringify({ schema: 1, target, node: version,

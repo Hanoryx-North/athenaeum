@@ -335,6 +335,11 @@ jobs:
           mkdir cli-stage
           cp "$BIN" LICENSE cli-stage/
           if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "$BIN" cli-stage/wiki.exe
+          else
+            cp "$BIN" cli-stage/wiki
+          fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
             (cd cli-stage && tar -a -cf "../dist-release/athenaeum-cli-$TARGET.zip" *)
           else
             tar -czf "dist-release/athenaeum-cli-$TARGET.tar.gz" -C cli-stage .

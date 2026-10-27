@@ -1,19 +1,14 @@
-//! `athenaeum` — command-line access to a knowledge base.
-//!
-//! This exists to keep the library honest. Every operation the desktop app
-//! performs is reachable here, without a window, a frontend build or a model
-//! API key, which means the core can be exercised in CI on all three target
-//! platforms and debugged by reading the same commands a user would type.
-//!
-//! It is also the acceptance harness for buildplan §73 — create, read,
-//! update, delete, version, validate.
-//!
-//! This file defines arguments and dispatches. Rendering lives in
-//! [`render`]; knowledge-base validation lives in [`check`].
+// `wiki` and the compatible `athenaeum` executable share this entry point.
+// Arguments and dispatch only; knowledge rules stay in athenaeum-core.
 
+mod api_cmd;
 mod bridge;
+mod catalog;
+mod config_cmd;
+mod dev_cmd;
 mod library;
 mod portable_cmd;
+mod process;
 mod product_cmd;
 mod render;
 mod setup_cmd;
@@ -24,7 +19,7 @@ use std::process::ExitCode;
 use athenaeum_core::graph;
 use athenaeum_core::prelude::*;
 use athenaeum_core::vault::{lint, LintOptions, LintSeverity, PageRef, VaultSync};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use portable_cmd::{LibraryCommand, RepoCommand, SyncCommand, TrustCommand, VaultCommand};
 use product_cmd::ScopeArg;
@@ -32,9 +27,10 @@ use render::emit;
 
 #[derive(Parser)]
 #[command(
-    name = "athenaeum",
+    name = "wiki",
     version,
-    about = "A local, navigable knowledge graph for a codebase."
+    about = "Athenaeum: local wikis, knowledge, agents, Library, and development.",
+    after_help = "Start: wiki setup\nDiscover every command: wiki commands\nDeveloper tools: wiki dev --help\nThe athenaeum executable accepts the same commands."
 )]
 struct Cli {
     /// Project directory. Defaults to the nearest ancestor containing
@@ -55,6 +51,26 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List every command and option, generated from the actual parser.
+    Commands,
+    /// Generate shell completion (bash, elvish, fish, powershell, zsh).
+    Completions { shell: clap_complete::Shell },
+    /// Inspect and edit the desktop's saved settings. Quit the app before writing.
+    Config(config_cmd::ConfigArgs),
+    /// Build, check, test, and serve the Athenaeum source projects.
+    Dev(dev_cmd::DevArgs),
+    /// Discover and call the full Library API, including authorized operator routes.
+    Api(api_cmd::ApiArgs),
+    /// Launch the installed Athenaeum Agent in this project. Pass its flags after `--`.
+    Agent {
+        #[arg(last = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Run the installed MCP server on stdio. Pass MCP flags after `--`.
+    Mcp {
+        #[arg(last = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Create `.athenaeum/` in the project directory.
     Init,
     /// Set up Athenaeum for this project and connect your coding agents. Safe to repeat.
@@ -63,6 +79,11 @@ enum Command {
     /// connects the hosted Library (`--library`), and wires Claude Code, Codex and Cursor to the
     /// knowledge base so they recall it and propose what they learn.
     Setup(setup_cmd::SetupArgs),
+    /// Remove Athenaeum's configuration from selected external agents, preserving other settings.
+    DisconnectAgents {
+        #[arg(long, value_delimiter = ',', value_parser = ["claude", "codex", "cursor"])]
+        agents: Vec<String>,
+    },
     /// Check every link: the engine, this project, the Library and your coding agents.
     Doctor {
         /// Where athenaeum-integrations is (a launcher, or its `.mjs` bundle).
@@ -72,8 +93,10 @@ enum Command {
     /// Show what the knowledge base contains.
     Stats,
     /// Add a node.
+    #[command(visible_alias = "create")]
     Add(AddArgs),
     /// Print a node with its evidence and relationships.
+    #[command(visible_alias = "open")]
     Show { id: String },
     /// List nodes.
     List(ListArgs),
@@ -94,6 +117,7 @@ enum Command {
         status: Option<StatusArg>,
     },
     /// Delete a node, its edges and its history.
+    #[command(visible_alias = "delete")]
     Remove { id: String },
     /// Assert a relationship: `link <from> <type> <to>`.
     Link(LinkArgs),
@@ -250,7 +274,10 @@ enum Command {
     /// Write the repository to a zip: text, sources and a manifest of hashes, never the index.
     Export { output: PathBuf },
     /// Create a repository from an export. Never overwrites; indexes when done.
-    Import { archive: PathBuf, destination: PathBuf },
+    Import {
+        archive: PathBuf,
+        destination: PathBuf,
+    },
     /// Pages that arrived from outside and have not been reviewed.
     Trust {
         #[command(subcommand)]
@@ -614,15 +641,39 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
     // These work on a directory that has no workspace yet, or create the one they work in.
     match &cli.command {
-        Command::Setup(args) => return setup_cmd::setup(cli.json, &cwd, cli.project.is_some(), args),
-        Command::Doctor { integrations } => return setup_cmd::doctor(cli.json, &cwd, integrations.as_deref()),
-        Command::Repo { command: RepoCommand::Init { name } } => {
+        Command::Commands => return catalog::run(cli.json),
+        Command::Completions { shell } => {
+            clap_complete::generate(*shell, &mut Cli::command(), "wiki", &mut std::io::stdout());
+            return Ok(Outcome::Ok);
+        }
+        Command::Config(args) => return config_cmd::run(cli.json, args),
+        Command::Dev(args) => return dev_cmd::run(cli.json, &cwd, args),
+        Command::Api(args) => return api_cmd::run(cli.json, args),
+        Command::Agent { args } => return process::launch(cli.json, &cwd, "agent", args),
+        Command::Mcp { args } => return process::launch(cli.json, &cwd, "mcp", args),
+        Command::Setup(args) => {
+            return setup_cmd::setup(cli.json, &cwd, cli.project.is_some(), args)
+        }
+        Command::DisconnectAgents { agents } => {
+            return setup_cmd::disconnect_agents(cli.json, agents)
+        }
+        Command::Doctor { integrations } => {
+            return setup_cmd::doctor(cli.json, &cwd, integrations.as_deref())
+        }
+        Command::Repo {
+            command: RepoCommand::Init { name },
+        } => {
             return portable_cmd::repo_init(cli.json, &cwd, name.as_deref());
         }
-        Command::Repo { command: RepoCommand::Info } => {
+        Command::Repo {
+            command: RepoCommand::Info,
+        } => {
             return portable_cmd::repo_info(cli.json, &cwd);
         }
-        Command::Import { archive, destination } => {
+        Command::Import {
+            archive,
+            destination,
+        } => {
             return portable_cmd::import(cli.json, archive, destination);
         }
         Command::Library { command } => return portable_cmd::library(cli.json, command),
@@ -688,10 +739,9 @@ fn run(cli: &Cli) -> Result<Outcome> {
             // A node the user stated is accepted by being stated, so it becomes a page now. It
             // would otherwise exist only in the database and be lost with it.
             if args.stated {
-                if let Err(error) = athenaeum_core::portable::memory::materialize_stated(
-                    &mut store,
-                    &created.id,
-                ) {
+                if let Err(error) =
+                    athenaeum_core::portable::memory::materialize_stated(&mut store, &created.id)
+                {
                     eprintln!(
                         "warning: {} was stored, but could not be written to the vault: {error}",
                         created.id
@@ -743,7 +793,10 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
-        Command::Status { id: Some(id), status: Some(status) } => {
+        Command::Status {
+            id: Some(id),
+            status: Some(status),
+        } => {
             let node = resolve(&store, id)?;
             let updated = store.set_node_status(&node.id, (*status).into())?;
             emit(cli.json, &updated, || {
@@ -937,7 +990,9 @@ fn run(cli: &Cli) -> Result<Outcome> {
             // Succeeding with "no path" is the answer, not a failure: the two nodes exist and
             // nothing connects them within the search depth. The bridge's `path` method reports
             // the same thing as `found: false`, and the exit code agrees with it.
-            emit(cli.json, &path, || render::path(&store, &from, &to, path.as_deref()))?;
+            emit(cli.json, &path, || {
+                render::path(&store, &from, &to, path.as_deref())
+            })?;
         }
 
         Command::Brief(args) => {
@@ -994,10 +1049,18 @@ fn run(cli: &Cli) -> Result<Outcome> {
         Command::Sources { limit } => return product_cmd::sources(cli.json, &store, *limit),
 
         Command::Repo { .. }
+        | Command::Commands
+        | Command::Completions { .. }
+        | Command::Config(_)
+        | Command::Dev(_)
+        | Command::Api(_)
+        | Command::Agent { .. }
+        | Command::Mcp { .. }
         | Command::Import { .. }
         | Command::Library { .. }
         | Command::Sync { .. }
         | Command::Setup(_)
+        | Command::DisconnectAgents { .. }
         | Command::Doctor { .. } => {
             unreachable!("handled before the workspace is opened")
         }
@@ -1008,14 +1071,16 @@ fn run(cli: &Cli) -> Result<Outcome> {
         Command::ImportLegacyCore { apply } => {
             return portable_cmd::import_legacy_core(cli.json, &mut store, *apply)
         }
-        Command::Proposals { limit } => return portable_cmd::proposals(cli.json, &mut store, *limit),
+        Command::Proposals { limit } => {
+            return portable_cmd::proposals(cli.json, &mut store, *limit)
+        }
         Command::Accept { id, by } => return portable_cmd::accept(cli.json, &mut store, id, by),
         Command::Reject { id, reason, by } => {
             return portable_cmd::reject(cli.json, &mut store, id, reason.as_deref(), by)
         }
-        Command::Vault { command: VaultCommand::Materialize { apply } } => {
-            return portable_cmd::materialize(cli.json, &mut store, *apply)
-        }
+        Command::Vault {
+            command: VaultCommand::Materialize { apply },
+        } => return portable_cmd::materialize(cli.json, &mut store, *apply),
         Command::Export { output } => return portable_cmd::export(cli.json, &workspace, output),
         Command::Trust { command } => {
             return portable_cmd::trust(cli.json, &mut store, &workspace, command)

@@ -36,7 +36,9 @@ try {
   mkdirSync(output, { recursive: true })
   // Invoke npm's JS entry directly when provided by CI; the command is a build
   // tool only, never something the desktop runs on a user's behalf.
-  const result = JSON.parse(execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', resolve(output)], { cwd: work, encoding: 'utf8' }))[0]
+  const npm = [process.env.npm_execpath, join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js'), resolve(dirname(process.execPath), '../lib/node_modules/npm/bin/npm-cli.js')].find(path => path && existsSync(path))
+  if (!npm) throw new Error('Cannot locate npm. Run this packaging script through npm exec.')
+  const result = JSON.parse(execFileSync(process.execPath, [npm, 'pack', '--ignore-scripts', '--json', '--pack-destination', resolve(output)], { cwd: work, encoding: 'utf8' }))[0]
   cpSync(join(output, result.filename), join(output, 'athenaeum-agent.tgz'))
   rmSync(join(output, result.filename))
   cpSync(join(agentRepo, 'install', 'install.mjs'), join(output, 'install.mjs'))

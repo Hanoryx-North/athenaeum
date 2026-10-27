@@ -1,5 +1,17 @@
 # Releasing
 
+## Local Windows candidate, 2026-10-27
+
+The local 0.1.0 NSIS candidate is built with `tauri.release.conf.json` and packaged CLI, private Node,
+MCP and agent installer resources. Its build output is
+`target/release/bundle/nsis/Athenaeum_0.1.0_x64-setup.exe`. It is unsigned. See
+`athenaeum_validation/RELEASE_COMPLETION.md` for the checksum, installed-app verification and limits.
+The GitHub repository is private with no latest release. The automated workflow below describes
+the publication mechanism; a public download, updater deployment or other-platform build is not
+established by this local package. No repository privacy setting has been changed.
+
+## Automated publication
+
 Every push to `main` that changes more than documentation becomes a release. Nobody
 tags anything by hand. This document says what that produces, the one-time setup it
 needs, and what to do when it fails.

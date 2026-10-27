@@ -2,7 +2,8 @@
 
 Athenaeum is one thing to install. It gives you the desktop app, the `athenaeum` command, and the
 connection that lets your coding agents (Claude Code, Codex, Cursor) use your project's wiki as they
-work. You do it once; after that you code as you always do.
+work. Claude Code has supported session/turn hooks. Codex and Cursor use MCP with explicit
+instructions to recall project knowledge and propose discoveries; they have no lifecycle hooks here.
 
 ```text
 install once ──▶ athenaeum setup (per project) ──▶ use your agent as usual
@@ -13,6 +14,12 @@ install once ──▶ athenaeum setup (per project) ──▶ use your agent as
 ```
 
 ## 1. Install with the native wizard
+
+The verified 2026-10-27 Windows candidate is a local NSIS artifact at
+`target/release/bundle/nsis/Athenaeum_0.1.0_x64-setup.exe`. The repository is private and has no
+published latest release; the public download and updater channel are not verified. This candidate
+does not establish installation support for macOS or Linux. See the cross-repository verification
+record in `athenaeum_validation/RELEASE_COMPLETION.md` for evidence and remaining checks.
 
 Download the package for your system from the
 [latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest):
@@ -27,6 +34,21 @@ Open Athenaeum, open a project, then go to **Knowledge → Library**. Guided set
 choose **Use my existing agent** (Codex, Claude Code or Cursor) or **Use Athenaeum Agent**
 (the app chat and `athenaeum-agent` command). Both routes build the same local wiki.
 You can connect Athenaeum Library during setup or leave that until later.
+
+The project chooser also offers **Clone from Library**. Choose a hosted `owner/wiki`, a new
+folder name and its parent directory; private wikis use browser sign-in. An existing coding folder
+can be opened before it has a wiki, then initialized through guided setup.
+
+In **Knowledge → Library**, **Sign in and publish** explicitly shares accepted pages under `wiki/`
+with a new private wiki (or a public wiki if you choose that option). Linked wikis have **Pull**,
+**Push**, **Sync**, status and hosted-history controls. A conflict holds local work in place and
+blocks push. **Compare versions** shows local, Library and last shared text; keep a version or
+combine them for editing, remove the markers, then keep the edited local version and sync.
+
+Agent setup offers connection checks, a repair action for Athenaeum Agent and per-agent disconnect
+actions. Disconnecting the built-in Agent stops its SDK runtime while preserving its installed
+profile and all wiki content. Checking it reconnects the runtime; model credentials are configured
+in Settings. External-agent repair reruns the selected agent's setup without duplicating hooks.
 
 The package contains the matching `athenaeum` CLI, a private checksum-verified Node runtime,
 and the MCP integration. Base setup copies these resources locally and works offline.
@@ -131,7 +153,8 @@ thing to do about any that is broken. `athenaeum setup` repairs what `doctor` re
 
 ## Updating
 
-The desktop app updates itself, including its packaged setup resources. Run **Configure coding agents**
+The desktop has an updater for signed, published releases. No updater channel is published for the
+local Windows candidate; run the replacement NSIS installer to update it. Run **Configure coding agents**
 in Knowledge → Library again to update the installed CLI and integrations. Choose Athenaeum Agent to
 also update its installed bundle and runtime. Project wikis and credentials are preserved.
 

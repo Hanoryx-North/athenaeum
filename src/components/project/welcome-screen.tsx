@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { getRecentProjects, removeFromRecentProjects } from "@/lib/project-store"
 import type { WikiProject } from "@/types/wiki"
 import { useTranslation } from "react-i18next"
+import { CloneWikiDialog } from "@/components/project/clone-wiki-dialog"
 
 interface WelcomeScreenProps {
   onCreateProject: () => void
@@ -18,6 +19,7 @@ export function WelcomeScreen({
 }: WelcomeScreenProps) {
   const { t } = useTranslation()
   const [recentProjects, setRecentProjects] = useState<WikiProject[]>([])
+  const [cloning, setCloning] = useState(false)
 
   useEffect(() => {
     getRecentProjects().then(setRecentProjects).catch(() => {})
@@ -40,11 +42,12 @@ export function WelcomeScreen({
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap justify-center gap-3">
           <Button onClick={onCreateProject}>
             <Plus className="mr-2 h-4 w-4" />
             {t("welcome.newProject")}
           </Button>
+          <Button variant="outline" onClick={() => setCloning(true)}>Clone from Library</Button>
           <Button variant="outline" onClick={onOpenProject}>
             <FolderOpen className="mr-2 h-4 w-4" />
             {t("welcome.openProject")}
@@ -87,6 +90,7 @@ export function WelcomeScreen({
           </div>
         )}
       </div>
+      <CloneWikiDialog open={cloning} onOpenChange={setCloning} onCloned={onSelectProject} />
     </div>
   )
 }

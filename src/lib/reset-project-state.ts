@@ -16,8 +16,10 @@ import { useResearchStore } from "@/stores/research-store"
 import { useEngineStore } from "@/stores/engine-store"
 import { useProposalStore } from "@/stores/proposal-store"
 import { useWikiStore } from "@/stores/wiki-store"
+import { useSetupStore } from "@/stores/setup-store"
 
 export async function resetProjectState(): Promise<void> {
+  await useSetupStore.getState().reset()
   // Zustand stores — clear all per-project data (synchronous)
   const globalLlmConfig = useWikiStore.getState().globalLlmConfig
   useWikiStore.setState({

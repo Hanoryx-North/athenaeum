@@ -4,6 +4,7 @@ import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace"
 import { IconSidebar } from "./icon-sidebar"
 import { UpdateBanner } from "./update-banner"
+import { SetupBanner } from "@/components/setup/setup-card"
 import { SidebarPanel } from "./sidebar-panel"
 import { ContentArea } from "./content-area"
 import { ResearchPanel } from "./research-panel"
@@ -110,6 +111,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     // it fills the rest of the viewport.
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
+      <SetupBanner />
       <div className="flex min-h-0 flex-1">
         <IconSidebar onSwitchProject={onSwitchProject} />
         <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">

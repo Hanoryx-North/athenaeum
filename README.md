@@ -3,6 +3,11 @@
 A local knowledge app: a Markdown wiki, its one rebuildable knowledge engine,
 and desktop and CLI clients.
 
+Use the standalone `wiki` command to set up and operate Athenaeum. `wiki commands`
+lists the full command surface; `wiki dev` builds, checks and tests the sibling
+projects. See [the Wiki CLI guide](docs/wiki-cli.md) for settings and API access.
+The existing `athenaeum` executable remains compatible.
+
 > **Building on Athenaeum?** Read [`AGENTS.md`](AGENTS.md) first. It defines what this
 > repository owns and — just as importantly — what belongs to
 > [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) and

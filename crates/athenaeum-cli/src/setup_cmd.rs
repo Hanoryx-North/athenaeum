@@ -525,6 +525,42 @@ fn run_integrations(found: &Integrations, extra: &[String]) -> std::result::Resu
     })
 }
 
+/// Integration configuration is written and removed only by the MIT integrations adapter.
+pub fn disconnect_agents(json: bool, agents: &[String]) -> Result<Outcome> {
+    let found = find_integrations(None).ok_or_else(|| {
+        athenaeum_core::portable::portable_error(
+            "integration_missing",
+            "Repair the packaged tools, then retry disconnecting the agent.",
+        )
+    })?;
+    let mut extra = vec!["disconnect".to_string()];
+    if !agents.is_empty() {
+        extra.extend(["--agent".to_string(), agents.join(",")]);
+    }
+    let report = run_integrations(&found, &extra)
+        .map_err(|reason| athenaeum_core::portable::portable_error("integration_failed", reason))?;
+    let failed = report
+        .get("agents")
+        .and_then(Value::as_array)
+        .is_some_and(|list| {
+            list.iter().any(|agent| {
+                matches!(
+                    agent.get("status").and_then(Value::as_str),
+                    Some("error" | "conflict")
+                )
+            })
+        });
+    crate::emit(json, &report, || {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        Ok(())
+    })?;
+    Ok(if failed {
+        Outcome::ProblemsFound
+    } else {
+        Outcome::Ok
+    })
+}
+
 fn connect_agents(args: &SetupArgs, auto_sync: Option<bool>) -> (Step, Value) {
     let Some(found) = find_integrations(args.integrations.as_deref()) else {
         return (

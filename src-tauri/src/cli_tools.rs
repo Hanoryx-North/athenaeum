@@ -105,6 +105,43 @@ pub enum CliJob {
     SyncStatus,
     /// Pull, then push what is left. Runs only when the person clicks.
     Sync,
+    DisconnectAgents {
+        agents: Vec<String>,
+    },
+    LibraryLogin {
+        server: String,
+    },
+    LibraryLogout {
+        server: String,
+    },
+    SyncLink {
+        server: String,
+        name: String,
+        public: bool,
+    },
+    SyncClone {
+        server: String,
+        remote: String,
+        destination: String,
+    },
+    SyncPush,
+    SyncPull,
+    SyncUnlink,
+    SyncConflict {
+        path: String,
+    },
+    SyncResolve {
+        path: String,
+        keep: ConflictChoice,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictChoice {
+    Local,
+    Remote,
+    Both,
 }
 
 impl CliJob {
@@ -114,6 +151,16 @@ impl CliJob {
             CliJob::Setup { .. } => "setup",
             CliJob::SyncStatus => "sync_status",
             CliJob::Sync => "sync",
+            CliJob::DisconnectAgents { .. } => "disconnect_agents",
+            CliJob::LibraryLogin { .. } => "library_login",
+            CliJob::LibraryLogout { .. } => "library_logout",
+            CliJob::SyncLink { .. } => "sync_link",
+            CliJob::SyncClone { .. } => "sync_clone",
+            CliJob::SyncPush => "sync_push",
+            CliJob::SyncPull => "sync_pull",
+            CliJob::SyncUnlink => "sync_unlink",
+            CliJob::SyncConflict { .. } => "sync_conflict",
+            CliJob::SyncResolve { .. } => "sync_resolve",
         }
     }
 
@@ -124,6 +171,97 @@ impl CliJob {
             CliJob::Doctor => args.push("doctor".into()),
             CliJob::SyncStatus => args.extend(["sync".into(), "status".into()]),
             CliJob::Sync => args.push("sync".into()),
+            CliJob::DisconnectAgents { agents } => {
+                if agents.iter().any(|agent| !AGENTS.contains(&agent.as_str())) {
+                    return Err("invalid_request: choose claude, codex or cursor".into());
+                }
+                args.push("disconnect-agents".into());
+                if !agents.is_empty() {
+                    args.extend(["--agents".into(), agents.join(",")]);
+                }
+            }
+            CliJob::LibraryLogin { server } | CliJob::LibraryLogout { server } => {
+                check_server(server)?;
+                let verb = if matches!(self, CliJob::LibraryLogin { .. }) {
+                    "login"
+                } else {
+                    "logout"
+                };
+                args.extend([
+                    "library".into(),
+                    verb.into(),
+                    "--server".into(),
+                    server.clone(),
+                ]);
+            }
+            CliJob::SyncLink {
+                server,
+                name,
+                public,
+            } => {
+                check_server(server)?;
+                if name.is_empty() || name.len() > 100 || name.starts_with('-') {
+                    return Err("invalid_request: enter a wiki name".into());
+                }
+                args.extend([
+                    "sync".into(),
+                    "link".into(),
+                    "--server".into(),
+                    server.clone(),
+                    "--create".into(),
+                    name.clone(),
+                ]);
+                if *public {
+                    args.push("--public".into());
+                }
+            }
+            CliJob::SyncClone {
+                server,
+                remote,
+                destination,
+            } => {
+                check_server(server)?;
+                if remote.is_empty()
+                    || remote.len() > 255
+                    || remote.starts_with('-')
+                    || !Path::new(destination).is_absolute()
+                {
+                    return Err(
+                        "invalid_request: choose a hosted wiki and an absolute destination folder"
+                            .into(),
+                    );
+                }
+                args.extend([
+                    "sync".into(),
+                    "clone".into(),
+                    "--server".into(),
+                    server.clone(),
+                    "--".into(),
+                    remote.clone(),
+                    destination.clone(),
+                ]);
+            }
+            CliJob::SyncPush => args.extend(["sync".into(), "push".into()]),
+            CliJob::SyncPull => args.extend(["sync".into(), "pull".into()]),
+            CliJob::SyncUnlink => args.extend(["sync".into(), "unlink".into()]),
+            CliJob::SyncConflict { path } => {
+                args.extend(["sync".into(), "conflict".into(), "--".into(), path.clone()])
+            }
+            CliJob::SyncResolve { path, keep } => {
+                let choice = match keep {
+                    ConflictChoice::Local => "local",
+                    ConflictChoice::Remote => "remote",
+                    ConflictChoice::Both => "both",
+                };
+                args.extend([
+                    "sync".into(),
+                    "resolve".into(),
+                    "--keep".into(),
+                    choice.into(),
+                    "--".into(),
+                    path.clone(),
+                ]);
+            }
             CliJob::Setup {
                 library,
                 auto_sync,
@@ -163,8 +301,16 @@ impl CliJob {
 
 /// Tokens travel over https, or plain http to this machine; the CLI enforces it too, this fails earlier.
 fn check_server(server: &str) -> Result<(), String> {
-    let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"];
-    if server.starts_with("https://") || local.iter().any(|prefix| server.starts_with(prefix)) {
+    let parsed = reqwest::Url::parse(server)
+        .map_err(|_| "invalid_request: enter a valid Library URL".to_string())?;
+    let local = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if (parsed.scheme() == "https" || (parsed.scheme() == "http" && local))
+        && parsed.host_str().is_some()
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.query().is_none()
+        && parsed.fragment().is_none()
+    {
         Ok(())
     } else {
         Err("invalid_request: the Library address must start with https:// (http:// is allowed only for this machine)".into())

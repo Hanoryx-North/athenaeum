@@ -53,7 +53,10 @@ impl HarnessRoute {
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
         if !route_id {
-            return Err(format!("Chat route \"{}\" is not a harness route id.", self.provider));
+            return Err(format!(
+                "Chat route \"{}\" is not a harness route id.",
+                self.provider
+            ));
         }
         if self.model.trim().is_empty() {
             return Err("Chat route has no model.".to_string());
@@ -74,7 +77,14 @@ impl HarnessRoute {
             .as_deref()
             .map(|key| format!("{:x}", Sha256::digest(key.as_bytes())))
             .unwrap_or_default();
-        json!([self.provider, self.model, self.api_key_env, self.pi_provider, key]).to_string()
+        json!([
+            self.provider,
+            self.model,
+            self.api_key_env,
+            self.pi_provider,
+            key
+        ])
+        .to_string()
     }
 }
 
@@ -680,4 +690,10 @@ pub async fn harness_cancel_turn(
         "runId": run_id,
     }))?;
     Ok(true)
+}
+
+/// Disconnect the desktop SDK from its runtime; installed profiles and knowledge remain intact.
+#[tauri::command]
+pub fn harness_disconnect(state: State<'_, HarnessChatState>) {
+    state.shutdown();
 }

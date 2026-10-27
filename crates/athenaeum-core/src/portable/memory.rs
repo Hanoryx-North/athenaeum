@@ -170,9 +170,9 @@ pub fn materialize(store: &mut KnowledgeStore, apply: bool) -> Result<Materializ
 
     let nodes = store.list_nodes(&NodeFilter::all())?;
     for node in nodes {
-        let reason = if is_vault_owned(&node) {
-            continue;
-        } else if node.provenance.source == ProvenanceSource::Deterministic {
+        let reason = if is_vault_owned(&node)
+            || node.provenance.source == ProvenanceSource::Deterministic
+        {
             continue;
         } else if !node.is_live() {
             Some("it is not live knowledge")

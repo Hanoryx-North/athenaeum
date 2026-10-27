@@ -52,7 +52,10 @@ impl LibraryClient {
 
     /// A client for `server` using the stored (or environment) token for it.
     pub fn for_server(server: &str) -> Result<Self> {
-        let server = normalize_server(server)?.to_string().trim_end_matches('/').to_string();
+        let server = normalize_server(server)?
+            .to_string()
+            .trim_end_matches('/')
+            .to_string();
         let token = credentials::token_for(&server).map(|c| c.token);
         Self::new(&server, token)
     }
@@ -106,6 +109,53 @@ impl LibraryClient {
         self.json(self.request(Method::GET, &["user"]))
     }
 
+    /// The server's authoritative operation catalogue. Public, and never follows redirects.
+    pub fn openapi(&self) -> Result<serde_json::Value> {
+        let mut url = self.base.clone();
+        url.path_segments_mut()
+            .expect("an http URL has a path")
+            .pop_if_empty()
+            .push("openapi.json");
+        self.json(self.http.get(url))
+    }
+
+    /// Explicit access to all API v1 routes. The same origin and token rules as sync apply.
+    pub fn api_request(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let path = path.trim_start_matches('/');
+        let path = path.strip_prefix("api/v1/").unwrap_or(path);
+        let segments = if path.is_empty() {
+            vec![]
+        } else {
+            path.split('/').collect::<Vec<_>>()
+        };
+        if segments.iter().any(|s| {
+            s.is_empty() || *s == "." || *s == ".." || s.contains(['%', '\\', '?', '#', ':'])
+        }) {
+            return Err(portable_error("invalid_request", "Use an API-relative path with literal segments; pass query parameters with --query"));
+        }
+        let mut request = self.request(method, &segments).query(query);
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = self.send(request)?;
+        let status = response.status().as_u16();
+        let bytes = read_limited(response, MAX_RESPONSE_BYTES)?;
+        let body = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&bytes).into_owned())
+            })
+        };
+        Ok(serde_json::json!({"status": status, "body": body}))
+    }
+
     /// Resolve `owner/name` to the repository it names.
     pub fn resolve(&self, owner_and_name: &str) -> Result<RemoteRepository> {
         match owner_and_name.split_once('/') {
@@ -137,7 +187,9 @@ impl LibraryClient {
         let status = response.status();
         let body = read_limited(response, 1024 * 1024).unwrap_or_default();
         match http_error(status, &body) {
-            Error::Portable { code, .. } if code == "authorization_pending" || code == "slow_down" => {
+            Error::Portable { code, .. }
+                if code == "authorization_pending" || code == "slow_down" =>
+            {
                 Ok(None)
             }
             other => Err(other),
@@ -163,7 +215,8 @@ impl Remote for LibraryClient {
     }
 
     fn blob(&self, id: &str, sha256: &str) -> Result<Vec<u8>> {
-        let response = self.send(self.request(Method::GET, &["repositories", id, "blobs", sha256]))?;
+        let response =
+            self.send(self.request(Method::GET, &["repositories", id, "blobs", sha256]))?;
         read_limited(response, MAX_RESPONSE_BYTES)
     }
 
@@ -219,9 +272,16 @@ pub fn normalize_server(server: &str) -> Result<Url> {
     } else {
         format!("https://{trimmed}")
     };
-    let url = Url::parse(&with_scheme)
-        .map_err(|error| portable_error("invalid_request", format!("{server:?} is not a URL: {error}")))?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]" | "::1"));
+    let url = Url::parse(&with_scheme).map_err(|error| {
+        portable_error(
+            "invalid_request",
+            format!("{server:?} is not a URL: {error}"),
+        )
+    })?;
+    let loopback = matches!(
+        url.host_str(),
+        Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+    );
     match url.scheme() {
         "https" => {}
         "http" if loopback => {}
@@ -242,14 +302,20 @@ pub fn normalize_server(server: &str) -> Result<Url> {
         }
     }
     if url.cannot_be_a_base() || url.host_str().is_none() {
-        return Err(portable_error("invalid_request", format!("{server:?} has no host")));
+        return Err(portable_error(
+            "invalid_request",
+            format!("{server:?} has no host"),
+        ));
     }
     Ok(url)
 }
 
 fn read_limited(response: Response, limit: u64) -> Result<Vec<u8>> {
     use std::io::Read;
-    if response.content_length().is_some_and(|length| length > limit) {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit)
+    {
         return Err(portable_error(
             "limit_exceeded",
             "the server's answer is larger than this client will read",
@@ -287,7 +353,10 @@ fn short(error: &reqwest::Error) -> String {
     // The URL can carry nothing secret here (tokens go in a header), but it is still noise.
     let mut text = error.to_string();
     if let Some(url) = error.url() {
-        text = text.replace(url.as_str(), &format!("{}://{}", url.scheme(), url.host_str().unwrap_or("?")));
+        text = text.replace(
+            url.as_str(),
+            &format!("{}://{}", url.scheme(), url.host_str().unwrap_or("?")),
+        );
     }
     text
 }
@@ -434,6 +503,4 @@ pub mod credentials {
         std::fs::rename(&temporary, &target)?;
         Ok(target)
     }
-
-
 }

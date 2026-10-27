@@ -18,6 +18,7 @@ import {
   type CliStatus,
   type DoctorReport,
   type SetupReport,
+  type JobResult,
 } from "@/lib/cli-tools"
 
 export type Busy = "check" | "install" | "setup" | "sync" | null
@@ -28,6 +29,7 @@ export interface DeviceCode {
 }
 
 interface SetupState {
+  agentRoute: "external" | "athenaeum"
   cli: CliStatus | null
   doctor: DoctorReport | null
   lastSetup: SetupReport | null
@@ -44,9 +46,16 @@ interface SetupState {
   sync: (workspace: string) => Promise<void>
   syncStatus: (workspace: string) => Promise<void>
   cancel: () => Promise<void>
+  reset: () => Promise<void>
+  operate: (workspace: string, job: CliJob) => Promise<JobResult | null>
 }
 
 const MAX_PROGRESS = 200
+let setupGeneration = 0
+
+function scopedSet(write: (partial: Partial<SetupState>) => void, generation: number) {
+  return (partial: Partial<SetupState>) => { if (generation === setupGeneration) write(partial) }
+}
 
 function message(cause: unknown): string {
   const text = cause instanceof Error ? cause.message : String(cause)
@@ -76,7 +85,8 @@ async function withProgress<T>(
   }
 }
 
-export const useSetupStore = create<SetupState>((set, get) => ({
+export const useSetupStore = create<SetupState>((write, get) => ({
+  agentRoute: "external",
   cli: null,
   doctor: null,
   lastSetup: null,
@@ -88,6 +98,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   error: null,
 
   check: async (workspace) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
     if (get().busy) return
     set({ busy: "check", error: null })
     try {
@@ -108,6 +120,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   },
 
   install: async (workspace, agent = false) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
     if (get().busy) return false
     set({ busy: "install" })
     let ok = false
@@ -124,11 +138,13 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     } finally {
       set({ busy: null })
     }
-    if (ok && workspace) await get().check(workspace)
+    if (ok && generation === setupGeneration && workspace) await get().check(workspace)
     return ok
   },
 
   setup: async (workspace, job) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
     if (get().busy) return false
     set({ busy: "setup" })
     let ok = false
@@ -143,11 +159,13 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     } finally {
       set({ busy: null })
     }
-    if (ok) await get().check(workspace)
+    if (ok && generation === setupGeneration) await get().check(workspace)
     return ok
   },
 
   syncStatus: async (workspace) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
     if (get().busy) return
     set({ busy: "check" })
     try {
@@ -162,6 +180,8 @@ export const useSetupStore = create<SetupState>((set, get) => ({
   },
 
   sync: async (workspace) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
     if (get().busy) return
     set({ busy: "sync" })
     try {
@@ -173,10 +193,36 @@ export const useSetupStore = create<SetupState>((set, get) => ({
     } finally {
       set({ busy: null })
     }
-    await get().syncStatus(workspace)
+    if (generation === setupGeneration) await get().syncStatus(workspace)
+  },
+
+  reset: async () => {
+    setupGeneration += 1
+    if (get().busy) await cancelCli()
+    write({ doctor: null, lastSetup: null, syncPosition: null, syncMessage: null, busy: null, progress: [], deviceCode: null, error: null })
   },
 
   cancel: async () => {
     await cancelCli()
+  },
+
+  operate: async (workspace, job) => {
+    const generation = setupGeneration
+    const set = scopedSet(write, generation)
+    if (get().busy) return null
+    set({ busy: "sync", syncMessage: null })
+    try {
+      const result = await withProgress(set, get, () => runCli(workspace, job))
+      if (result.exitCode !== 0) {
+        const out = result.output as { error?: { message?: string }; message?: string } | null
+        set({ error: out?.error?.message ?? out?.message ?? result.stderr[result.stderr.length - 1] ?? "The operation stopped. Check the connection and retry." })
+      }
+      return generation === setupGeneration ? result : null
+    } catch (cause) {
+      set({ error: message(cause) })
+      return null
+    } finally {
+      set({ busy: null })
+    }
   },
 }))

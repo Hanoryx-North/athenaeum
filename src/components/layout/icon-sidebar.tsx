@@ -93,6 +93,8 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
           {NAV_ITEMS.map(({ view, icon: Icon, labelKey }) => (
             <Tooltip key={view}>
               <TooltipTrigger
+                aria-label={t(labelKey)}
+                aria-pressed={activeView === view}
                 onClick={() => setActiveView(view)}
                 className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
                   activeView === view
@@ -116,6 +118,7 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
           {/* Deep Research — same row as other nav items */}
           <Tooltip>
             <TooltipTrigger
+              aria-label={t("research.title")}
               onClick={handleResearchPanelToggle}
               className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
                 isResearchPanelVisible(activeView, researchPanelOpen)
@@ -134,6 +137,7 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
+              aria-label={t("nav.skills")}
               onClick={() => setActiveView("skills")}
               className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
                 activeView === "skills"
@@ -150,7 +154,7 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
         <div className="flex flex-col items-center gap-1 pb-1">
           {/* Daemon status indicator */}
           <Tooltip>
-            <TooltipTrigger className="flex h-6 w-6 items-center justify-center">
+            <TooltipTrigger aria-label="Web Clipper status" className="flex h-6 w-6 items-center justify-center">
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
                   daemonStatus === "running" ? "bg-emerald-500" :
@@ -169,6 +173,7 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
+              aria-label={t("nav.settings")}
               onClick={() => setActiveView("settings")}
               className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
                 activeView === "settings"
@@ -201,6 +206,7 @@ export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
+              aria-label={t("nav.switchProject")}
               onClick={onSwitchProject}
               className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground"
             >

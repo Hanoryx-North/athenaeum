@@ -47,7 +47,10 @@ pub fn workspace_status(status: &WorkspaceStatus) {
         return;
     }
     if status.has_vault {
-        println!("knowledge   initialized, with a vault of {} page(s)", status.vault_pages);
+        println!(
+            "knowledge   initialized, with a vault of {} page(s)",
+            status.vault_pages
+        );
     } else {
         println!(
             "knowledge   initialized, but there is no vault here (the repository is indexed, \
@@ -86,7 +89,9 @@ pub fn workspace_status(status: &WorkspaceStatus) {
 /// looking like the whole inventory.
 pub fn sources(sources: &[SourceSummary], limit: u32) {
     if sources.is_empty() {
-        println!("nothing has been indexed from this project yet; run `athenaeum index --scope all`");
+        println!(
+            "nothing has been indexed from this project yet; run `athenaeum index --scope all`"
+        );
         return;
     }
     for source in sources {
@@ -99,7 +104,11 @@ pub fn sources(sources: &[SourceSummary], limit: u32) {
             human_bytes(source.bytes),
             source.nodes,
             source.anchors,
-            if source.scanned { "scanned" } else { "not scanned" },
+            if source.scanned {
+                "scanned"
+            } else {
+                "not scanned"
+            },
             if source.stale { ", STALE" } else { "" }
         );
         if source.sha256.is_empty() {
@@ -225,7 +234,10 @@ pub fn node_detail(store: &KnowledgeStore, node: &KnowledgeNode) -> Result<()> {
                 neighbor.edge.note.as_deref(),
                 neighbor.edge.confidence.map(f64::from),
             );
-            println!("  {marker} {} → {}{reason}", neighbor.edge_type, other.title);
+            println!(
+                "  {marker} {} → {}{reason}",
+                neighbor.edge_type, other.title
+            );
         }
     }
 
@@ -385,7 +397,10 @@ pub fn review_findings(findings: &[ReviewFindingView], limit: u32) {
         if finding.title.is_empty() {
             println!("{mark} {} ({})", finding.kind, finding.severity);
         } else {
-            println!("{mark} {} ({})  {}", finding.kind, finding.severity, finding.title);
+            println!(
+                "{mark} {} ({})  {}",
+                finding.kind, finding.severity, finding.title
+            );
         }
         if !finding.detail.is_empty() {
             println!("    {}", finding.detail);

@@ -236,6 +236,7 @@ pub fn run() {
             harness::harness_check,
             harness::harness_start_turn_stream,
             harness::harness_cancel_turn,
+            harness::harness_disconnect,
             set_proxy_env,
             set_close_behavior,
         ])

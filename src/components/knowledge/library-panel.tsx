@@ -1,257 +1,137 @@
-/**
- * The hosted Library, as far as this window can honestly see it.
- *
- * Publishing is not the desktop's job: the Library client lives in the CLI,
- * sync never runs in the background, and this window makes no network request
- * to a hosted service. What it *can* do is read the link the CLI recorded —
- * which repository this project is linked to, when it last agreed with it, and
- * whether anything is waiting for a person — and say plainly that reachability
- * is not something it checked.
- *
- * That is the offline/unreachable state this panel exists for: instead of a
- * green light nobody verified, it shows the link, the last sync the CLI
- * recorded, and the exact commands that publish or pull.
- */
-import { useCallback, useEffect, useState } from "react"
-import {
-  AlertTriangle,
-  Check,
-  CloudOff,
-  Copy,
-  Link2Off,
-  Loader2,
-  RefreshCw,
-  Unplug,
-} from "lucide-react"
+/** Explicit Library operations. The CLI owns HTTP, credentials and sync policy. */
+import { useEffect, useState } from "react"
+import { openUrl } from "@tauri-apps/plugin-opener"
 import { Button } from "@/components/ui/button"
-import { useEngineStore } from "@/stores/engine-store"
+import { Input } from "@/components/ui/input"
 import { SetupCard } from "@/components/setup/setup-card"
-import { formatTimestamp } from "@/lib/engine-present"
-import { cn } from "@/lib/utils"
+import { useEngineStore } from "@/stores/engine-store"
+import { useSetupStore } from "@/stores/setup-store"
+import { useWikiStore } from "@/stores/wiki-store"
+import { useAppDialog } from "@/stores/app-dialog-store"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+import type { CliJob } from "@/lib/cli-tools"
 
-function CommandLine({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(command)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard access can be refused; the command is still selectable text.
-      setCopied(false)
-    }
-  }, [command])
-
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <code className="min-w-0 flex-1 select-all overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-[11px]">
-        {command}
-      </code>
-      <Button variant="ghost" size="sm" className="h-6 shrink-0 px-2 text-xs" onClick={() => void copy()}>
-        {copied ? <Check className="h-3 w-3" aria-hidden /> : <Copy className="h-3 w-3" aria-hidden />}
-        <span className="sr-only">Copy command</span>
-        <span aria-hidden className="ml-1">
-          {copied ? "Copied" : "Copy"}
-        </span>
-      </Button>
-    </div>
-  )
-}
+interface ConflictPreview { path: string; base: string | null; local: string | null; remote: string | null }
 
 export function LibraryPanel() {
-  const library = useEngineStore((s) => s.library)
-  const libraryState = useEngineStore((s) => s.libraryState)
-  const libraryError = useEngineStore((s) => s.libraryError)
-  const refresh = useEngineStore((s) => s.refresh)
-  const refreshing = useEngineStore((s) => s.refreshing)
-  const loadLibrary = useEngineStore((s) => s.loadLibrary)
-  const [checking, setChecking] = useState(false)
+  const project = useWikiStore((s) => s.project)
+  return project ? <LibraryWorkspace key={project.path} workspace={project.path} name={project.name} /> : null
+}
 
-  useEffect(() => {
-    if (!library && libraryState.kind === "loading") void loadLibrary()
-  }, [library, libraryState.kind, loadLibrary])
+function LibraryWorkspace({ workspace, name }: { workspace: string; name: string }) {
+  const { library, libraryState, libraryError, loadLibrary, refresh } = useEngineStore()
+  const { cli, busy, operate, syncStatus, syncPosition, error } = useSetupStore()
+  const [server, setServer] = useState("https://wiki.hanoryx.com")
+  const [wikiName, setWikiName] = useState(name.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 60))
+  const [isPublic, setPublic] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [preview, setPreview] = useState<ConflictPreview | null>(null)
+  const dialog = useAppDialog()
+  const linked = libraryState.kind === "linked" || libraryState.kind === "conflicted"
+  const link = library
+  const linkedServer = link?.server
+  const working = busy !== null
 
-  const check = useCallback(async () => {
-    setChecking(true)
-    try {
+  useEffect(() => { void loadLibrary() }, [loadLibrary])
+
+  async function run(job: CliJob) {
+    setNotice(null)
+    const result = await operate(workspace, job)
+    if (useWikiStore.getState().project?.path !== workspace) return null
+    if (result?.exitCode === 0) {
       await loadLibrary()
-    } finally {
-      setChecking(false)
+      if (job.job !== "sync_conflict" && job.job !== "library_login") {
+        await useSetupStore.getState().check(workspace)
+        await refreshProjectFileTree(workspace, { bumpDataVersion: true })
+        await refresh()
+      }
+      return result.output
     }
-  }, [loadLibrary])
+    await loadLibrary()
+    return null
+  }
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold">Library</h2>
-          <p className="text-xs text-muted-foreground">
-            The hosted store for accepted wiki text. This window never contacts it; the command-line tool does, when you ask.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void check()} disabled={checking}>
-            {checking ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden />
-            ) : (
-              <RefreshCw className="mr-1 h-3 w-3" aria-hidden />
-            )}
-            Recheck link
-          </Button>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => void refresh()} disabled={refreshing}>
-            Refresh everything
-          </Button>
-        </div>
+  async function publish() {
+    if (isPublic && !await dialog.confirm({ title: "Publish a public wiki?", message: "Everyone can read the explicitly shared, accepted pages you publish. Raw sources, proposals and local state stay on this computer.", confirmLabel: "Publish publicly" })) return
+    const signedIn = await run({ job: "library_login", server })
+    if (!signedIn) return
+    const created = await run({ job: "sync_link", server, name: wikiName.trim(), public: isPublic })
+    if (!created) return
+    const pushed = await run({ job: "sync_push" })
+    if (pushed) setNotice("Your wiki is published. Use Pull to receive updates and Push to share local accepted changes.")
+    await syncStatus(workspace)
+  }
+
+  async function sync(job: "sync" | "sync_push" | "sync_pull") {
+    const result = await run({ job })
+    if (result) setNotice(job === "sync_pull" ? "Pull completed." : job === "sync_push" ? "Push completed." : "Sync completed.")
+    await syncStatus(workspace)
+  }
+
+  async function inspect(path: string) {
+    const out = await run({ job: "sync_conflict", path })
+    if (out && typeof out === "object") {
+      const p = out as ConflictPreview
+      if (p.path === path && [p.base, p.local, p.remote].every((v) => v === null || typeof v === "string")) setPreview(p)
+    }
+  }
+
+  async function resolve(keep: "local" | "remote" | "both") {
+    if (!preview) return
+    if (keep === "remote" && !await dialog.confirm({ title: "Use the Library version?", message: `Replace the local version of ${preview.path} with the reviewed Library version${preview.remote === null ? " (deleted)" : ""}?`, confirmLabel: "Use Library version" })) return
+    const out = await run({ job: "sync_resolve", path: preview.path, keep })
+    if (!out) return
+    setPreview(null)
+    setNotice(keep === "both" ? "Both versions are in the local page with conflict markers. Edit the page, remove the markers, then review it and choose Keep local. Push stays blocked until every conflict is resolved." : "Conflict resolved locally. Sync when all conflicts are resolved to share the result.")
+    await syncStatus(workspace)
+  }
+
+  return <div className="h-full overflow-y-auto p-4"><div className="mx-auto max-w-3xl space-y-4">
+    <header><h2 className="text-sm font-semibold">Library</h2><p className="mt-1 text-xs text-muted-foreground">Publish accepted Markdown and bring changes between computers. Every transfer runs when you ask.</p></header>
+    <SetupCard />
+    {libraryError && <p role="alert" className="text-sm text-destructive">{libraryError}</p>}
+    {libraryState.kind === "loading" && <p role="status">Reading the local Library link?</p>}
+    {libraryState.kind === "unlinked" && <section className="space-y-3 rounded-md border p-4" aria-label="Publish wiki">
+      <h3 className="font-medium">Publish this wiki</h3>
+      <p className="text-xs text-muted-foreground">Publish the accepted Markdown under wiki/ and the minimal repository identity. This explicitly shares those pages with the hosted wiki’s readers.</p>
+      <label className="block text-xs">Library address<Input value={server} onChange={(e) => setServer(e.target.value)} disabled={working} /></label>
+      <label className="block text-xs">Wiki name<Input value={wikiName} onChange={(e) => setWikiName(e.target.value)} disabled={working} /></label>
+      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={isPublic} disabled={working} onChange={(e) => setPublic(e.target.checked)} />Make this wiki public (private by default)</label>
+      <Button disabled={working || !cli?.found || !wikiName.trim()} onClick={() => void publish()}>Sign in and publish</Button>
+      <p className="text-xs text-muted-foreground">To download an existing hosted wiki, return to the project chooser and select Clone from Library.</p>
+    </section>}
+    {linked && <section className="space-y-3 rounded-md border p-4" aria-label="Library synchronization">
+      <h3 className="font-medium">{link?.remoteName ?? "Linked wiki"}</h3>
+      <p className="break-all text-xs text-muted-foreground">{link?.server} ? {link?.remoteId}</p>
+      <p className="text-xs">Last agreed revision: <code className="break-all">{link?.lastSynced ?? "none yet"}</code></p>
+      <p role="status" className="text-xs">Status: {syncPosition?.replace(/_/g, " ") ?? "not checked against the Library"}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" disabled={working} onClick={() => void syncStatus(workspace)}>Check sync status</Button>
+        <Button variant="outline" disabled={working} onClick={() => void sync("sync_pull")}>Pull</Button>
+        <Button variant="outline" disabled={working || libraryState.kind === "conflicted"} onClick={() => void sync("sync_push")}>Push</Button>
+        <Button disabled={working || libraryState.kind === "conflicted"} onClick={() => void sync("sync")}>Sync</Button>
       </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="mx-auto flex max-w-2xl flex-col gap-4">
-          <SetupCard />
-
-          {libraryState.kind === "loading" && (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Reading the link the CLI recorded…
-            </p>
-          )}
-
-          {libraryState.kind === "error" && (
-            <section
-              role="alert"
-              className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
-            >
-              <div className="flex items-center gap-2 font-medium text-destructive">
-                <AlertTriangle className="h-4 w-4" aria-hidden />
-                The link state could not be read
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {libraryError ?? "The sync state or athenaeum.json is unreadable."} Nothing was
-                changed; publishing still runs from the CLI.
-              </p>
-              <Button variant="outline" size="sm" className="mt-2 h-7 text-xs" onClick={() => void check()}>
-                Try again
-              </Button>
-            </section>
-          )}
-
-          {libraryState.kind === "unlinked" && (
-            <section
-              role="status"
-              className="rounded-md border bg-muted/30 p-3 text-sm"
-            >
-              <div className="flex items-center gap-2 font-medium">
-                <Link2Off className="h-4 w-4 text-muted-foreground" aria-hidden />
-                Not linked to a Library
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                This project keeps everything locally: the Markdown vault is the source of truth,
-                and there is nothing to be offline from. To publish it, use "Connect to the
-                Library" above — it runs the command-line tool, which holds the Library client and
-                your credentials. Or do it yourself:
-              </p>
-              <CommandLine command="athenaeum library login --server https://your-library.example" />
-              <CommandLine command="athenaeum sync link --create my-wiki" />
-              <p className="mt-2 text-xs text-muted-foreground">
-                Only accepted wiki Markdown is ever sent. Raw sources, code, indexes and local state
-                stay here.
-              </p>
-            </section>
-          )}
-
-          {libraryState.kind === "conflicted" && (
-            <section
-              role="status"
-              className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm"
-            >
-              <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-500">
-                <AlertTriangle className="h-4 w-4" aria-hidden />
-                Divergent edits are waiting for you
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {libraryState.conflicts.length} path
-                {libraryState.conflicts.length === 1 ? "" : "s"} changed on both sides. Nothing was
-                overwritten: local work is intact until you choose.
-              </p>
-              <ul className="mt-2 list-inside list-disc break-all font-mono text-[11px] text-muted-foreground">
-                {libraryState.conflicts.map((path) => (
-                  <li key={path}>{path}</li>
-                ))}
-              </ul>
-              <CommandLine
-                command={`athenaeum sync resolve ${libraryState.conflicts[0]} --keep local|remote|both`}
-              />
-            </section>
-          )}
-
-          {libraryState.kind === "linked" && (
-            <>
-              <section role="status" className="rounded-md border p-3 text-sm">
-                <div className="flex items-center gap-2 font-medium">
-                  <CloudOff className="h-4 w-4 text-muted-foreground" aria-hidden />
-                  Linked to {libraryState.remoteName ?? libraryState.remoteId}
-                </div>
-                <dl className="mt-2 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
-                  <dt className="text-muted-foreground">Server</dt>
-                  <dd className="break-all font-mono">{libraryState.server}</dd>
-                  <dt className="text-muted-foreground">Remote</dt>
-                  <dd className="break-all font-mono">{libraryState.remoteId}</dd>
-                  <dt className="text-muted-foreground">Last agreed</dt>
-                  <dd>
-                    {libraryState.lastSynced
-                      ? `${libraryState.lastSynced} (${formatTimestamp(libraryState.lastSyncAt)})`
-                      : "never"}
-                  </dd>
-                  <dt className="text-muted-foreground">Reachability</dt>
-                  <dd>
-                    <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
-                      not checked from this window
-                    </span>
-                  </dd>
-                </dl>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  This window makes no network request to the Library, so it will not claim the
-                  Library is up when it has not looked. Publishing, pulling and conflict resolution
-                  run in the CLI, where the client and its credentials live.
-                </p>
-                <CommandLine command="athenaeum sync push" />
-                <CommandLine command="athenaeum sync pull" />
-              </section>
-
-              {library?.repositoryId && (
-                <section className="rounded-md border p-3 text-sm">
-                  <h3 className="font-medium">Repository identity</h3>
-                  <dl className="mt-2 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
-                    <dt className="text-muted-foreground">Name</dt>
-                    <dd>{library.repositoryName ?? "(unnamed)"}</dd>
-                    <dt className="text-muted-foreground">ID</dt>
-                    <dd className="break-all font-mono">{library.repositoryId}</dd>
-                    <dt className="text-muted-foreground">Manifest</dt>
-                    <dd>{library.manifestPresent ? "athenaeum.json present" : "no athenaeum.json"}</dd>
-                  </dl>
-                </section>
-              )}
-            </>
-          )}
-
-          <section
-            className={cn(
-              "rounded-md border border-dashed p-3 text-xs text-muted-foreground",
-            )}
-            aria-label="What never leaves this machine"
-          >
-            <div className="flex items-center gap-2 font-medium text-foreground">
-              <Unplug className="h-3.5 w-3.5" aria-hidden />
-              What sync never sends
-            </div>
-            <p className="mt-1">
-              Raw sources, code repositories, the SQLite index, embeddings, agent sessions, logs and
-              credentials. The cloud is a place to publish accepted text, not a place to think — and
-              nothing here syncs in the background.
-            </p>
-          </section>
-        </div>
-      </div>
-    </div>
-  )
+      <p className="text-xs text-muted-foreground">Pull merges non-overlapping edits and holds conflicts for review. Push sends explicitly shared accepted changes. Sync pulls, then pushes.</p>
+      {linkedServer && <div className="flex flex-wrap gap-2">
+        <Button variant="ghost" disabled={working} onClick={() => void run({ job: "library_login", server: linkedServer })}>Sign in again</Button>
+        <Button variant="ghost" disabled={working} onClick={() => void (async () => {
+          if (await dialog.confirm({ title: "Disconnect this wiki?", message: "Keep local pages and hosted history, and remove this computer?s link to the wiki.", confirmLabel: "Disconnect" })) await run({ job: "sync_unlink" })
+        })()}>Disconnect wiki</Button>
+        <Button variant="ghost" disabled={working} onClick={() => void run({ job: "library_logout", server: linkedServer })}>Sign out on this computer</Button>
+        {link?.remoteName?.includes("/") && <Button variant="ghost" onClick={() => void openUrl(`${linkedServer}/${link.remoteName}/history`)}>View hosted history</Button>}
+      </div>}
+    </section>}
+    {libraryState.kind === "conflicted" && <section className="space-y-2 rounded-md border border-amber-500 p-4" aria-label="Resolve conflicts">
+      <h3 className="font-medium">Review conflicting pages</h3><p className="text-xs">Local edits are preserved. Compare each page before choosing a version. Push is blocked until all conflicts are resolved.</p>
+      {libraryState.conflicts.map((path) => <div key={path} className="flex items-center justify-between gap-2"><code className="break-all text-xs">{path}</code><Button variant="outline" disabled={working} onClick={() => void inspect(path)}>Compare versions</Button></div>)}
+      {preview && <div className="space-y-3"><h4 className="break-all text-sm font-medium">{preview.path}</h4>
+        <div className="grid gap-2 md:grid-cols-2">{(["local", "remote"] as const).map((side) => <div key={side}><h5 className="text-xs font-medium">{side === "local" ? "Local version" : "Library version"}</h5><pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">{preview[side] ?? "(deleted)"}</pre></div>)}</div>
+        <details><summary className="cursor-pointer text-xs">Last shared version</summary><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">{preview.base ?? "(did not exist)"}</pre></details>
+        <div className="flex flex-wrap gap-2"><Button disabled={working} onClick={() => void resolve("local")}>Keep local</Button><Button variant="outline" disabled={working} onClick={() => void resolve("remote")}>Use Library version</Button><Button variant="outline" disabled={working || preview.local === null || preview.remote === null} onClick={() => void resolve("both")}>Combine for manual editing</Button></div>
+      </div>}
+    </section>}
+    {notice && <p role="status" className="text-sm">{notice}</p>}
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <p className="text-xs text-muted-foreground">Raw sources, source code, proposals, indexes, agent sessions, logs and credentials stay local. Offline browsing and editing do not need Library sign-in. Automatic sync is opt-in and runs only in a supported agent?s foreground turn.</p>
+  </div></div>
 }

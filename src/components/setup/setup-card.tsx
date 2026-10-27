@@ -8,6 +8,9 @@
 import { useEffect, useState } from "react"
 import { AlertTriangle, Check, Download, Loader2, PlugZap, RefreshCw, UploadCloud, X } from "lucide-react"
 import { openUrl } from "@tauri-apps/plugin-opener"
+import { invoke } from "@tauri-apps/api/core"
+import { harnessRouteFor } from "@/lib/harness-route"
+import { forgetHarnessSessions } from "@/lib/harness-chat"
 import { Button } from "@/components/ui/button"
 import { useSetupStore } from "@/stores/setup-store"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -26,7 +29,8 @@ function useWorkspace(): string | null {
 function usePending() {
   const cli = useSetupStore((s) => s.cli)
   const doctor = useSetupStore((s) => s.doctor)
-  const agentsPending = !!doctor?.checks.some((c) => !c.ok && (c.id.startsWith("agent-") || c.id === "integrations"))
+  const route = useSetupStore((s) => s.agentRoute)
+  const agentsPending = route === "athenaeum" ? cli !== null && !cli.agentInstalled : !!doctor?.checks.some((c) => !c.ok && (c.id.startsWith("agent-") || c.id === "integrations"))
   const libraryLinked = !!doctor?.checks.some((c) => c.id === "library" && c.detail.startsWith("linked"))
   return { cliMissing: cli !== null && !cli.found, agentsPending, libraryLinked }
 }
@@ -57,7 +61,7 @@ export function SetupBanner() {
           : "Your coding agents aren't connected to this wiki yet."}{" "}
         Finish in the <span className="font-medium">Library</span> tab.
       </span>
-      <Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => useKnowledgeViewStore.getState().setTab("library")}>
+      <Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => { useKnowledgeViewStore.getState().setTab("library"); useWikiStore.getState().setActiveView("knowledge") }}>
         Finish setup
       </Button>
       <button
@@ -89,10 +93,15 @@ export function SetupCard() {
   const [autoSync, setAutoSync] = useState(false)
   const [configuring, setConfiguring] = useState(true)
   const [step, setStep] = useState<string | null>(null)
+  const [agentMessage, setAgentMessage] = useState<string | null>(null)
+  const [externalAgent, setExternalAgent] = useState("detected")
 
   useEffect(() => {
     try {
       setConfiguring(!localStorage.getItem(`athenaeum.setup.complete:${workspace}`))
+      const saved = localStorage.getItem(`athenaeum.setup.route:${workspace}`) === "athenaeum" ? "athenaeum" : "external"
+      setRoute(saved)
+      useSetupStore.setState({ agentRoute: saved })
     } catch {
       setConfiguring(true)
     }
@@ -113,9 +122,11 @@ export function SetupCard() {
     setStep("Installing your tools…")
     try {
       if (!await install(null, route === "athenaeum")) return
+      if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
       setStep("Setting up this project's wiki…")
       const ok = await setup(workspace, {
         job: "setup", noAgents: route === "athenaeum",
+        ...(route === "external" && externalAgent !== "detected" ? { agents: [externalAgent] } : {}),
         ...(connectLibrary && !libraryLinked ? { library: "" } : {}),
         ...(route === "external" ? { autoSync: autoSync && (connectLibrary || libraryLinked) } : {}),
       })
@@ -124,12 +135,29 @@ export function SetupCard() {
         return
       }
       if (ok) {
+        useSetupStore.setState({ agentRoute: route })
         setConfiguring(false)
-        try { localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1") } catch { /* setup still succeeded */ }
+        try {
+          localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1")
+          localStorage.setItem(`athenaeum.setup.route:${workspace}`, route)
+        } catch { /* setup still succeeded */ }
       }
     } finally {
       setStep(null)
     }
+  }
+
+  const checkAgent = async () => {
+    setStep("Checking Athenaeum Agent...")
+    setAgentMessage(null)
+    try {
+      const selected = harnessRouteFor(useWikiStore.getState().llmConfig)
+      if (!selected.ok) throw new Error(`${selected.reason} Choose a model in Settings, then retry.`)
+      const status = await invoke<{ provider: string; model: string }>("harness_check", { projectPath: workspace, route: selected.route })
+      setAgentMessage(`Connected to the installed Harness runtime: ${status.provider} / ${status.model}. A model request uses the credentials in Settings.`)
+    } catch (cause) {
+      setAgentMessage(String(cause))
+    } finally { setStep(null) }
   }
 
   return (
@@ -167,6 +195,11 @@ export function SetupCard() {
                 <span className="mt-1 block leading-relaxed text-muted-foreground">Install the coding agent for the app chat and the <code>athenaeum-agent</code> command. Setup downloads its runtime; coding needs a model API key.</span></span>
             </label>
           </fieldset>
+          {route === "external" && <label className="block text-xs">Connect or repair
+            <select className="ml-2 rounded border bg-background p-1" value={externalAgent} disabled={working} onChange={(event) => setExternalAgent(event.target.value)}>
+              <option value="detected">Detected agents</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="cursor">Cursor</option>
+            </select>
+          </label>}
           <fieldset disabled={working} className="space-y-2 border-t pt-3 text-xs">
             <legend className="sr-only">Library connection</legend>
             {!libraryLinked && (
@@ -199,6 +232,22 @@ export function SetupCard() {
         </div>
       )}
       {cli?.agentInstalled && <p className="mt-2 text-xs text-muted-foreground">Athenaeum Agent is installed for app chat and the terminal.</p>}
+      {cli?.agentInstalled && <div className="mt-2 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" disabled={working} onClick={() => void checkAgent()}>Check Athenaeum Agent</Button>
+        <Button variant="outline" size="sm" disabled={working} onClick={() => void install(workspace, true)}>Repair Athenaeum Agent</Button>
+        <Button variant="ghost" size="sm" disabled={working} onClick={() => void (async () => {
+          await invoke("harness_disconnect")
+          forgetHarnessSessions()
+          setAgentMessage("Athenaeum Agent disconnected. Your wiki and installed profile are preserved; Check reconnects the runtime.")
+        })().catch((cause) => setAgentMessage(String(cause)))}>Disconnect Athenaeum Agent</Button>
+      </div>}
+      {route === "external" && cli?.found && !configuring && <div className="mt-2 flex flex-wrap gap-2">
+        {(["codex", "claude", "cursor"] as const).map((agent) => <Button key={agent} variant="ghost" size="sm" disabled={working} onClick={() => void (async () => {
+          const result = await useSetupStore.getState().operate(workspace, { job: "disconnect_agents", agents: [agent] })
+          if (result?.exitCode === 0) { setAgentMessage(`${agent} disconnected. Other agent settings are preserved.`); await check(workspace) }
+        })()}>Disconnect {agent === "claude" ? "Claude Code" : agent === "codex" ? "Codex" : "Cursor"}</Button>)}
+      </div>}
+      {agentMessage && <p role="status" className="mt-2 text-xs">{agentMessage}</p>}
 
       {doctor && (
         <ul className="mt-2 flex flex-col gap-1 text-xs">
