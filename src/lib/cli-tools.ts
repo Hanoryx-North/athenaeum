@@ -25,6 +25,7 @@ export type CliJob =
       autoSync?: boolean
       agents?: string[]
       noAgents?: boolean
+      capture?: "off" | "instruct" | "nudge"
     }
   | { job: "sync_status" }
   | { job: "sync" }
@@ -70,7 +71,7 @@ export function runCli(workspace: string, job: CliJob): Promise<JobResult> {
     workspace,
     // Rust's serde names are snake_case; the closed enum is the contract.
     job: job.job === "setup"
-      ? { job: "setup", library: job.library, auto_sync: job.autoSync, agents: job.agents ?? [], no_agents: job.noAgents ?? false }
+      ? { job: "setup", library: job.library, auto_sync: job.autoSync, agents: job.agents ?? [], no_agents: job.noAgents ?? false, capture: job.capture }
       : job,
   })
 }

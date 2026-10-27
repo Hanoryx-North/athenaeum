@@ -29,7 +29,6 @@ export interface DeviceCode {
 }
 
 interface SetupState {
-  agentRoute: "external" | "athenaeum"
   cli: CliStatus | null
   doctor: DoctorReport | null
   lastSetup: SetupReport | null
@@ -86,7 +85,6 @@ async function withProgress<T>(
 }
 
 export const useSetupStore = create<SetupState>((write, get) => ({
-  agentRoute: "external",
   cli: null,
   doctor: null,
   lastSetup: null,

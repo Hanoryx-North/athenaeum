@@ -66,18 +66,24 @@ Markdown on disk, and answers every client through one versioned contract.
 
 ## Product entry points and installation
 
-People can code with Athenaeum Agent (desktop chat or `athenaeum-agent` CLI), or keep
-using Codex, Claude Code or Cursor with the local MCP integration. Both routes recall from
-and propose into the same local wiki through the bridge. A person reviews proposals;
-accepted Markdown pages can then sync to Athenaeum Library. MCP alone does not guarantee
-that an external agent records every turn; hooks and documented client instructions belong
-to `athenaeum_integrations`.
+**Product direction updated 2026-10-28:** the default onboarding is **Set up Codex**.
+Athenaeum connects the user's existing Codex, Claude Code or Cursor to the local wiki;
+it does not install a separate coding-agent runtime in this flow. Codex receives
+persistent recall/record instructions in its active global AGENTS file, maintained by
+`athenaeum_integrations`, and MCP tools that reach the same bridge. No additional
+model API key or subscription is required for this memory integration. This is
+instruction-driven behavior, not an enforced per-turn hook. Routine memory work
+happens in the existing session without a mandatory subagent.
+
+The separate Athenaeum Agent runtime remains an optional advanced integration owned
+by `athenaeum_agent` and the unmodified harness. Both routes propose to the same wiki;
+a person reviews proposals before they become accepted Markdown pages.
 
 macOS and Windows must have native installer wizards and packaged dependencies. A shell
 or PowerShell one-liner is an optional advanced path, never the required onboarding flow.
-The desktop guides agent selection, project setup and optional Library connection. It may
-orchestrate `athenaeum_agent`'s installer for the agent CLI/profile, while the runtime and
-agent implementation stay in their owning repositories. Base CLI/MCP setup works offline;
+The desktop guides existing-agent selection, project setup and optional Library
+connection. Advanced agent CLI/profile installation remains in its owning repository.
+Base CLI/MCP setup works offline;
 agent-runtime installation and Library connection may require internet access.
 
 ## Athenaeum owns

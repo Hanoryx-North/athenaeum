@@ -100,6 +100,8 @@ pub enum CliJob {
         agents: Vec<String>,
         #[serde(default)]
         no_agents: bool,
+        #[serde(default)]
+        capture: Option<String>,
     },
     /// Where the project stands against the Library. Works offline.
     SyncStatus,
@@ -267,8 +269,15 @@ impl CliJob {
                 auto_sync,
                 agents,
                 no_agents,
+                capture,
             } => {
                 args.extend(["setup".into(), "--yes".into()]);
+                if let Some(mode) = capture {
+                    if !["off", "instruct", "nudge"].contains(&mode.as_str()) {
+                        return Err("invalid_request: unknown capture mode".into());
+                    }
+                    args.extend(["--capture".into(), mode.clone()]);
+                }
                 if let Some(server) = library {
                     args.push("--library".into());
                     if !server.is_empty() {

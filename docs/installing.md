@@ -30,10 +30,15 @@ Download the package for your system from the
   Applications; macOS may request administrator authorization. A `.dmg` is also available.
 - **Linux:** install the `.deb` or run the `.AppImage`.
 
-Open Athenaeum, open a project, then go to **Knowledge → Library**. Guided setup lets you
-choose **Use my existing agent** (Codex, Claude Code or Cursor) or **Use Athenaeum Agent**
-(the app chat and `athenaeum-agent` command). Both routes build the same local wiki.
-You can connect Athenaeum Library during setup or leave that until later.
+Open Athenaeum, open a project, then go to **Knowledge → Library** and click
+**Set up Codex**. You can also select Claude Code or Cursor. Setup installs the local
+wiki tools and Codex memory instructions, using your existing Codex session and login.
+Wiki memory needs no additional API key, subscription or agent runtime. Reopen Codex
+after setup to load the connection. Library connection is optional.
+
+See [Codex wiki memory](codex-memory.md) for the recall and recording routine.
+The separate Athenaeum Agent runtime remains an advanced, optional CLI integration;
+it is not part of this setup flow.
 
 The project chooser also offers **Clone from Library**. Choose a hosted `owner/wiki`, a new
 folder name and its parent directory; private wikis use browser sign-in. An existing coding folder
@@ -45,17 +50,15 @@ with a new private wiki (or a public wiki if you choose that option). Linked wik
 blocks push. **Compare versions** shows local, Library and last shared text; keep a version or
 combine them for editing, remove the markers, then keep the edited local version and sync.
 
-Agent setup offers connection checks, a repair action for Athenaeum Agent and per-agent disconnect
-actions. Disconnecting the built-in Agent stops its SDK runtime while preserving its installed
-profile and all wiki content. Checking it reconnects the runtime; model credentials are configured
-in Settings. External-agent repair reruns the selected agent's setup without duplicating hooks.
+Setup offers connection checks, repair by rerunning the selected agent’s setup, and
+per-agent disconnect actions. Disconnect preserves other settings and wiki content.
 
 The package contains the matching `athenaeum` CLI, a private checksum-verified Node runtime,
 and the MCP integration. Base setup copies these resources locally and works offline.
 You do not need Node, Rust, a terminal installer command, or a downloaded shell script.
 The app invokes its packaged Node entry point directly.
 
-Selecting Athenaeum Agent additionally runs `athenaeum_agent`'s own packaged installer to
+Advanced Athenaeum Agent installation uses `athenaeum_agent`'s own packaged installer to
 install its pinned DeepSeek Harness runtime from npm and mount the packaged wiki bundle.
 This step needs internet access. Its `athenaeum-agent` launcher starts the unmodified
 Harness with the `athenaeum` profile; coding needs a model API key (`DEEPSEEK_API_KEY`).
@@ -105,12 +108,15 @@ What changes in each agent:
 | | Claude Code | Codex | Cursor |
 | --- | --- | --- | --- |
 | Tools (`wiki_context`, `wiki_search`, `wiki_create`, …) | MCP server | MCP server | MCP server |
-| Knowledge recalled for each prompt | hook | the agent asks | the agent asks |
+| Knowledge recalled for each task | hook | instructed in `AGENTS.md` | the agent asks |
 | Note on when to record knowledge | session-start hook | `AGENTS.md` block | — |
-| Housekeeping when a turn ends | hook | — | — |
+| Recording useful findings before finishing | hook | instructed in `AGENTS.md` | the agent asks |
 
-Codex and Cursor get the tools but not hooks: Athenaeum only writes configuration it has a documented
-format for, and Codex's and Cursor's hook formats are not wired.
+Codex gets a managed block in its active global `AGENTS.md` (or a non-empty
+`AGENTS.override.md`), conditional on a project having `.athenaeum/`. It directs Codex
+to recall before each task and propose durable findings before finishing. This is
+instruction-driven behavior, not an enforced lifecycle hook. Cursor receives tools only.
+The connection check detects missing or outdated Codex instructions; rerun setup to repair them.
 
 In a project that has a knowledge base, Claude Code is handed a short brief of what the wiki knows that
 relates to your prompt, inside the engine's trust wrapper: reference material, never instruction. In a
@@ -122,8 +128,9 @@ was made, a trap that cost time, a convention) with `wiki_create`. That only *pr
 accepts it, in the app under **Review** or with `athenaeum proposals` / `athenaeum accept`, and accepting
 is what writes the Markdown page. Conversation text never becomes permanent knowledge by itself.
 
-`--capture` sets how hard the agent is pushed: `instruct` (default) tells it once per session; `nudge`
-also asks it, at most once per session and only after it edited files without proposing anything, whether
+`--capture` controls the recording instructions: `instruct` (default) installs the Codex
+recall/record routine and tells Claude Code once per session; `nudge`
+also asks Claude Code, at most once per session and only after it edited files without proposing anything, whether
 there is something worth recording; `off` removes the instructions.
 
 ## 4. The Library (optional)
@@ -155,8 +162,9 @@ thing to do about any that is broken. `athenaeum setup` repairs what `doctor` re
 
 The desktop has an updater for signed, published releases. No updater channel is published for the
 local Windows candidate; run the replacement NSIS installer to update it. Run **Configure coding agents**
-in Knowledge → Library again to update the installed CLI and integrations. Choose Athenaeum Agent to
-also update its installed bundle and runtime. Project wikis and credentials are preserved.
+in Knowledge → Library again to reconnect the selected agent and refresh its memory instructions
+from the installed integration. Advanced Athenaeum Agent updates use its separate installer.
+Project wikis and credentials are preserved.
 
 ## Removing
 
@@ -209,7 +217,7 @@ without the desktop, use that repository's own installer. No agent runtime is im
 
 ## Not covered
 
-- **Codex and Cursor hooks.** Their MCP tools work; automatic recall and end-of-turn upkeep are Claude Code only.
+- **Codex and Cursor hooks.** Codex uses persistent memory instructions rather than enforced hooks; Cursor receives MCP tools only.
 - **Platform signing credentials.** Updater signatures are separate from OS code signing.
   Apple app/installer signing and notarization require release credentials; Windows certificate
   signing is not configured. See [releasing.md](releasing.md).

@@ -42,24 +42,23 @@ Download the installer for your system from the
 Windows and macOS ask for a one-time approval on first launch because the installers are not yet
 signed with a paid certificate: [what to click](docs/releasing.md#first-launch-on-macos-and-windows).
 
-### Choose your coding agent
+### Set up Codex memory
 
-Open a project, go to **Knowledge → Library**, and use the guided setup:
+Open a project, go to **Knowledge → Library**, and click **Set up Codex**.
+Setup connects the local wiki tools and adds persistent instructions for Codex to
+recall relevant knowledge before each task and propose useful findings before finishing.
+It works in your existing Codex session and uses your existing login, with no
+additional API key, subscription or separate agent runtime for memory.
 
-- **Use your existing agent:** connect installed Codex, Claude Code or Cursor through MCP.
-  Keep coding in your usual app; it can recall knowledge and propose wiki pages.
-- **Use Athenaeum Agent:** install its runtime for the app chat and the
-  `athenaeum-agent` CLI. The runtime is DeepSeek Harness, with Athenaeum's wiki bundle.
+Review proposals before accepting them as Markdown pages. Library sync is optional.
+Small tasks record useful findings directly; routine work needs no new note or subagent.
+This is instruction-driven behavior, not an enforced Codex turn hook.
+See [Codex wiki memory](docs/codex-memory.md) for details and limitations.
 
-Both routes use the same local wiki and `athenaeum` CLI. You review proposals before
-accepting them as Markdown pages. Optionally connect **Athenaeum Library** to sync
-shared, accepted wiki text online. Claude Code supports optional end-of-turn sync;
-Codex, Cursor and Athenaeum Agent use explicit sync.
-
-Release installers carry the CLI, private Node and MCP integration. No terminal install
-command or preinstalled developer tools are needed. Selecting Athenaeum Agent downloads
-its pinned runtime and needs a model API key for coding. See [docs/installing.md](docs/installing.md)
-for the workflow, platform limitations and advanced command-line installation.
+Claude Code and Cursor can also connect through the agent selector. Release installers
+carry the CLI, private Node and MCP integration. The separate Athenaeum Agent runtime
+is an advanced, optional CLI integration with its own model configuration; it is not
+installed by the Codex setup flow. See [docs/installing.md](docs/installing.md).
 
 Athenaeum then **updates itself**. A new release is built automatically whenever `main` changes;
 the app notices, offers **Update and restart**, and installs it in place. How that works, and the
