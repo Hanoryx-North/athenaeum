@@ -5,6 +5,7 @@ import { useEngineWorkspace } from "@/hooks/useEngineWorkspace"
 import { IconSidebar } from "./icon-sidebar"
 import { UpdateBanner } from "./update-banner"
 import { SetupBanner } from "@/components/setup/setup-card"
+import { openConnectors } from "@/stores/connectors-store"
 import { SidebarPanel } from "./sidebar-panel"
 import { ContentArea } from "./content-area"
 import { ResearchPanel } from "./research-panel"
@@ -14,6 +15,7 @@ import { ErrorBoundary } from "@/components/error-boundary"
 import { getAppLayoutVisibility } from "./app-layout-visibility"
 import { PanelLeftOpen } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { useUiPreference } from "@/hooks/useUiPreference"
 
 const LEFT_PANEL_COLLAPSED_KEY = "athenaeum:left-panel-collapsed"
 
@@ -30,8 +32,8 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
   // The engine-backed stores follow the open project for the whole app, so the
   // sidebar badge and every knowledge panel read the same workspace.
   useEngineWorkspace()
-  const [leftWidth, setLeftWidth] = useState(220)
-  const [rightWidth, setRightWidth] = useState(400)
+  const [leftWidth, setLeftWidth] = useUiPreference("left-panel-width", 220, (value) => Number.isFinite(value) && value >= 150 && value <= 400)
+  const [rightWidth, setRightWidth] = useUiPreference("right-panel-width", 400, (value) => Number.isFinite(value) && value >= 250 && value <= 2000)
   const [leftCollapsed, setLeftCollapsed] = useState(
     () => localStorage.getItem(LEFT_PANEL_COLLAPSED_KEY) === "true",
   )
@@ -112,6 +114,7 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
     // it fills the rest of the viewport.
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
+      <div className="flex shrink-0 items-center justify-between border-b px-4 py-2 text-sm"><span className="truncate font-medium">{project?.name}</span><button onClick={() => openConnectors()} className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Connectors</button></div>
       <SetupBanner />
       <div className="flex min-h-0 flex-1">
         <IconSidebar onSwitchProject={onSwitchProject} onQuickStart={onQuickStart} />
@@ -165,7 +168,7 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
               />
               <div
                 className="flex shrink-0 flex-col overflow-hidden border-l"
-                style={{ width: rightWidth }}
+                style={{ width: rightWidth, maxWidth: "50%" }}
               >
                 <ErrorBoundary>
                   <ResearchPanel />

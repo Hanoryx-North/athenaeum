@@ -1,312 +1,291 @@
-/**
- * Setting Athenaeum up for the person's coding agents and the Library, from this window.
- *
- * Everything that changes something is a click: connecting Claude Code and Codex, signing in to the
- * Library, syncing. The window runs the command-line tool to do it and shows what it says; it makes
- * no request to the Library itself, and nothing here runs in the background.
- */
 import { useEffect, useState } from "react"
-import { AlertTriangle, Check, Download, Loader2, PlugZap, RefreshCw, UploadCloud, X } from "lucide-react"
-import { openUrl } from "@tauri-apps/plugin-opener"
+import { ArrowLeft, ArrowRight, CheckCircle2, Loader2, PlugZap, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useSetupStore } from "@/stores/setup-store"
 import { useWikiStore } from "@/stores/wiki-store"
-import { useKnowledgeViewStore } from "@/stores/knowledge-view-store"
+import { openConnectors } from "@/stores/connectors-store"
 import { normalizePath } from "@/lib/path-utils"
 import { cn } from "@/lib/utils"
+import { useUiPreference } from "@/hooks/useUiPreference"
 
-const DISMISSED = "athenaeum.setup-banner.dismissed"
-
-function useWorkspace(): string | null {
-  const project = useWikiStore((s) => s.project)
-  return project ? normalizePath(project.path) : null
-}
-
-/** What still needs doing, in the words of the checks the CLI reported. */
-function usePending() {
-  const cli = useSetupStore((s) => s.cli)
-  const doctor = useSetupStore((s) => s.doctor)
-  const agentsPending = !!doctor?.checks.some((c) => !c.ok && (c.id.startsWith("agent-") || c.id === "integrations"))
-  const libraryLinked = !!doctor?.checks.some((c) => c.id === "library" && c.detail.startsWith("linked"))
-  return { cliMissing: cli !== null && !cli.found, agentsPending, libraryLinked }
-}
+export const AGENTS = [
+  { id: "codex", name: "Codex", description: "Use the Codex you already work in." },
+  { id: "claude", name: "Claude Code", description: "Connect your existing Claude Code." },
+  { id: "cursor", name: "Cursor", description: "Make your wiki available in Cursor." },
+] as const
+export type Agent = (typeof AGENTS)[number]["id"]
 
 export function SetupBanner() {
-  const workspace = useWorkspace()
+  const project = useWikiStore((s) => s.project)
+  const doctor = useSetupStore((s) => s.doctor)
+  const cli = useSetupStore((s) => s.cli)
   const check = useSetupStore((s) => s.check)
-  const { cliMissing, agentsPending } = usePending()
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return sessionStorage.getItem(DISMISSED) === "1"
-    } catch {
-      return false
-    }
-  })
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  useEffect(() => {
+    if (project) void check(project.path)
+  }, [project, check])
+  const hasAgent = doctor?.checks.some((c) => c.id.startsWith("agent-") && c.ok)
+  if (
+    !project ||
+    dismissed === project.path ||
+    (cli?.found && hasAgent) ||
+    (!doctor && cli?.found !== false)
+  )
+    return null
+  return (
+    <div role="status" className="flex items-center gap-3 border-b bg-primary/5 px-4 py-2 text-sm">
+      <PlugZap className="h-4 w-4 shrink-0" />
+      <span className="flex-1">Connect your coding agent to get started.</span>
+      <Button size="sm" onClick={() => openConnectors()}>
+        Finish setup
+      </Button>
+      <button aria-label="Dismiss setup reminder" onClick={() => setDismissed(project.path)}>
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  )
+}
+
+/** One decision per step. Publishing and account access live on separate pages. */
+export function SetupCard({ initialAgent = "codex", onAgentChange, onComplete, onCancel }: {
+  initialAgent?: Agent
+  onAgentChange?: (agent: Agent) => void
+  onComplete?: () => void
+  onCancel?: () => void
+}) {
+  const project = useWikiStore((s) => s.project)
+  const workspace = project ? normalizePath(project.path) : null
+  const { cli, doctor, busy, progress, error, lastSetup, check, install, setup, cancel } =
+    useSetupStore()
+  const [agent, setAgent] = useState<Agent>(initialAgent)
+  const [page, setPage] = useUiPreference<0 | 1 | 2>(`setup-step:${workspace}`, 0, (value) => value === 0 || value === 1 || value === 2)
+  const [connecting, setConnecting] = useState(false)
+  const [status, setStatus] = useState("")
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const selected = AGENTS.find((item) => item.id === agent)!
+  const connected = doctor?.checks.some((item) => item.id === `agent-${agent}` && item.ok) === true
+  const working = connecting || busy !== null
 
   useEffect(() => {
     if (workspace) void check(workspace)
   }, [workspace, check])
-
-  if (dismissed || (!cliMissing && !agentsPending)) return null
-  return (
-    <p role="status" className="flex items-center gap-2 border-b bg-primary/5 px-4 py-1.5 text-xs">
-      <PlugZap className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">
-        {cliMissing
-          ? "Claude Code and Codex can't use this wiki yet: the Athenaeum command-line tool isn't installed."
-          : "Your coding agents aren't connected to this wiki yet."}{" "}
-        Finish in the <span className="font-medium">Library</span> tab.
-      </span>
-      <Button variant="ghost" size="sm" className="shrink-0 text-xs" onClick={() => { useKnowledgeViewStore.getState().setTab("library"); useWikiStore.getState().setActiveView("knowledge") }}>
-        Finish setup
-      </Button>
-      <button
-        type="button"
-        className="rounded p-0.5 hover:bg-muted"
-        aria-label="Dismiss"
-        onClick={() => {
-          setDismissed(true)
-          try {
-            sessionStorage.setItem(DISMISSED, "1")
-          } catch {
-            /* a banner that cannot remember simply comes back next session */
-          }
-        }}
-      >
-        <X className="h-3 w-3" aria-hidden />
-      </button>
-    </p>
-  )
-}
-
-export function SetupCard() {
-  const workspace = useWorkspace()
-  const { cli, doctor, busy, progress, deviceCode, error, lastSetup, syncPosition, syncMessage } = useSetupStore()
-  const { check, install, setup, sync, syncStatus, cancel } = useSetupStore.getState()
-  const { agentsPending, libraryLinked } = usePending()
-  const [connectLibrary, setConnectLibrary] = useState(false)
-  const [autoSync, setAutoSync] = useState(false)
-  const [configuring, setConfiguring] = useState(true)
-  const [step, setStep] = useState<string | null>(null)
-  const [agentMessage, setAgentMessage] = useState<string | null>(null)
-  const [externalAgent, setExternalAgent] = useState("codex")
-
   useEffect(() => {
-    try {
-      setConfiguring(localStorage.getItem(`athenaeum.setup.route:${workspace}`) === "athenaeum" || !localStorage.getItem(`athenaeum.setup.complete:${workspace}`))
-    } catch {
-      setConfiguring(true)
-    }
-    setStep(null)
+    setConnectionError(null)
   }, [workspace])
 
-  useEffect(() => {
-    if (workspace && !useSetupStore.getState().cli) void check(workspace)
-  }, [workspace, check])
-  useEffect(() => {
-    if (workspace && libraryLinked) void syncStatus(workspace)
-  }, [workspace, libraryLinked, syncStatus])
-
-  if (!workspace) return null
-  const working = busy !== null || step !== null
-
-  const configure = async () => {
-    setStep("Installing your tools…")
+  async function connect() {
+    if (!workspace || working) return
+    setConnecting(true)
+    setConnectionError(null)
+    setStatus("Preparing your connection…")
     try {
-      const toolsMissing = !cli?.found || doctor?.checks.some((c) => c.id === "integrations" && !c.ok)
-      if (toolsMissing && !await install(null)) return
+      if (
+        (!cli?.found || doctor?.checks.some((c) => c.id === "integrations" && !c.ok)) &&
+        !(await install(null))
+      )
+        return
       if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
-      setStep("Setting up this project's wiki…")
-      const ok = await setup(workspace, {
-        job: "setup", capture: "instruct",
-        ...(externalAgent !== "detected" ? { agents: [externalAgent] } : {}),
-        ...(connectLibrary && !libraryLinked ? { library: "" } : {}),
-        autoSync: (externalAgent === "claude" || externalAgent === "detected") && autoSync && (connectLibrary || libraryLinked),
-      })
-      if (ok && useSetupStore.getState().lastSetup?.steps.some((s) => s.id === "agents" && s.status === "skipped")) {
-        useSetupStore.setState({ error: "No supported coding agent was found. Install Codex, Claude Code or Cursor, then retry setup." })
+      setStatus(`Connecting ${selected.name}…`)
+      const ok = await setup(workspace, { job: "setup", agents: [agent], capture: "instruct" })
+      if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
+      const report = useSetupStore.getState().doctor
+      if (!ok || !report?.checks.some((c) => c.id === `agent-${agent}` && c.ok)) {
+        setConnectionError(
+          `Could not finish connecting ${selected.name}. Check the details below, then try again.`,
+        )
         return
       }
-      if (ok) {
-        setConfiguring(false)
-        try {
-          localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1")
-          localStorage.setItem(`athenaeum.setup.route:${workspace}`, "external")
-        } catch { /* setup still succeeded */ }
+      try {
+        localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1")
+        localStorage.setItem(`athenaeum.setup.route:${workspace}`, "external")
+      } catch {
+        /* The connection itself is already saved by setup. */
       }
+      setPage(2)
     } finally {
-      setStep(null)
+      setConnecting(false)
+      setStatus("")
     }
   }
 
+  if (!workspace) return null
   return (
-    <section className="rounded-md border p-3 text-sm" aria-label="Set up Athenaeum">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 font-medium">
-          <PlugZap className="h-4 w-4" aria-hidden />
-          Set up your wiki
-        </h3>
-        <Button variant="ghost" size="sm" className="h-7 text-xs" disabled={working} onClick={() => void check(workspace)}>
-          {busy === "check" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <RefreshCw className="mr-1 h-3 w-3" aria-hidden />}
-          Check
-        </Button>
-      </div>
-
-      {cli === null && busy === "check" && <p className="mt-2 text-xs text-muted-foreground">Looking for the command-line tool…</p>}
-
-      <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-        Connect your existing coding agent to this project’s wiki. Codex uses its current session to recall relevant knowledge
-        and propose useful findings. No additional API key or subscription is needed for wiki memory.
-      </p>
-
-      {configuring ? (
-        <div className="mt-4 space-y-4">
-          <label className="block text-xs">Coding agent
-            <select className="ml-2 rounded border bg-background p-1" value={externalAgent} disabled={working} onChange={(event) => setExternalAgent(event.target.value)}>
-              <option value="codex">Codex</option><option value="claude">Claude Code</option><option value="cursor">Cursor</option><option value="detected">All detected agents</option>
-            </select>
-          </label>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {externalAgent === "codex" || externalAgent === "detected"
-              ? "Setup adds wiki tools and Codex instructions to recall before each task and record durable findings before finishing. Review proposals here before they become accepted wiki pages."
-              : externalAgent === "claude"
-                ? "Setup connects wiki tools and Claude Code hooks for recall and knowledge proposals. Review proposals here before they become accepted wiki pages."
-                : "Setup connects wiki tools to Cursor. Ask Cursor to recall project context and propose useful findings; automatic memory instructions are not installed for Cursor."}
-          </p>
-          <fieldset disabled={working} className="space-y-2 border-t pt-3 text-xs">
-            <legend className="sr-only">Library connection</legend>
-            {!libraryLinked && (
-              <label className="flex cursor-pointer items-start gap-2">
-                <input className="mt-0.5 accent-primary" type="checkbox" checked={connectLibrary} onChange={(event) => setConnectLibrary(event.target.checked)} />
-                <span>Connect Athenaeum Library<span className="mt-1 block text-muted-foreground">Sign in through your browser and link a private wiki repository. You can also do this later.</span></span>
-              </label>
+    <section className="space-y-7" aria-label="Connect your coding agent">
+      {onCancel && <Button variant="ghost" disabled={working} onClick={onCancel}><ArrowLeft className="h-4 w-4" />Coding agents</Button>}
+      <ol aria-label="Connection steps" className="flex items-center gap-2 text-xs sm:gap-5">
+        {["Choose agent", "Connect", "Ready"].map((label, index) => (
+          <li
+            key={label}
+            aria-current={page === index ? "step" : undefined}
+            className={cn(
+              "flex items-center gap-2",
+              page === index ? "font-medium text-foreground" : "text-muted-foreground",
             )}
-            {(externalAgent === "claude" || externalAgent === "detected") && (connectLibrary || libraryLinked) && (
-              <label className="flex cursor-pointer items-start gap-2">
-                <input className="mt-0.5 accent-primary" type="checkbox" checked={autoSync} onChange={(event) => setAutoSync(event.target.checked)} />
-                <span>Sync shared, accepted pages after Claude Code turns<span className="mt-1 block text-muted-foreground">Optional. Codex and Cursor use the Sync button. Sync stops at conflicts.</span></span>
-              </label>
-            )}
-          </fieldset>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={working || cli === null} onClick={() => void configure()}>
-              {working ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <Download className="mr-1 h-3 w-3" aria-hidden />}
-              {step ?? (externalAgent === "codex" ? "Set up Codex" : externalAgent === "claude" ? "Set up Claude Code" : externalAgent === "cursor" ? "Set up Cursor" : "Set up coding agents")}
-            </Button>
-            {!working && <Button variant="ghost" size="sm" onClick={() => setConfiguring(false)}>Later</Button>}
-            {working && busy !== "check" && <Button variant="ghost" size="sm" onClick={() => void cancel()}>Cancel setup</Button>}
-          </div>
-          <p className="text-xs text-muted-foreground">Reopen your coding agent after setup to load the connection. Codex follows memory instructions; there is no enforced turn hook.</p>
-        </div>
-      ) : (
-        <div className="mt-3 text-xs">
-          {lastSetup?.ok && <p role="status">Your wiki is ready. Reopen your coding agent in this project, then review its wiki proposals in Athenaeum.</p>}
-          <Button variant="outline" size="sm" className="mt-2" disabled={working} onClick={() => setConfiguring(true)}>Configure coding agents</Button>
-        </div>
-      )}
-      {cli?.found && !configuring && <div className="mt-2 flex flex-wrap gap-2">
-        {(["codex", "claude", "cursor"] as const).map((agent) => <Button key={agent} variant="ghost" size="sm" disabled={working} onClick={() => void (async () => {
-          const result = await useSetupStore.getState().operate(workspace, { job: "disconnect_agents", agents: [agent] })
-          if (result?.exitCode === 0) { setAgentMessage(`${agent} disconnected. Other agent settings are preserved.`); await check(workspace) }
-        })()}>Disconnect {agent === "claude" ? "Claude Code" : agent === "codex" ? "Codex" : "Cursor"}</Button>)}
-      </div>}
-      {agentMessage && <p role="status" className="mt-2 text-xs">{agentMessage}</p>}
-
-      {doctor && (
-        <ul className="mt-2 flex flex-col gap-1 text-xs">
-          {doctor.checks.map((c) => (
-            <li key={c.id} className="flex items-start gap-2">
-              {c.ok ? (
-                <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" aria-label="ok" />
-              ) : (
-                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" aria-label="needs attention" />
+          >
+            <span
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full border",
+                index <= page && "border-primary bg-primary text-primary-foreground",
               )}
-              <span className="min-w-0">
-                <span className="font-medium">{c.id}</span> <span className="break-all text-muted-foreground">{c.detail}</span>
-                {!c.ok && c.fix && <span className="block text-muted-foreground">→ {c.fix}</span>}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {cli?.found && !configuring && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {agentsPending && (
-            <Button size="sm" className="h-7 text-xs" disabled={working} onClick={() => void setup(workspace, { job: "setup", agents: ["codex"], capture: "instruct" })}>
-              {busy === "setup" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <PlugZap className="mr-1 h-3 w-3" aria-hidden />}
-              Set up Codex
-            </Button>
-          )}
-          {!libraryLinked && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 text-xs"
-              disabled={working}
-              onClick={() => void setup(workspace, { job: "setup", library: "" })}
             >
-              <UploadCloud className="mr-1 h-3 w-3" aria-hidden />
-              Connect to the Library
-            </Button>
-          )}
-          {libraryLinked && (
-            <Button size="sm" className="h-7 text-xs" disabled={working} onClick={() => void sync(workspace)}>
-              {busy === "sync" ? <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden /> : <UploadCloud className="mr-1 h-3 w-3" aria-hidden />}
-              Sync accepted pages now
-            </Button>
-          )}
-          {working && busy !== "check" && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => void cancel()}>
-              Cancel
-            </Button>
-          )}
-        </div>
-      )}
-
-      {deviceCode && (
-        <div role="status" className="mt-3 rounded-md border bg-muted/40 p-3 text-xs">
-          <p className="font-medium">Approve this sign-in in your browser</p>
-          <p className="mt-1 text-muted-foreground">
-            Confirm the code <code className="rounded bg-background px-1.5 py-0.5 font-mono text-sm text-foreground">{deviceCode.code}</code>
-          </p>
-          <Button variant="outline" size="sm" className="mt-2 h-7 text-xs" onClick={() => void openUrl(deviceCode.url).catch(() => undefined)}>
-            Open the Library sign-in
-          </Button>
-          <p className="mt-2 break-all text-muted-foreground">{deviceCode.url}</p>
-        </div>
-      )}
-
-      {libraryLinked && (syncPosition || syncMessage) && (
-        <p className="mt-2 text-xs text-muted-foreground" role="status">
-          {syncPosition && <span className={cn("mr-2 rounded-full border px-2 py-0.5")}>{syncPosition.replace("_", " ")}</span>}
-          {syncMessage}
-        </p>
-      )}
-
-      {lastSetup && (
-        <ul className="mt-2 flex flex-col gap-1 text-xs">
-          {lastSetup.steps
-            .filter((step) => step.status === "failed")
-            .map((step) => (
-              <li key={step.id} role="alert" className="text-destructive">
-                {step.id}: {step.detail}
-                {step.fix && <span className="block text-muted-foreground">→ {step.fix}</span>}
-              </li>
+              {index + 1}
+            </span>
+            {label}
+          </li>
+        ))}
+      </ol>
+      {page === 0 && (
+        <>
+          <header>
+            <h2 className="text-2xl font-semibold">Which coding agent do you use?</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Choose the one you already use to code. Athenaeum will give it access to this
+              project’s wiki.
+            </p>
+          </header>
+          <div className="space-y-3" role="radiogroup" aria-label="Coding agent">
+            {AGENTS.map((item) => (
+              <button
+                key={item.id}
+                role="radio"
+                aria-checked={agent === item.id}
+                onClick={() => {
+                  setAgent(item.id)
+                  onAgentChange?.(item.id)
+                  setConnectionError(null)
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-xl border p-5 text-left focus-visible:ring-2 focus-visible:ring-ring",
+                  agent === item.id ? "border-primary bg-primary/5" : "hover:bg-muted/30",
+                )}
+              >
+                <span>
+                  <span className="block font-medium">{item.name}</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    {item.description}
+                  </span>
+                </span>
+                <span
+                  aria-hidden
+                  className={cn(
+                    "ml-4 h-4 w-4 shrink-0 rounded-full border",
+                    agent === item.id && "border-[5px] border-primary",
+                  )}
+                />
+              </button>
             ))}
-        </ul>
+          </div>
+          <footer className="sticky bottom-0 z-10 bg-background pb-4 flex justify-end border-t pt-5">
+            <Button onClick={() => setPage(1)}>
+              Next
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </footer>
+        </>
       )}
-
-      {error && (
-        <p role="alert" className="mt-2 text-xs text-destructive">
-          {error}
-        </p>
+      {page === 1 && (
+        <>
+          <header>
+            <h2 className="text-2xl font-semibold">Connect {selected.name}</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {connected
+                ? `${selected.name} is already connected. Continue to finish, or reconnect if you need to repair it.`
+                : `One click connects ${selected.name} to ${project?.name}.`}
+            </p>
+          </header>
+          <div className="space-y-3 rounded-xl border bg-muted/20 p-5 text-sm">
+            <p>Uses your existing {selected.name} account.</p>
+            <p className="text-muted-foreground">
+              {agent === "cursor"
+                ? "Ask Cursor to search your wiki and propose useful findings."
+                : "Your agent will be asked to recall relevant knowledge and propose useful findings as you work."}
+            </p>
+            <p className="text-muted-foreground">
+              You review proposals before they become wiki pages.
+            </p>
+            <p className="text-muted-foreground">This connects wiki memory. You stay signed in through {selected.name}.</p>
+          </div>
+          {connecting && (
+            <p role="status" className="flex items-center gap-2 text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {status}
+            </p>
+          )}
+          {(connectionError || error) && (
+            <p role="alert" className="text-sm text-destructive">
+              {connectionError ?? error}
+            </p>
+          )}
+          <footer className="sticky bottom-0 z-10 bg-background pb-4 flex flex-wrap items-center justify-between gap-3 border-t pt-5">
+            <Button variant="ghost" disabled={working} onClick={() => setPage(0)}>
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+            <div className="flex gap-2">
+              {connecting && (
+                <Button variant="outline" onClick={() => void cancel()}>
+                  Cancel
+                </Button>
+              )}
+              {connected && !connectionError && (
+                <Button variant="outline" disabled={working} onClick={() => void connect()}>
+                  Reconnect
+                </Button>
+              )}
+              <Button
+                disabled={working}
+                onClick={() => (connected && !connectionError ? setPage(2) : void connect())}
+              >
+                {working
+                  ? "Please wait…"
+                  : connected && !connectionError
+                    ? "Next"
+                    : `Connect ${selected.name}`}
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </footer>
+          {(connectionError || error || progress.length > 0) && (
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Connection details</summary>
+              <pre className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted p-3">
+                {[
+                  ...(lastSetup?.steps
+                    .filter((step) => step.status === "failed")
+                    .map((step) => step.detail) ?? []),
+                  ...progress.slice(-15),
+                  ...(doctor?.checks
+                    .filter((c) => !c.ok && (c.id === `agent-${agent}` || c.id === "integrations"))
+                    .map((c) => c.detail) ?? []),
+                ].join("\n")}
+              </pre>
+            </details>
+          )}
+        </>
       )}
-
-      {progress.length > 0 && (
-        <pre className="mt-2 max-h-32 overflow-y-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap" aria-label="Progress">
-          {progress.slice(-12).join("\n")}
-        </pre>
+      {page === 2 && (
+        <>
+          {connected && <CheckCircle2 className="h-10 w-10 text-emerald-600" />}
+          <header>
+            <h2 className="text-2xl font-semibold">{connected ? `${selected.name} is connected.` : working ? "Checking connection…" : "Connection needs attention"}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              {connected ? <>
+              Reopen {selected.name} in <strong className="text-foreground">{project?.name}</strong>{" "}
+              to load the connection. Then code as usual.
+              </> : "Go back to reconnect your agent, or return to Coding agents to check its status."}
+            </p>
+          </header>
+          <div className="space-y-3 rounded-xl border p-5 text-sm">
+            <p>Try asking: “What does this project’s wiki know?”</p>
+            <p className="text-muted-foreground">New findings appear in Review → Proposals.</p>
+          </div>
+          <footer className="sticky bottom-0 z-10 bg-background pb-4 flex justify-between border-t pt-5">
+            <Button variant="ghost" onClick={() => setPage(1)}>
+              Back
+            </Button>
+            <Button disabled={!connected || working} onClick={() => { setPage(0); if (onComplete) onComplete(); else openConnectors("agents") }}>Finish</Button>
+          </footer>
+        </>
       )}
     </section>
   )

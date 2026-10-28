@@ -30,8 +30,15 @@ Download the package for your system from the
   Applications; macOS may request administrator authorization. A `.dmg` is also available.
 - **Linux:** install the `.deb` or run the `.AppImage`.
 
-Open Athenaeum, open a project, then go to **Knowledge → Library** and click
-**Set up Codex**. You can also select Claude Code or Cursor. Setup installs the local
+On first launch, choose Library sign-in or local use and click **Next**. Library
+sign-in accepts your username/email and password inside Athenaeum, with no device
+code to enter. The CLI exchanges a temporary account session for a scoped token,
+ends the temporary session, and saves only the token. Creating a new account still
+opens the Library registration page in your browser.
+
+Open a project, then go to **Connectors → Coding agents**, select **Codex**, click
+**Next**, then **Connect Codex**. The connection is checked before **Ready** appears;
+click **Finish** to open your wiki. You can also select Claude Code or Cursor. Setup installs the local
 wiki tools and Codex memory instructions, using your existing Codex session and login.
 Wiki memory needs no additional API key, subscription or agent runtime. Reopen Codex
 after setup to load the connection. Library connection is optional.
@@ -44,7 +51,11 @@ The project chooser also offers **Clone from Library**. Choose a hosted `owner/w
 folder name and its parent directory; private wikis use browser sign-in. An existing coding folder
 can be opened before it has a wiki, then initialized through guided setup.
 
-In **Knowledge → Library**, **Sign in and publish** explicitly shares accepted pages under `wiki/`
+Account access is separate in **Connectors → Library account**. Model configuration
+is in **Connectors → AI model**, and remains available in Settings too.
+
+In **Knowledge → Library**, name your wiki, click **Next**, sign in if needed,
+then click **Publish wiki**. This explicitly shares accepted pages under `wiki/`
 with a new private wiki (or a public wiki if you choose that option). Linked wikis have **Pull**,
 **Push**, **Sync**, status and hosted-history controls. A conflict holds local work in place and
 blocks push. **Compare versions** shows local, Library and last shared text; keep a version or
@@ -161,8 +172,8 @@ thing to do about any that is broken. `athenaeum setup` repairs what `doctor` re
 ## Updating
 
 The desktop has an updater for signed, published releases. No updater channel is published for the
-local Windows candidate; run the replacement NSIS installer to update it. Run **Configure coding agents**
-in Knowledge → Library again to reconnect the selected agent and refresh its memory instructions
+local Windows candidate; run the replacement NSIS installer to update it. Open **Connectors → Coding agents**
+again to reconnect the selected agent and refresh its memory instructions
 from the installed integration. Advanced Athenaeum Agent updates use its separate installer.
 Project wikis and credentials are preserved.
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import {
-  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, CircleHelp,
+  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, CircleHelp, PlugZap,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -11,6 +11,7 @@ import { useUpdateStore, hasAvailableUpdate } from "@/stores/update-store"
 import { useTranslation } from "react-i18next"
 import logoImg from "@/assets/logo.png"
 import type { WikiState } from "@/stores/wiki-store"
+import { LibraryAccountMenu } from "@/components/setup/library-account-menu"
 import {
   isResearchPanelVisible,
   nextResearchPanelNavState,
@@ -153,6 +154,11 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
         </div>
         {/* Bottom: daemon status + settings + switch project */}
         <div className="flex flex-col items-center gap-1 pb-1">
+          <LibraryAccountMenu />
+          <Tooltip>
+            <TooltipTrigger aria-label="Connectors" aria-pressed={activeView === "connectors"} onClick={() => setActiveView("connectors")} className={`flex h-10 w-10 items-center justify-center rounded-md ${activeView === "connectors" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent"}`}><PlugZap className="h-5 w-5" /></TooltipTrigger>
+            <TooltipContent side="right">Connectors</TooltipContent>
+          </Tooltip>
           <Tooltip>
             <TooltipTrigger aria-label="Quick start guide" onClick={onQuickStart} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
               <CircleHelp className="h-4 w-4" />

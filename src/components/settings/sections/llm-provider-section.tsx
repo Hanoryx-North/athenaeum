@@ -409,10 +409,14 @@ function PresetRow({
         ? t("settings.sections.llm.testingConnection")
         : t("settings.sections.llm.testingFunction"),
     })
-    const result = kind === "connection"
-      ? await testLlmConnection(resolvedConfig)
-      : await testLlmFunction(resolvedConfig)
-    setTestState({ kind: "done", result })
+    try {
+      const result = kind === "connection"
+        ? await testLlmConnection(resolvedConfig)
+        : await testLlmFunction(resolvedConfig)
+      setTestState({ kind: "done", result })
+    } catch (cause) {
+      setTestState({ kind: "done", result: { ok: false, message: cause instanceof Error ? cause.message : String(cause) } })
+    }
   }
 
   return (

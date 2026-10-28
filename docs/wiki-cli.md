@@ -62,7 +62,7 @@ parser, including aliases, accepted enum values and defaults. Use any command's
 | Proposal review | `proposals`, `accept`, `reject`, `draft-source` |
 | Portability | `export`, `import`, `vault materialize`, `import-legacy-core` |
 | Arrived knowledge | `trust list`, `trust adopt` |
-| Library credentials | `library login`, `library logout`, `library status` |
+| Library credentials | `library sign-in --stdin` (account JSON on stdin), `library login` (browser device flow), `library logout`, `library status` |
 | Sync | `sync`, `sync link`, `sync clone`, `sync status`, `sync pull`, `sync push`, `sync conflict`, `sync resolve`, `sync unlink` |
 | Integrations | `agent -- …`, `mcp -- …`, plus `setup`'s agent connection options |
 | Automation | `commands`, `completions`, `--json`, `bridge` |

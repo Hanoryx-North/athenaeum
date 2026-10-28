@@ -109,6 +109,58 @@ impl LibraryClient {
         self.json(self.request(Method::GET, &["user"]))
     }
 
+    /// Exchange an account sign-in for a scoped desktop token. The password and
+    /// temporary session cookie are never persisted or returned to the window.
+    pub fn sign_in(&self, username: &str, password: &str) -> Result<(String, String)> {
+        let response = self.send(
+            self.http
+                .post(self.url(&["auth", "login"]))
+                .json(&serde_json::json!({ "username": username, "password": password })),
+        )?;
+        let cookie = response
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .filter_map(|value| value.split(';').next())
+            .find(|value| value.starts_with("athenaeum_session="))
+            .ok_or_else(|| {
+                portable_error(
+                    "invalid_response",
+                    "The Library did not return a sign-in session.",
+                )
+            })?
+            .to_string();
+        #[derive(Deserialize)]
+        struct SignedIn {
+            user: Whoami,
+        }
+        let signed_in: SignedIn = serde_json::from_slice(&read_limited(response, 1024 * 1024)?)?;
+        #[derive(Deserialize)]
+        struct AccessToken {
+            token: String,
+        }
+        let token: Result<AccessToken> = self.json(
+            self.http.post(self.url(&["user", "tokens"]))
+                .header(reqwest::header::COOKIE, &cookie)
+                .json(&serde_json::json!({ "name": "Athenaeum desktop", "scopes": ["repo:read", "repo:write"] })),
+        );
+        // End the temporary account session even if token creation failed.
+        let _ = self.send(
+            self.http
+                .post(self.url(&["auth", "logout"]))
+                .header(reqwest::header::COOKIE, cookie),
+        );
+        let token = token?;
+        if token.token.is_empty() {
+            return Err(portable_error(
+                "invalid_response",
+                "The Library did not return an access token.",
+            ));
+        }
+        Ok((token.token, signed_in.user.username))
+    }
+
     /// The server's authoritative operation catalogue. Public, and never follows redirects.
     pub fn openapi(&self) -> Result<serde_json::Value> {
         let mut url = self.base.clone();

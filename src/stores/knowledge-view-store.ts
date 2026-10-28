@@ -7,6 +7,7 @@
  * what the app did.
  */
 import { create } from "zustand"
+import { readUiPreference, saveUiPreference } from "@/lib/ui-preferences"
 
 export type KnowledgeTab = "health" | "sources" | "brief" | "library"
 
@@ -16,6 +17,6 @@ interface KnowledgeViewState {
 }
 
 export const useKnowledgeViewStore = create<KnowledgeViewState>((set) => ({
-  tab: "health",
-  setTab: (tab) => set({ tab }),
+  tab: (() => { const tab = readUiPreference<KnowledgeTab>("knowledge-tab", "health"); return ["health", "sources", "brief", "library"].includes(tab) ? tab : "health" })(),
+  setTab: (tab) => { saveUiPreference("knowledge-tab", tab); set({ tab }) },
 }))

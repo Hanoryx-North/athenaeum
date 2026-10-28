@@ -10,7 +10,7 @@
 //! no general "run this command" door. Progress lines are forwarded as `cli-progress` events, and a
 //! running job can be cancelled, because the browser sign-in step may wait for minutes.
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -113,6 +113,12 @@ pub enum CliJob {
     LibraryLogin {
         server: String,
     },
+    LibrarySignIn {
+        server: String,
+    },
+    LibraryStatus {
+        server: String,
+    },
     LibraryLogout {
         server: String,
     },
@@ -155,6 +161,8 @@ impl CliJob {
             CliJob::Sync => "sync",
             CliJob::DisconnectAgents { .. } => "disconnect_agents",
             CliJob::LibraryLogin { .. } => "library_login",
+            CliJob::LibrarySignIn { .. } => "library_sign_in",
+            CliJob::LibraryStatus { .. } => "library_status",
             CliJob::LibraryLogout { .. } => "library_logout",
             CliJob::SyncLink { .. } => "sync_link",
             CliJob::SyncClone { .. } => "sync_clone",
@@ -170,6 +178,22 @@ impl CliJob {
     fn args(&self, workspace: &str) -> Result<Vec<String>, String> {
         let mut args: Vec<String> = vec!["-C".into(), workspace.into(), "--json".into()];
         match self {
+            CliJob::LibrarySignIn { server } | CliJob::LibraryStatus { server } => {
+                check_server(server)?;
+                args.extend([
+                    "library".into(),
+                    if matches!(self, CliJob::LibrarySignIn { .. }) {
+                        "sign-in".into()
+                    } else {
+                        "status".into()
+                    },
+                    "--server".into(),
+                    server.clone(),
+                ]);
+                if matches!(self, CliJob::LibrarySignIn { .. }) {
+                    args.push("--stdin".into());
+                }
+            }
             CliJob::Doctor => args.push("doctor".into()),
             CliJob::SyncStatus => args.extend(["sync".into(), "status".into()]),
             CliJob::Sync => args.push("sync".into()),
@@ -368,6 +392,7 @@ fn run_process(
     mut command: Command,
     job: &str,
     stream_stdout: bool,
+    input: Option<Vec<u8>>,
 ) -> Result<JobResult, String> {
     let mut slot = state
         .current
@@ -377,7 +402,11 @@ fn run_process(
         return Err("busy: another Athenaeum command is still running".into());
     }
     command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(unix)]
@@ -394,6 +423,22 @@ fn run_process(
     let mut child = command
         .spawn()
         .map_err(|error| format!("could not start {:?}: {error}", command.get_program()))?;
+    if let Some(input) = input {
+        let written = child
+            .stdin
+            .take()
+            .ok_or_else(|| "could not open sign-in input".to_string())
+            .and_then(|mut stdin| {
+                stdin
+                    .write_all(&input)
+                    .map_err(|_| "could not send sign-in input".to_string())
+            });
+        if let Err(error) = written {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    }
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let child = Arc::new(Mutex::new(child));
@@ -499,15 +544,43 @@ pub async fn cli_status() -> Result<CliStatus, String> {
 }
 
 /// Run one job in `workspace`. Needs the CLI to be installed; says so plainly when it is not.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryCredentials {
+    username: String,
+    password: String,
+}
+
 #[tauri::command]
 pub async fn cli_run(
     app: AppHandle,
     state: State<'_, CliRun>,
     workspace: Option<String>,
     job: CliJob,
+    credentials: Option<LibraryCredentials>,
 ) -> Result<JobResult, String> {
     let state = state.inner().clone();
     run_guarded_async("cli_run", async move {
+        let input = match (&job, credentials) {
+            (CliJob::LibrarySignIn { .. }, Some(credentials))
+                if !credentials.username.trim().is_empty()
+                    && credentials.username.chars().count() <= 254
+                    && !credentials.password.is_empty()
+                    && credentials.password.chars().count() <= 256 =>
+            {
+                Some(
+                    serde_json::to_vec(&credentials)
+                        .map_err(|_| "could not prepare sign-in".to_string())?,
+                )
+            }
+            (CliJob::LibrarySignIn { .. }, _) => {
+                return Err("Enter your Library username or email and password.".into())
+            }
+            (_, Some(_)) => {
+                return Err("invalid_request: credentials are only accepted for sign-in".into())
+            }
+            (_, None) => None,
+        };
         let cli = locate_cli().ok_or("cli_missing: the athenaeum command is not installed")?;
         // Account sign-in is available before the person has created a wiki.
         // Only account jobs may use the app's own directory as their working folder.
@@ -515,7 +588,10 @@ pub async fn cli_run(
             Some(workspace) => workspace,
             None if matches!(
                 &job,
-                CliJob::LibraryLogin { .. } | CliJob::LibraryLogout { .. }
+                CliJob::LibraryLogin { .. }
+                    | CliJob::LibraryLogout { .. }
+                    | CliJob::LibrarySignIn { .. }
+                    | CliJob::LibraryStatus { .. }
             ) =>
             {
                 let directory = app
@@ -538,7 +614,7 @@ pub async fn cli_run(
         tauri::async_runtime::spawn_blocking(move || {
             let mut command = Command::new(cli);
             command.args(args).env("ATHENAEUM_PROGRESS", "json");
-            run_process(&app, &state, command, label, false)
+            run_process(&app, &state, command, label, false, input)
         })
         .await
         .map_err(|error| format!("cli_run task failed: {error}"))?
@@ -606,7 +682,7 @@ pub async fn cli_install_tools(
             if agent.unwrap_or(false) {
                 command.arg("--agent");
             }
-            run_process(&app, &state, command, "install", true)
+            run_process(&app, &state, command, "install", true, None)
         })
         .await
         .map_err(|error| format!("cli_install_tools task failed: {error}"))?

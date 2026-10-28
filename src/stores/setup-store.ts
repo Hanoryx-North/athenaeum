@@ -46,7 +46,7 @@ interface SetupState {
   syncStatus: (workspace: string) => Promise<void>
   cancel: () => Promise<void>
   reset: () => Promise<void>
-  operate: (workspace: string, job: CliJob) => Promise<JobResult | null>
+  operate: (workspace: string | null, job: CliJob) => Promise<JobResult | null>
 }
 
 const MAX_PROGRESS = 200

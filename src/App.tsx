@@ -485,9 +485,7 @@ function App() {
       ))
       const projectOutputLang = await loadOutputLanguage(proj.id)
       useWikiStore.getState().setOutputLanguage(projectOutputLang ?? "auto")
-      setSelectedFile(null)
       setFileTree([])
-      setActiveView("wiki")
       useWikiStore.getState().setScheduledImportConfig({
         enabled: false,
         path: `${proj.path}/raw/sources`,

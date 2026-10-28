@@ -31,6 +31,8 @@ export type CliJob =
   | { job: "sync" }
   | { job: "disconnect_agents"; agents: string[] }
   | { job: "library_login" | "library_logout"; server: string }
+  | { job: "library_status"; server: string }
+  | { job: "library_sign_in"; server: string; username: string; password: string }
   | { job: "sync_link"; server: string; name: string; public: boolean }
   | { job: "sync_clone"; server: string; remote: string; destination: string }
   | { job: "sync_push" | "sync_pull" | "sync_unlink" }
@@ -69,10 +71,11 @@ export function cliStatus(): Promise<CliStatus> {
 export function runCli(workspace: string | null, job: CliJob): Promise<JobResult> {
   return invoke<JobResult>("cli_run", {
     workspace,
+    credentials: job.job === "library_sign_in" ? { username: job.username, password: job.password } : undefined,
     // Rust's serde names are snake_case; the closed enum is the contract.
     job: job.job === "setup"
       ? { job: "setup", library: job.library, auto_sync: job.autoSync, agents: job.agents ?? [], no_agents: job.noAgents ?? false, capture: job.capture }
-      : job,
+      : job.job === "library_sign_in" ? { job: job.job, server: job.server } : job,
   })
 }
 

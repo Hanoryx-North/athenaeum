@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { loadWorkspaceNavigation, saveWorkspaceNavigation } from "@/lib/workspace-navigation"
 import type { WikiProject, FileNode } from "@/types/wiki"
 import { DEFAULT_SOURCE_WATCH_CONFIG } from "@/lib/source-watch-config"
 import {
@@ -412,7 +413,7 @@ interface WikiState {
    * one wiki-relative) still works.
    */
   pendingScrollImageSrc: string | null
-  activeView: "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "review" | "knowledge" | "skills" | "settings"
+  activeView: "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "review" | "knowledge" | "skills" | "settings" | "connectors"
   llmConfig: LlmConfig
   /** Persisted global/default config, kept separate while a project override is effective. */
   globalLlmConfig: LlmConfig
@@ -518,7 +519,7 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   dataVersion: 0,
 
-  setProject: (project) => set({ project }),
+  setProject: (project) => set({ project, ...(project ? loadWorkspaceNavigation(project.path) : { activeView: "wiki" as const, selectedFile: null }), previewReturnView: null, externalPreview: null, previewContentPath: null, fileContent: "" }),
   setFileTree: (fileTree, options) => {
     if (options?.syncPathIndex === false) {
       set({ fileTree })
@@ -683,5 +684,12 @@ export const useWikiStore = create<WikiState>((set) => ({
   resetGraphUiState: () => set({ graphUiState: createDefaultGraphUiState() }),
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }))
+
+useWikiStore.subscribe((state, previous) => {
+  if (state.project && state.project.path === previous.project?.path &&
+      (state.activeView !== previous.activeView || state.selectedFile !== previous.selectedFile)) {
+    saveWorkspaceNavigation(state.project.path, state)
+  }
+})
 
 export type { WikiState, LlmConfig, SearchApiConfig, EmbeddingConfig, MultimodalConfig, OutputLanguage, ProxyConfig, ScheduledImportConfig, SourceWatchConfig, ApiConfig }

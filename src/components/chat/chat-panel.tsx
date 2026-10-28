@@ -8,6 +8,7 @@ import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePrevie
 import { ChatInput, type ChatSendOptions, type ChatSkillOption } from "./chat-input"
 import { useChatStore, type MessageImage, type MessageReference } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
+import { openConnectors } from "@/stores/connectors-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
 import { harnessRouteFor } from "@/lib/harness-route"
 import { supportsImageInput } from "@/lib/llm-providers"
@@ -1059,10 +1060,20 @@ export function ChatPanel() {
         )}
         {!activeConversationId ? (
           <div className="flex flex-1 items-center justify-center text-muted-foreground">
-            <div className="text-center">
+            <div className="max-w-md space-y-3 px-6 text-center">
               <MessageSquare className="mx-auto mb-3 h-8 w-8 opacity-30" />
+              {mode === "chat" && harnessStatus.state === "offline" ? <>
+                <h2 className="font-medium text-foreground">Chat is not ready</h2>
+                <p className="text-sm">In-app chat needs its own model and agent runtime. You can keep using your connected coding agent with wiki memory.</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button variant="outline" onClick={() => openConnectors("agents")}>Coding agents</Button>
+                  <Button variant="ghost" onClick={() => openConnectors("model")}>AI model settings</Button>
+                </div>
+              </> : <>
               <p className="text-sm">{t("chat.startNewConversation")}</p>
               <p className="mt-1 text-xs opacity-60">{t("chat.clickNewChatToBegin")}</p>
+              <Button variant="outline" onClick={handleNewConversation}>New chat</Button>
+              </>}
             </div>
           </div>
           ) : (

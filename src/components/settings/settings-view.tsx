@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useUiPreference } from "@/hooks/useUiPreference"
 import {
   Bot,
   Binary,
@@ -224,7 +225,7 @@ export function SettingsView() {
   // per version.
   const updateAvailable = useUpdateStore((s) => hasAvailableUpdate(s))
 
-  const [active, setActive] = useState<CategoryId>("llm")
+  const [active, setActive] = useUiPreference<CategoryId>("settings-category", "llm", (value) => CATEGORIES.some((category) => category.id === value))
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [currentTheme, setCurrentTheme] = useState<AppTheme>("system")

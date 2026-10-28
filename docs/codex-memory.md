@@ -1,6 +1,8 @@
 # Codex wiki memory
 
-In **Knowledge → Library**, choose Codex and click **Set up Codex**. Setup creates
+Open **Connectors → Coding agents**, choose **Codex**, click **Next**, then
+**Connect Codex**. Setup verifies the connection before showing **Ready** and a
+**Finish** button. It creates
 the project wiki, connects local MCP tools, and adds a managed block to Codex's
 active global `AGENTS.md` (or non-empty `AGENTS.override.md`). Existing instructions
 are preserved and backed up. Reopen Codex after setup.

@@ -64,6 +64,14 @@ pub enum TrustCommand {
 
 #[derive(Subcommand)]
 pub enum LibraryCommand {
+    /// Sign in with an account. Read username and password as JSON from stdin.
+    SignIn {
+        #[arg(long)]
+        server: Option<String>,
+        /// Required: credentials are never accepted in command-line arguments.
+        #[arg(long, required = true)]
+        stdin: bool,
+    },
     /// Connect to a Library server. Opens no browser: it prints a code and a URL.
     Login {
         /// The server, e.g. `https://library.example`. Defaults to `ATHENAEUM_LIBRARY_URL`.
@@ -539,6 +547,55 @@ fn server_arg(flag: Option<&str>, state: Option<&SyncState>) -> Result<String> {
 
 pub fn library(json: bool, command: &LibraryCommand) -> Result<Outcome> {
     match command {
+        LibraryCommand::SignIn { server, .. } => {
+            use std::io::Read;
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Credentials {
+                username: String,
+                password: String,
+            }
+            let mut input = String::new();
+            std::io::stdin()
+                .take(16 * 1024 + 1)
+                .read_to_string(&mut input)?;
+            if input.len() > 16 * 1024 {
+                return Err(portable_error(
+                    "invalid_request",
+                    "Sign-in input is too large.",
+                ));
+            }
+            let credentials: Credentials = serde_json::from_str(&input).map_err(|_| {
+                portable_error(
+                    "invalid_request",
+                    "Provide username and password as JSON on stdin.",
+                )
+            })?;
+            if credentials.username.trim().is_empty()
+                || credentials.username.chars().count() > 254
+                || credentials.password.is_empty()
+                || credentials.password.chars().count() > 256
+            {
+                return Err(portable_error(
+                    "invalid_request",
+                    "Enter your Library username or email and password.",
+                ));
+            }
+            let server = server_arg(server.as_deref(), None)?;
+            let client = LibraryClient::new(&server, None)?;
+            let (token, username) =
+                client.sign_in(credentials.username.trim(), &credentials.password)?;
+            let server = client.server();
+            credentials::store(&server, &token, Some(&username))?;
+            emit(
+                json,
+                &serde_json::json!({ "server": server, "username": username }),
+                || {
+                    println!("signed in to {server} as {username}");
+                    Ok(())
+                },
+            )?;
+        }
         LibraryCommand::Login { server, token } => {
             let server = server_arg(server.as_deref(), None)?;
             let client = LibraryClient::new(&server, token.clone())?;
