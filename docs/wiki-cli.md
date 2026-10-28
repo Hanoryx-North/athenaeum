@@ -12,15 +12,20 @@ For local development, launch the compiled desktop from the command line:
 ```sh
 wiki start                 # build once if missing, otherwise just open the app
 wiki start --build         # refresh frontend + desktop using the existing cache
+wiki start --dev           # optional foreground developer session with live updates
 wiki start --dry-run --json
 ```
 
-This workflow creates no installer packages or desktop shortcuts. It uses one
-release build in `athenaeum/target/release` (or `CARGO_TARGET_DIR`), and ordinary
-starts run no compiler or development server. Source changes take effect after
+This workflow creates no installer packages or desktop shortcuts. It keeps a
+ready app in `athenaeum/target/standalone` (or `$CARGO_TARGET_DIR/standalone`).
+The frontend is embedded; ordinary starts run no compiler or development server
+and return immediately while the app stays open. Source changes take effect after
 `wiki start --build` (quit the running desktop first on Windows). Keep the Cargo
-cache to reuse dependencies; no `cargo clean`
-or separate build directory is needed. The first build needs the normal desktop
+cache to reuse dependencies; no `cargo clean` is needed. Preparation uses an
+incremental debug build, without the full-program release optimization that can
+spend minutes on the final linking step. Live development may replace the debug
+executable but cannot replace the standalone snapshot. An existing release app
+is reused if no snapshot exists. The first build needs the normal desktop
 build prerequisites and dependencies (`wiki dev install desktop`).
 
 Run from the source workspace, pass `--root /path/to/parent`, or save

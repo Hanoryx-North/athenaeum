@@ -1,4 +1,4 @@
-//! Local source-checkout launcher. Ordinary starts never invoke a build tool.
+//! Local source-checkout launcher. Cached starts never invoke a build tool.
 use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
@@ -15,7 +15,10 @@ pub struct StartArgs {
     /// Parent of the source repositories. Also read from WIKI_DEV_ROOT.
     #[arg(long)]
     root: Option<PathBuf>,
-    /// Refresh the compiled app using the existing release build cache.
+    /// Run the live desktop in the foreground (Vite UI updates, incremental Rust).
+    #[arg(long, conflicts_with = "build")]
+    dev: bool,
+    /// Refresh the standalone app with an incremental build (no installers).
     #[arg(long)]
     build: bool,
     /// Show the build (if needed) and launch plan without executing it.
@@ -26,18 +29,36 @@ pub struct StartArgs {
 pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
     let root = dev_cmd::root(cwd, args.root.as_deref())?;
     let repo = root.join("athenaeum");
+    if args.dev {
+        if json_out && !args.dry_run {
+            return Err(portable_error(
+                "invalid_request",
+                "start --dev is a foreground stream; omit --json, or use --dry-run",
+            ));
+        }
+        return process::run_steps(json_out, args.dry_run, &[dev_cmd::desktop_serve(&root)?]);
+    }
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .filter(|value| !value.is_empty())
         .map(|value| repo.join(value))
         .unwrap_or_else(|| repo.join("target"));
-    let binary = target.join("release").join(if cfg!(windows) {
+    let executable = if cfg!(windows) {
         "athenaeum-app.exe"
     } else {
         "athenaeum-app"
-    });
+    };
+    // Live Tauri development replaces target/debug with a Vite-dependent app.
+    // Keep the embedded-frontend snapshot separate so it always opens offline.
+    let snapshot = target.join("standalone").join(executable);
+    let release = target.join("release").join(executable);
+    let binary = if !args.build && !snapshot.is_file() && release.is_file() {
+        release
+    } else {
+        snapshot
+    };
     let needs_build = args.build || !binary.is_file();
     let steps = if needs_build {
-        vec![dev_cmd::desktop_build(&root, true)?]
+        vec![dev_cmd::desktop_snapshot(&root)?]
     } else {
         Vec::new()
     };
@@ -57,6 +78,7 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
         return Ok(Outcome::Ok);
     }
     if needs_build {
+        eprintln!("[desktop] Preparing the standalone app with the incremental build cache. Later wiki start launches it directly.");
         // Build logs go to stderr; stdout remains one JSON launch report.
         let outcome = process::run_build_steps(&steps)?;
         if matches!(outcome, Outcome::ProblemsFound) {
@@ -65,7 +87,7 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
     }
     if !binary.is_file() {
         return Err(portable_error("missing_tool", format!(
-            "Desktop executable missing at {}. Set CARGO_TARGET_DIR to your Cargo target directory and retry wiki start --build.",
+            "Desktop executable missing at {}. Run wiki start --build to prepare the standalone app. If using a custom Cargo cache, set CARGO_TARGET_DIR to it.",
             binary.display()
         )));
     }
@@ -84,7 +106,14 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
 
 #[cfg(not(windows))]
 fn spawn_desktop(binary: &Path, cwd: &Path) -> std::io::Result<u32> {
-    Ok(Command::new(binary)
+    let mut command = Command::new(binary);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // The GUI must outlive the shell/process group that opened it.
+        command.process_group(0);
+    }
+    Ok(command
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

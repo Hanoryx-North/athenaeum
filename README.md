@@ -195,9 +195,32 @@ should receive: retrieved knowledge is *reference material*, never instruction.
 ### Desktop app
 
 ```bash
-npm run tauri dev      # develop
-npm run tauri build    # produce an installer for the current platform
+npm install           # once, then again only when dependencies change
+npm start             # desktop + Vite live updates; Ctrl+C stops both
 ```
+
+Keep `npm start` running while editing. React, TypeScript and CSS changes update
+the open window through Vite without compiling Rust. Backend changes trigger an
+incremental Rust rebuild and restart the window. The first development launch
+builds the native dependencies once; subsequent launches reuse `target/debug`.
+No installer, signing, or release optimization runs during this workflow.
+
+From the source workspace, `wiki start --dev` and `wiki dev serve desktop` run
+the same live desktop. `npm run dev` starts only Vite, without the native backend.
+
+For normal use, run `wiki start`. It immediately opens the cached standalone app
+and returns to the terminal, without Cargo, Node, Vite or a server. If no app has
+been built yet, it prepares one once. Source changes take effect after
+`wiki start --build` (quit Athenaeum first on Windows).
+
+`wiki start --build` and `npm run desktop:build` embed the frontend using the
+incremental debug cache, without release optimization or installers. The ready
+executable lives in `target/standalone/athenaeum-app` (`.exe` on Windows), with
+its local resources. Running `npm start` afterward leaves this snapshot intact.
+An existing `target/release` app is also supported until a standalone snapshot
+is prepared. Use `npm run tauri build` only when deliberately
+creating release installers. Keep the Cargo cache; do not run `cargo clean`
+between UI changes.
 
 ---
 

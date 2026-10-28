@@ -210,6 +210,16 @@ pub(crate) fn desktop_build(root: &Path, release: bool) -> Result<Step> {
     script(root, Component::Desktop, "tauri", &args)
 }
 
+/// Share one live desktop command with `wiki start --dev` and `wiki dev serve`.
+pub(crate) fn desktop_serve(root: &Path) -> Result<Step> {
+    script(root, Component::Desktop, "tauri", &["dev".into()])
+}
+
+/// Build and preserve an embedded-frontend app independently of live development.
+pub(crate) fn desktop_snapshot(root: &Path) -> Result<Step> {
+    script(root, Component::Desktop, "desktop:build", &[])
+}
+
 fn selected(targets: &Targets) -> Vec<Component> {
     let all = targets.components.is_empty() || targets.components.contains(&Component::All);
     COMPONENTS
@@ -356,7 +366,7 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
             }
             let mut step = match c {
                 Component::Api => native(&root, *c, "run"),
-                Component::Desktop => script(&root, *c, "tauri", &["dev".into()])?,
+                Component::Desktop => desktop_serve(&root)?,
                 Component::App | Component::Library | Component::Admin => {
                     script(&root, *c, "dev", &[])?
                 }

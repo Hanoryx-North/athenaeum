@@ -81,10 +81,17 @@ a person reviews proposals before they become accepted Markdown pages.
 
 macOS and Windows must have native installer wizards and packaged dependencies. A shell
 or PowerShell one-liner is an optional advanced path, never the required onboarding flow.
-During current local development, use `wiki start` to launch the compiled app and
-`wiki start --build` to refresh it. Do not create or install native installer packages
+During current local development, use `npm start` (or `wiki start --dev`) for the
+live desktop: Vite updates UI changes without Rust compilation, and native changes
+rebuild incrementally. Keep this process running while editing. The first launch
+builds native dependencies once and subsequent launches reuse `target/debug`.
+Use `wiki start` to open the cached standalone app. If missing, it prepares it
+once; `wiki start --build` refreshes it deliberately. Local snapshots use the
+incremental debug cache and embed the frontend in `target/standalone`, separate
+from the live `target/debug` app. No release optimization runs on this path. Do not
+use release builds for routine UI iteration. Do not create or install native installer packages
 or desktop shortcuts for local iteration. Packaging is an explicit release task;
-ordinary launches reuse the existing release executable and Cargo cache.
+ordinary launches reuse the standalone executable without a compiler or server.
 The desktop guides existing-agent selection, project setup and optional Library
 connection. Advanced agent CLI/profile installation remains in its owning repository.
 Base CLI/MCP setup works offline;agent-runtime installation and Library connection may require internet access.
@@ -203,7 +210,8 @@ direction; take your scope from this file.
 ```sh
 npm install && cargo build          # Rust 1.88+, Node 20+
 npm run dev                         # Vite dev server
-npm run tauri dev                   # the app
+npm start                           # live desktop + Vite (keep running while editing)
+npm run desktop:build               # standalone debug snapshot, no installer
 npm run typecheck                   # frontend types
 cargo build --release -p athenaeum-cli   # the `athenaeum` CLI and engine, no window needed
 npm run build                       # typecheck + bundle

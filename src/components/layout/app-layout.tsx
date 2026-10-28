@@ -1,4 +1,3 @@
-import { Brand } from "@/design-system/components"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
@@ -33,16 +32,8 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
   // The engine-backed stores follow the open project for the whole app, so the
   // sidebar badge and every knowledge panel read the same workspace.
   useEngineWorkspace()
-  const [leftWidth, setLeftWidth] = useUiPreference(
-    "left-panel-width",
-    220,
-    (value) => Number.isFinite(value) && value >= 150 && value <= 400,
-  )
-  const [rightWidth, setRightWidth] = useUiPreference(
-    "right-panel-width",
-    400,
-    (value) => Number.isFinite(value) && value >= 250 && value <= 2000,
-  )
+  const [leftWidth, setLeftWidth] = useUiPreference("left-panel-width", 220, (value) => Number.isFinite(value) && value >= 150 && value <= 400)
+  const [rightWidth, setRightWidth] = useUiPreference("right-panel-width", 400, (value) => Number.isFinite(value) && value >= 250 && value <= 2000)
   const [leftCollapsed, setLeftCollapsed] = useState(
     () => localStorage.getItem(LEFT_PANEL_COLLAPSED_KEY) === "true",
   )
@@ -100,16 +91,13 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
       document.addEventListener("mousemove", handleMouseMove)
       document.addEventListener("mouseup", handleMouseUp)
     },
-    [],
+    []
   )
 
   // Settings and Chat are standalone views. Hide the project file tree,
   // activity strip, and optional right research panel there so those
   // screens use the whole work area.
-  const { showLeftPanel, hasRightPanel } = getAppLayoutVisibility(
-    activeView,
-    researchPanelOpen,
-  )
+  const { showLeftPanel, hasRightPanel } = getAppLayoutVisibility(activeView, researchPanelOpen)
   const toggleLeftPanel = () => {
     setLeftCollapsed((value) => {
       const next = !value
@@ -126,26 +114,11 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
     // it fills the rest of the viewport.
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
-      <div className="desktop-workspace-header">
-        <Brand />
-        <span className="desktop-workspace-name">{project?.name}</span>
-        <button
-          onClick={() => openConnectors()}
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          Connectors
-        </button>
-      </div>
+      <div className="flex shrink-0 items-center justify-between border-b px-4 py-2 text-sm"><span className="truncate font-medium">{project?.name}</span><button onClick={() => openConnectors()} className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Connectors</button></div>
       <SetupBanner />
       <div className="flex min-h-0 flex-1">
-        <IconSidebar
-          onSwitchProject={onSwitchProject}
-          onQuickStart={onQuickStart}
-        />
-        <div
-          ref={containerRef}
-          className="relative flex min-w-0 flex-1 overflow-hidden"
-        >
+        <IconSidebar onSwitchProject={onSwitchProject} onQuickStart={onQuickStart} />
+        <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">
           {showLeftPanel && !leftCollapsed && (
             <>
               {/* Left: File tree + Activity */}

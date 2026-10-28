@@ -15,6 +15,18 @@ install once ──▶ athenaeum setup (per project) ──▶ use your agent as
 
 ## 1. Install with the native wizard
 
+In a prepared source checkout, `wiki start` opens the standalone app immediately
+and returns to the terminal. If missing, it builds once using the incremental
+cache; `wiki start --build` refreshes it. Normal launches need no development
+server. See [Wiki CLI](wiki-cli.md#install-and-start).
+
+For editing a source checkout, run `npm install` once, then `npm start`. This
+opens the native desktop with Vite live updates; leave it running as you edit.
+UI changes do not rebuild Rust, and backend changes rebuild incrementally.
+The first development launch compiles native dependencies once. `wiki start --dev`
+is the equivalent workspace command. Local iteration needs no installer or
+release build; see [the desktop development workflow](../README.md#desktop-app).
+
 The verified 2026-10-27 Windows candidate is a local NSIS artifact at
 `target/release/bundle/nsis/Athenaeum_0.1.0_x64-setup.exe`. The repository is private and has no
 published latest release; the public download and updater channel are not verified. This candidate

@@ -1,5 +1,5 @@
-// Prevents an additional console window on Windows in release. DO NOT REMOVE.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// The desktop is a GUI even in an incremental standalone build.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 fn main() {
     athenaeum_app_lib::run();

@@ -52,7 +52,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the compiled desktop app. Build once if missing; reuse it thereafter.
+    /// Open the compiled desktop app, or use --dev for live UI updates while editing.
     Start(start_cmd::StartArgs),
     /// List every command and option, generated from the actual parser.
     Commands,

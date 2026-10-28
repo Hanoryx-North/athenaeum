@@ -30,6 +30,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sha2 = "0.10"
 thiserror = "2"
 
+# Local iteration: keep Rust incremental and avoid emitting gigabytes of debug
+# symbols for the document/vector dependencies. Frontend edits use Vite HMR and
+# never invoke Cargo. Release optimizations below are for shipping builds only.
+[profile.dev]
+debug = 0
+incremental = true
+
 [profile.release]
 codegen-units = 1
 lto = true
