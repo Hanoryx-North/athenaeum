@@ -24,11 +24,16 @@ import { loadOnboardingComplete, saveOnboardingComplete } from "@/lib/project-st
 import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
 
+import { AccountPage } from "@/components/setup/account-page"
+import { useAccountViewStore } from "@/stores/account-view-store"
+
 function applyDocumentZoom(level: number) {
   document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * level}px`
 }
 
 function App() {
+  const accountOpen = useAccountViewStore((s) => s.open)
+  const setAccountOpen = useAccountViewStore((s) => s.setOpen)
   const appDialog = useAppDialog()
   const project = useWikiStore((s) => s.project)
   const setProject = useWikiStore((s) => s.setProject)
@@ -657,6 +662,8 @@ function App() {
     )
   }
 
+  if (accountOpen) return <AccountPage />
+
   if (firstLaunch) return <FirstLaunch onComplete={completeOnboarding} />
 
   if (!project) {
@@ -666,7 +673,7 @@ function App() {
           onCreateProject={() => setShowCreateDialog(true)}
           onOpenProject={handleOpenProject}
           onSelectProject={handleSelectRecent}
-          onAccount={() => setFirstLaunch(true)}
+          onAccount={() => setAccountOpen(true)}
           onQuickStart={() => setShowGuide(true)}
         />
         <QuickStartGuide open={showGuide} onOpenChange={setShowGuide} />

@@ -1,32 +1,34 @@
 import { useEffect } from "react"
-import { CircleUserRound, X } from "lucide-react"
-import { Popover } from "@base-ui/react/popover"
+import { CircleUserRound } from "lucide-react"
 import { useLibraryAccountStore } from "@/stores/library-account-store"
 import { useSetupStore } from "@/stores/setup-store"
-import { LibraryAccount } from "./library-account"
+import { useAccountViewStore } from "@/stores/account-view-store"
+import { AccountIdentity } from "@/design-system/components"
 
+/** Account credentials belong to a full screen, never a popover. */
 export function LibraryAccountMenu() {
   const { username, checked, checking, refresh } = useLibraryAccountStore()
   const busy = useSetupStore((s) => s.busy)
+  const setOpen = useAccountViewStore((s) => s.setOpen)
   useEffect(() => {
     if (!busy && !checked && !checking) void refresh()
   }, [busy, checked, checking, refresh])
-
   return (
-    <Popover.Root>
-      <Popover.Trigger aria-label={username ? `Library account: ${username}` : "Sign in to Library"} title={username ? `Library: ${username}` : "Sign in to Library"} className="relative flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
-        <CircleUserRound className="h-5 w-5" />
-        {username && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />}
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Positioner side="right" align="end" sideOffset={10} className="z-50">
-          <Popover.Popup className="relative max-h-[calc(100dvh-2rem)] w-80 max-w-[calc(100vw-5rem)] overflow-y-auto rounded-xl border bg-popover p-5 text-popover-foreground shadow-xl outline-none">
-            <Popover.Title className="sr-only">Library account</Popover.Title>
-            <Popover.Close aria-label="Close account menu" className="absolute right-2 top-2 rounded p-1 text-muted-foreground hover:bg-accent"><X className="h-4 w-4" /></Popover.Close>
-            <LibraryAccount />
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+    <button
+      onClick={() => setOpen(true)}
+      aria-label={
+        username ? `Library account: ${username}` : "Sign in to Library"
+      }
+      className="desktop-account-trigger"
+    >
+      {username ? (
+        <AccountIdentity username={username} detail="Library account" />
+      ) : (
+        <>
+          <CircleUserRound className="h-5 w-5" />
+          <span>Sign in to Library</span>
+        </>
+      )}
+    </button>
   )
 }

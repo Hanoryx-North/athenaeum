@@ -214,7 +214,7 @@ pub fn setup(json: bool, cwd: &Path, explicit_dir: bool, args: &SetupArgs) -> Re
             "left your coding agents alone (--no-agents)",
         ));
     } else {
-        let (step, report) = connect_agents(args, auto_sync);
+        let (step, report) = connect_agents(args, auto_sync, &project);
         steps.push(step);
         agents = report;
     }
@@ -561,7 +561,7 @@ pub fn disconnect_agents(json: bool, agents: &[String]) -> Result<Outcome> {
     })
 }
 
-fn connect_agents(args: &SetupArgs, auto_sync: Option<bool>) -> (Step, Value) {
+fn connect_agents(args: &SetupArgs, auto_sync: Option<bool>, project: &Path) -> (Step, Value) {
     let Some(found) = find_integrations(args.integrations.as_deref()) else {
         return (
             Step::failed(
@@ -572,7 +572,11 @@ fn connect_agents(args: &SetupArgs, auto_sync: Option<bool>) -> (Step, Value) {
             Value::Null,
         );
     };
-    let mut extra = vec!["connect".to_string()];
+    let mut extra = vec![
+        "connect".to_string(),
+        "--workspace".to_string(),
+        project.display().to_string(),
+    ];
     if let Some(capture) = &args.capture {
         extra.push("--capture".into());
         extra.push(capture.clone());
@@ -816,7 +820,10 @@ pub fn doctor(json_out: bool, cwd: &Path, integrations: Option<&Path>) -> Result
             "athenaeum-integrations is not installed, so coding agents cannot reach the knowledge base",
             Some("Run the Athenaeum installer again."),
         )),
-        Some(found) => match run_integrations(&found, &["doctor".to_string()]) {
+        Some(found) => match run_integrations(
+            &found,
+            &["doctor".to_string(), "--cwd".to_string(), cwd.display().to_string()],
+        ) {
             Ok(report) => {
                 for c in report.get("checks").and_then(Value::as_array).into_iter().flatten() {
                     // The integration repeats the engine and knowledge-base checks; keep only what is new.

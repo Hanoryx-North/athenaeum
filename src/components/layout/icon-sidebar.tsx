@@ -1,15 +1,33 @@
 import { useState, useEffect } from "react"
 import {
-  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, CircleHelp, PlugZap,
+  FileText,
+  FolderOpen,
+  Search,
+  Network,
+  ClipboardCheck,
+  Settings,
+  ArrowLeftRight,
+  ClipboardList,
+  Globe,
+  MessageSquare,
+  Sparkles,
+  Activity,
+  CircleHelp,
+  PlugZap,
 } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { useProposalStore } from "@/stores/proposal-store"
 import { useResearchStore } from "@/stores/research-store"
 import { useUpdateStore, hasAvailableUpdate } from "@/stores/update-store"
 import { useTranslation } from "react-i18next"
-import logoImg from "@/assets/logo.png"
+
 import type { WikiState } from "@/stores/wiki-store"
 import { LibraryAccountMenu } from "@/components/setup/library-account-menu"
 import {
@@ -19,33 +37,42 @@ import {
 
 type NavView = WikiState["activeView"]
 
-const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = [
-  { view: "chat", icon: MessageSquare, labelKey: "nav.chat" },
-  { view: "wiki", icon: FileText, labelKey: "nav.wiki" },
-  { view: "sources", icon: FolderOpen, labelKey: "nav.sources" },
-  { view: "search", icon: Search, labelKey: "nav.search" },
-  { view: "graph", icon: Network, labelKey: "nav.graph" },
-  { view: "lint", icon: ClipboardCheck, labelKey: "nav.lint" },
-  { view: "review", icon: ClipboardList, labelKey: "nav.review" },
-  { view: "knowledge", icon: Activity, labelKey: "nav.knowledge" },
-]
+const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] =
+  [
+    { view: "chat", icon: MessageSquare, labelKey: "nav.chat" },
+    { view: "wiki", icon: FileText, labelKey: "nav.wiki" },
+    { view: "sources", icon: FolderOpen, labelKey: "nav.sources" },
+    { view: "search", icon: Search, labelKey: "nav.search" },
+    { view: "graph", icon: Network, labelKey: "nav.graph" },
+    { view: "lint", icon: ClipboardCheck, labelKey: "nav.lint" },
+    { view: "review", icon: ClipboardList, labelKey: "nav.review" },
+    { view: "knowledge", icon: Activity, labelKey: "nav.knowledge" },
+  ]
 
 interface IconSidebarProps {
   onSwitchProject: () => void
   onQuickStart: () => void
 }
 
-export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps) {
+export function IconSidebar({
+  onSwitchProject,
+  onQuickStart,
+}: IconSidebarProps) {
   const { t } = useTranslation()
   const activeView = useWikiStore((s) => s.activeView)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   // Two queues share one badge: the engine's proposals (the ones that become
   // pages if accepted) and the file-based review items.
-  const legacyPendingCount = useReviewStore((s) => s.items.filter((i) => !i.resolved).length)
+  const legacyPendingCount = useReviewStore(
+    (s) => s.items.filter((i) => !i.resolved).length,
+  )
   const proposalCount = useProposalStore((s) => s.proposals.length)
   const pendingCount = legacyPendingCount + proposalCount
   const researchPanelOpen = useResearchStore((s) => s.panelOpen)
-  const researchActiveCount = useResearchStore((s) => s.tasks.filter((t) => t.status !== "done" && t.status !== "error").length)
+  const researchActiveCount = useResearchStore(
+    (s) =>
+      s.tasks.filter((t) => t.status !== "done" && t.status !== "error").length,
+  )
   const toggleResearchPanel = useResearchStore((s) => s.setPanelOpen)
   // Use `hasAvailableUpdate` (ignores dismiss state) rather than
   // `shouldShowUpdateBanner`. The dot is a passive signpost — it
@@ -81,17 +108,9 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
 
   return (
     <TooltipProvider delay={300}>
-      <div className="flex h-full w-12 flex-col items-center border-r bg-muted/50 py-2">
-        {/* Logo */}
-        <div className="mb-2 flex items-center justify-center">
-          <img
-            src={logoImg}
-            alt="Athenaeum"
-            className="h-8 w-8 rounded-[22%]"
-          />
-        </div>
+      <div className="desktop-rail">
         {/* Top: main nav items + Deep Research */}
-        <div className="flex flex-1 flex-col items-center gap-1">
+        <div className="desktop-rail-main">
           {NAV_ITEMS.map(({ view, icon: Icon, labelKey }) => (
             <Tooltip key={view}>
               <TooltipTrigger
@@ -105,6 +124,7 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
                 }`}
               >
                 <Icon className="h-5 w-5" />
+                <span className="desktop-nav-label">{t(labelKey)}</span>
                 {view === "review" && pendingCount > 0 && (
                   <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
                     {pendingCount > 99 ? "99+" : pendingCount}
@@ -129,6 +149,7 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
               }`}
             >
               <Globe className="h-5 w-5" />
+              <span className="desktop-nav-label">{t("research.title")}</span>
               {researchActiveCount > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-bold text-white">
                   {researchActiveCount}
@@ -148,39 +169,61 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
               }`}
             >
               <Sparkles className="h-5 w-5" />
+              <span className="desktop-nav-label">{t("nav.skills")}</span>
             </TooltipTrigger>
             <TooltipContent side="right">{t("nav.skills")}</TooltipContent>
           </Tooltip>
         </div>
         {/* Bottom: daemon status + settings + switch project */}
-        <div className="flex flex-col items-center gap-1 pb-1">
+        <div className="desktop-rail-bottom">
           <LibraryAccountMenu />
           <Tooltip>
-            <TooltipTrigger aria-label="Connectors" aria-pressed={activeView === "connectors"} onClick={() => setActiveView("connectors")} className={`flex h-10 w-10 items-center justify-center rounded-md ${activeView === "connectors" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent"}`}><PlugZap className="h-5 w-5" /></TooltipTrigger>
+            <TooltipTrigger
+              aria-label="Connectors"
+              aria-pressed={activeView === "connectors"}
+              onClick={() => setActiveView("connectors")}
+              className={`flex h-10 w-10 items-center justify-center rounded-md ${activeView === "connectors" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent"}`}
+            >
+              <PlugZap className="h-5 w-5" />
+              <span className="desktop-nav-label">Connectors</span>
+            </TooltipTrigger>
             <TooltipContent side="right">Connectors</TooltipContent>
           </Tooltip>
           <Tooltip>
-            <TooltipTrigger aria-label="Quick start guide" onClick={onQuickStart} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+            <TooltipTrigger
+              aria-label="Quick start guide"
+              onClick={onQuickStart}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
               <CircleHelp className="h-4 w-4" />
+              <span className="desktop-nav-label">Quick start</span>
             </TooltipTrigger>
             <TooltipContent side="right">Quick start guide</TooltipContent>
           </Tooltip>
           {/* Daemon status indicator */}
           <Tooltip>
-            <TooltipTrigger aria-label="Web Clipper status" className="flex h-6 w-6 items-center justify-center">
+            <TooltipTrigger
+              aria-label="Web Clipper status"
+              className="flex h-6 w-6 items-center justify-center"
+            >
               <span
                 className={`h-2.5 w-2.5 rounded-full ${
-                  daemonStatus === "running" ? "bg-emerald-500" :
-                  daemonStatus === "starting" ? "bg-amber-400 animate-pulse" :
-                  daemonStatus === "port_conflict" ? "bg-red-500" :
-                  "bg-red-500 animate-pulse"
+                  daemonStatus === "running"
+                    ? "bg-emerald-500"
+                    : daemonStatus === "starting"
+                      ? "bg-amber-400 animate-pulse"
+                      : daemonStatus === "port_conflict"
+                        ? "bg-red-500"
+                        : "bg-red-500 animate-pulse"
                 }`}
               />
+              <span className="desktop-nav-label">Web Clipper</span>
             </TooltipTrigger>
             <TooltipContent side="right">
               {daemonStatus === "running" && "Clip server running"}
               {daemonStatus === "starting" && "Clip server starting..."}
-              {daemonStatus === "port_conflict" && "Port 19827 is occupied. Web Clipper unavailable."}
+              {daemonStatus === "port_conflict" &&
+                "Port 19827 is occupied. Web Clipper unavailable."}
               {daemonStatus === "error" && "Clip server error. Restarting..."}
             </TooltipContent>
           </Tooltip>
@@ -195,6 +238,7 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
               }`}
             >
               <Settings className="h-5 w-5" />
+              <span className="desktop-nav-label">{t("nav.settings")}</span>
               {updateAvailable && (
                 // Update-available indicator on the Settings gear.
                 // Smaller (8px / `h-2 w-2`) so it doesn't shout —
@@ -224,8 +268,13 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
               className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground"
             >
               <ArrowLeftRight className="h-5 w-5" />
+              <span className="desktop-nav-label">
+                {t("nav.switchProject")}
+              </span>
             </TooltipTrigger>
-            <TooltipContent side="right">{t("nav.switchProject")}</TooltipContent>
+            <TooltipContent side="right">
+              {t("nav.switchProject")}
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>

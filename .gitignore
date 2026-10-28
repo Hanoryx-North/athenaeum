@@ -37,3 +37,6 @@ Thumbs.db
 # Left behind by the CI smoke test if run locally
 /ci-smoke/
 /brief.txt
+
+# Local design-review fixtures and captures
+.impeccable/review/

@@ -45,6 +45,13 @@ wiki commands --json
 agent chat is an explicit `wiki agent` command. `-C DIR` selects a project;
 otherwise commands discover the nearest ancestor with `.athenaeum/`.
 
+`wiki setup -C DIR` also binds the coding-agent connection to that selected wiki.
+The MCP server then reaches it even when ChatGPT or Codex starts in another folder.
+Reconnecting from another wiki changes the selected wiki; `wiki doctor -C DIR`
+checks that the saved connection actually addresses it. Routine recall and capture
+are quiet; host-controlled tool activity can still be visible. Proposals await
+human acceptance in Review before becoming wiki pages.
+
 `wiki commands --json` generates the full command and option catalogue from the
 parser, including aliases, accepted enum values and defaults. Use any command's
 `--help` for its exact arguments. It is the authoritative command reference.

@@ -13,9 +13,11 @@ export { LIBRARY } from "@/stores/library-account-store"
 export function LibraryAccount({
   onContinue,
   server = LIBRARY,
+  showHeading = true,
 }: {
   onContinue?: () => void
   server?: string
+  showHeading?: boolean
 }) {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -98,9 +100,9 @@ export function LibraryAccount({
   return (
     <section className="space-y-6" aria-label="Athenaeum Library account">
       <div>
-        <h2 className="text-xl font-semibold">Your Library account</h2>
+        {showHeading && <h2 className="text-xl font-semibold">Your Library account</h2>}
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Sign in to use your wikis across computers. You choose which wiki to share later.
+          {signedIn ? 'Manage your Library profile and account. Sharing a wiki remains your choice.' : 'Sign in to use your wikis across computers. You choose which wiki to share later.'}
         </p>
       </div>
       {checking || (server === LIBRARY && account.checking) ? (

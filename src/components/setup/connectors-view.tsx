@@ -1,10 +1,14 @@
 import { Bot, Cloud, PlugZap } from "lucide-react"
-import { useConnectorsStore, type ConnectorPage } from "@/stores/connectors-store"
+import {
+  useConnectorsStore,
+  type ConnectorPage,
+} from "@/stores/connectors-store"
 import { CodingAgentsView } from "./coding-agents-view"
 import { ActiveModelStatus } from "./active-model-status"
 import { LibraryAccount } from "./library-account"
 import { LlmProviderSection } from "@/components/settings/sections/llm-provider-section"
 import { cn } from "@/lib/utils"
+import { PageHeading } from "@/design-system/components"
 
 const PAGES: { id: ConnectorPage; label: string; icon: typeof Bot }[] = [
   { id: "agents", label: "Coding agents", icon: PlugZap },
@@ -16,12 +20,11 @@ export function ConnectorsView() {
   const { page, setPage } = useConnectorsStore()
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="shrink-0 border-b px-6 py-5">
-        <h1 className="text-xl font-semibold">Connectors</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your coding agents, Library account and wiki model.
-        </p>
-      </header>
+      <PageHeading
+        className="shrink-0 px-6 py-5"
+        title="Connectors"
+        description="Manage your coding agents, Library account and wiki model."
+      />
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav
           aria-label="Connectors"
@@ -53,8 +56,9 @@ export function ConnectorsView() {
                 <header>
                   <h2 className="text-2xl font-semibold">AI model</h2>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Choose a model API or local model server to build wiki pages from sources.
-                    Connect Codex, Claude Code and Cursor in Coding agents to use their own AI.
+                    Choose a model API or local model server to build wiki pages
+                    from sources. Connect Codex, Claude Code and Cursor in
+                    Coding agents to use their own AI.
                   </p>
                 </header>
                 <ActiveModelStatus />
