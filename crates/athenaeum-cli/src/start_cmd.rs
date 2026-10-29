@@ -21,6 +21,9 @@ pub struct StartArgs {
     /// Refresh the standalone app with an incremental build (no installers).
     #[arg(long)]
     build: bool,
+    /// Show the opening account/local workflow without clearing saved data.
+    #[arg(long, conflicts_with = "dev")]
+    onboarding: bool,
     /// Show the build (if needed) and launch plan without executing it.
     #[arg(long)]
     dry_run: bool,
@@ -66,12 +69,18 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
         crate::emit(
             json_out,
             &json!({"dryRun": true, "steps": steps,
-            "launch": {"program": binary, "cwd": repo}, "buildRequired": needs_build}),
+            "launch": {"program": binary, "cwd": repo,
+                "args": if args.onboarding { vec!["--onboarding"] } else { Vec::new() }},
+            "buildRequired": needs_build}),
             || {
                 for step in &steps {
                     println!("[desktop] {} {:?}", step.program, step.args);
                 }
-                println!("[desktop] launch {}", binary.display());
+                println!(
+                    "[desktop] launch {}{}",
+                    binary.display(),
+                    if args.onboarding { " --onboarding" } else { "" }
+                );
                 Ok(())
             },
         )?;
@@ -91,7 +100,7 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
             binary.display()
         )));
     }
-    let pid = spawn_desktop(&binary, &repo)?;
+    let pid = spawn_desktop(&binary, &repo, args.onboarding)?;
     crate::emit(
         json_out,
         &json!({"started": true, "pid": pid,
@@ -105,8 +114,11 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
 }
 
 #[cfg(not(windows))]
-fn spawn_desktop(binary: &Path, cwd: &Path) -> std::io::Result<u32> {
+fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result<u32> {
     let mut command = Command::new(binary);
+    if onboarding {
+        command.arg("--onboarding");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -123,7 +135,7 @@ fn spawn_desktop(binary: &Path, cwd: &Path) -> std::io::Result<u32> {
 }
 
 #[cfg(windows)]
-fn spawn_desktop(binary: &Path, cwd: &Path) -> std::io::Result<u32> {
+fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result<u32> {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null;
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -134,11 +146,13 @@ fn spawn_desktop(binary: &Path, cwd: &Path) -> std::io::Result<u32> {
 
     let program: Vec<u16> = binary.as_os_str().encode_wide().chain(Some(0)).collect();
     let directory: Vec<u16> = cwd.as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut command_line: Vec<u16> = Some(b'"' as u16)
-        .into_iter()
-        .chain(binary.as_os_str().encode_wide())
-        .chain([b'"' as u16, 0])
-        .collect();
+    let mut command_line = vec![b'"' as u16];
+    command_line.extend(binary.as_os_str().encode_wide());
+    command_line.push(b'"' as u16);
+    if onboarding {
+        command_line.extend(" --onboarding".encode_utf16());
+    }
+    command_line.push(0);
     let startup = STARTUPINFOW {
         cb: std::mem::size_of::<STARTUPINFOW>() as u32,
         ..Default::default()

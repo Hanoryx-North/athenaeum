@@ -13,6 +13,7 @@ For local development, launch the compiled desktop from the command line:
 wiki start                 # build once if missing, otherwise just open the app
 wiki start --build         # refresh frontend + desktop using the existing cache
 wiki start --dev           # optional foreground developer session with live updates
+wiki start --onboarding    # replay the opening flow; keep saved projects and account
 wiki start --dry-run --json
 ```
 

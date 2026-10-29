@@ -7,9 +7,9 @@ export function QuickStartGuide({ open, onOpenChange }: { open: boolean; onOpenC
       <DialogHeader><DialogTitle>Your first wiki, in a minute</DialogTitle><DialogDescription>Start small. You can explore the rest as you go.</DialogDescription></DialogHeader>
       <ol className="space-y-4 text-sm leading-relaxed">
         <li><strong>1. Create a wiki.</strong><p className="text-muted-foreground">Choose a name and a folder. Your wiki lives here as Markdown files.</p></li>
-        <li><strong>2. Add something to learn from.</strong><p className="text-muted-foreground">Choose your AI model in Settings, then open Sources to import a document, notes, or a link.</p></li>
-        <li><strong>3. Build and explore.</strong><p className="text-muted-foreground">Imported sources are queued to build linked pages. Read them in Wiki, find ideas with Search, or follow connections in Graph.</p></li>
-        <li><strong>4. Make it yours.</strong><p className="text-muted-foreground">Open Connectors to connect your coding agent or Library account. Review suggested changes in Review. Publish and sync accepted pages in Knowledge → Library.</p></li>
+        <li><strong>2. Connect your coding agent.</strong><p className="text-muted-foreground">Open Connectors and choose Codex, Claude Code, or Cursor. Keep using your existing agent and account; this connection needs no extra model API key.</p></li>
+        <li><strong>3. Work, review, and explore.</strong><p className="text-muted-foreground">As you work, your agent quietly recalls useful knowledge and proposes new findings. Open Review to accept them, read pages in Wiki, or follow connections in Graph.</p></li>
+        <li><strong>4. Connect Athenaeum Cloud.</strong><p className="text-muted-foreground">In Knowledge → Library, link your wiki and sync accepted pages across computers. You choose what to share. You can also clone an existing wiki from the welcome screen.</p></li>
       </ol>
       <p className="text-xs text-muted-foreground">Reopen this guide any time with the ? button.</p>
       <Button onClick={() => onOpenChange(false)}>Let me explore</Button>

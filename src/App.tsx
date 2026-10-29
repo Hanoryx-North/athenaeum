@@ -323,12 +323,14 @@ function App() {
   // Auto-open last project on startup
   useEffect(() => {
     async function init() {
+      // Replay the real opening flow without clearing saved projects or credentials.
+      const replayOnboarding = await invoke<boolean>("startup_onboarding_requested").catch(() => false)
       // Existing installations keep opening their projects without a new gate.
       try {
         const [complete, recent, last] = await Promise.all([
           loadOnboardingComplete(), getRecentProjects(), getLastProject(),
         ])
-        setFirstLaunch(!complete && recent.length === 0 && !last)
+        setFirstLaunch(replayOnboarding || (!complete && recent.length === 0 && !last))
       } catch (cause) {
         console.warn("[startup] failed to load onboarding state:", cause)
         setFirstLaunch(true)
@@ -441,7 +443,7 @@ function App() {
           await i18n.changeLanguage(savedLang)
         }
         const lastProject = await getLastProject()
-        if (lastProject) {
+        if (lastProject && !replayOnboarding) {
           try {
             const proj = await openProject(lastProject.path)
             await handleProjectOpened(proj)

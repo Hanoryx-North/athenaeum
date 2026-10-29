@@ -11,11 +11,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
-# Tauri needs the app as a library on mobile targets and as a binary on
-# desktop; this mirrors the layout llm_wiki uses.
+# The desktop binary consumes an rlib. Emitting mobile static/shared libraries
+# here also links the entire document/vector stack twice on every desktop build.
 [lib]
 name = "athenaeum_app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [[bin]]
 name = "athenaeum-app"

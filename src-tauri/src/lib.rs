@@ -32,6 +32,11 @@ struct CloseBehaviorState(Mutex<String>);
 struct TrayAvailabilityState(Mutex<bool>);
 
 #[tauri::command]
+fn startup_onboarding_requested() -> bool {
+    std::env::args_os().any(|arg| arg == "--onboarding")
+}
+
+#[tauri::command]
 fn set_proxy_env(config: proxy::ProxyConfig) -> String {
     let summary = proxy::apply_proxy_env(&config);
     eprintln!("[proxy] live update: {summary}");
@@ -144,6 +149,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            startup_onboarding_requested,
             commands::fs::read_file,
             commands::fs::write_file,
             commands::fs::write_file_base64,

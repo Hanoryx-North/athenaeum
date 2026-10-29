@@ -12,9 +12,11 @@ export { LIBRARY } from "@/stores/library-account-store"
 /** Account identity only. Signing in never links or publishes a project. */
 export function LibraryAccount({
   onContinue,
+  continuing = false,
   server = LIBRARY,
 }: {
   onContinue?: () => void
+  continuing?: boolean
   server?: string
 }) {
   const [username, setUsername] = useState("")
@@ -30,7 +32,7 @@ export function LibraryAccount({
   const [message, setMessage] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const busy = useSetupStore((s) => s.busy)
-  const working = submitting || busy !== null
+  const working = submitting || continuing || busy !== null
 
   useEffect(() => {
     let cancelled = false
@@ -135,7 +137,7 @@ export function LibraryAccount({
             </Button>
             {onContinue && (
               <Button onClick={onContinue} disabled={working}>
-                Next
+                {continuing ? "Opening…" : "Open Athenaeum"}
               </Button>
             )}
           </div>
