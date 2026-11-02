@@ -1,5 +1,14 @@
 # AGENTS.md — Athenaeum
 
+> **Agent ownership updated 2026-10-30:** `athenaeum_agent/runtime/` now also owns a
+> source-based Codex coding runtime adapted to Athenaeum, at the product owner's request.
+> References below to DeepSeek Harness as the exclusive owner of coding-agent turns,
+> tools, permissions and sessions are superseded: the native runtime owns those for its
+> terminal/app-server entry points; the optional Harness integration still owns its turns.
+> This repository remains the desktop/CLI/knowledge client and must not grow another loop.
+> Its existing desktop chat driver still uses Harness until a native app-server client
+> is integrated. Knowledge access from either runtime stays behind the versioned bridge.
+
 **Read this before writing any code in this repository.** It defines what Athenaeum is
 allowed to contain. If a task asks you to build something on the *must not* list below,
 stop and say which repository owns it instead.
