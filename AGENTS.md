@@ -1,5 +1,14 @@
 # AGENTS.md — Athenaeum
 
+> **Product direction updated 2026-11-05:** the built-in Athenaeum Agent chat is
+> the primary agent experience. Its native app-server supplies turns, tools,
+> approvals and sessions; the desktop owns their UI. Keep the native terminal
+> and the Harness integration as optional advanced entry points. Per-wiki
+> automation can save proposals and sync saved pages when enabled by the user.
+> Manual review remains available. This supersedes the manual-only and
+> Harness-only desktop statements below. Page links created through the bridge
+> or CLI must be written into canonical Markdown and survive index rebuilding.
+
 > **Agent ownership updated 2026-10-30:** `athenaeum_agent/runtime/` now also owns a
 > source-based Codex coding runtime adapted to Athenaeum, at the product owner's request.
 > References below to DeepSeek Harness as the exclusive owner of coding-agent turns,

@@ -233,6 +233,8 @@ pub fn run() {
             core_bridge::core_bridge,
             engine::engine_request,
             engine::engine_accept,
+            engine::wiki_automation,
+            harness::agent_respond_approval,
             engine::engine_reject,
             engine::library_link,
             cli_tools::cli_status,

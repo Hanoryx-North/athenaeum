@@ -10,6 +10,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { useAppDialog } from "@/stores/app-dialog-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import type { CliJob } from "@/lib/cli-tools"
+import { useAutomationStore } from "@/stores/automation-store"
 
 interface ConflictPreview {
   path: string
@@ -45,6 +46,7 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
   const link = library
   const linkedServer = link?.server
   const working = busy !== null
+  const automation = useAutomationStore()
 
   useEffect(() => {
     void loadLibrary()
@@ -151,8 +153,7 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
         <header>
           <h2 className="text-sm font-semibold">Library</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Publish accepted Markdown and bring changes between computers. Every transfer runs when
-            you ask.
+            Keep your saved pages available across computers through your Library account.
           </p>
         </header>
         {libraryError && (
@@ -180,7 +181,7 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
               <>
                 <h3 className="text-lg font-medium">Publish this wiki</h3>
                 <p className="text-sm text-muted-foreground">
-                  Give your shared wiki a name. Only accepted wiki pages will be uploaded.
+                  Your account is connected separately from each wiki. Connect this wiki once to start syncing its saved pages.
                 </p>
                 <label className="block text-xs">
                   Wiki name
@@ -249,6 +250,16 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
         {linked && (
           <section className="space-y-3 rounded-md border p-4" aria-label="Library synchronization">
             <h3 className="font-medium">{link?.remoteName ?? "Linked wiki"}</h3>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={automation.workspace === workspace && automation.settings.autoSync}
+                disabled={automation.busy}
+                onChange={(event) => void automation.run(workspace, {
+                  settings: { ...automation.settings, autoSync: event.target.checked },
+                })} />
+              Sync automatically while this wiki is open
+            </label>
+            <p className="text-xs text-muted-foreground">Checks every minute and retries after reconnecting. Conflicting edits wait for your review.</p>
+            {automation.error && <p role="alert" className="text-xs text-destructive">{automation.error}</p>}
             <p className="break-all text-xs text-muted-foreground">{link?.server}</p>
             <p className="text-xs">
               Last agreed revision:{" "}

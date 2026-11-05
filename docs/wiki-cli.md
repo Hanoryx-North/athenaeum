@@ -99,6 +99,32 @@ settings editing are CLI operations and are not exposed as model-facing bridge m
 
 ## Saved desktop settings
 
+Per-wiki automation is stored separately in `.athenaeum/automation.json`:
+
+```sh
+wiki automation --json
+wiki automation --accept-proposals true --auto-sync true
+wiki automation --accept-all --json
+```
+
+Both choices default off until enabled for that wiki. Automatic saving waits
+15 seconds for capture tools to attach evidence and links. The desktop checks
+the queue every 15 seconds; bridge knowledge reads also save settled proposals
+when the policy is enabled. Batch acceptance reconciles once and leaves failed
+proposals available for retry. Saving does not raise a claim's verification status.
+Page-to-page `wiki link` and bridge links update the Markdown itself.
+
+Desktop automatic sync runs every minute while the wiki is visible, after its
+Library repository has been linked. It uses the existing CLI credentials and
+conflict handling. Signing in alone does not identify which wiki to synchronize.
+Neither local automation settings nor proposals are uploaded.
+
+The built-in chat connects to the native Athenaeum Agent app-server. Its provider
+configuration and credentials live in `~/.athenaeum-agent`; an OpenAI API provider
+chosen in desktop Settings can also be supplied to that isolated process. The
+optional Harness integration remains selectable in chat. The terminal stays an
+advanced entry point. No Codex credentials or sessions are copied.
+
 `wiki config` reads and writes the desktop's **actual** `app-state.json`:
 
 ```sh

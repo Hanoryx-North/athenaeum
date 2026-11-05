@@ -2,12 +2,9 @@
  * The review queue: what the engine says is proposed, and the decision a
  * person makes about it.
  *
- * This store is the desktop's half of the product's central rule: a model's
- * proposal lives in the derived index until a person accepts it, and accepting
- * writes Markdown *through the engine*. There is no other path. Nothing here
- * writes a page, nothing accepts in bulk, and nothing accepts on a timer: the
- * only call that can make a proposal permanent is `accept`, and it happens
- * because somebody pressed the button on that proposal.
+ * Individual review lives here. Batch acceptance and the owner's automatic
+ * saving policy live in automation-store; every path writes through the same
+ * core page writer.
  *
  * Rejecting is the other half of the same rule: it writes nothing durable and
  * simply stops the engine offering the node again.

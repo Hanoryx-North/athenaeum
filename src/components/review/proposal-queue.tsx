@@ -49,6 +49,7 @@ import {
   standingLabel,
 } from "@/lib/engine-present"
 import { cn } from "@/lib/utils"
+import { useAutomationStore } from "@/stores/automation-store"
 
 export function ProposalQueue() {
   const project = useWikiStore((s) => s.project)
@@ -63,6 +64,8 @@ export function ProposalQueue() {
   const decisions = useProposalStore((s) => s.decisions)
   const load = useProposalStore((s) => s.load)
   const clearDecision = useProposalStore((s) => s.clearDecision)
+  const editing = useProposalStore((s) => s.editing)
+  const automation = useAutomationStore()
 
   // `useEngineWorkspace` attaches both stores to the open project; this pane
   // only asks for a fresh read when it is first shown.
@@ -89,6 +92,10 @@ export function ProposalQueue() {
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
+          <Button size="sm" disabled={!workspace || loading || automation.busy || editing !== null || proposals.length === 0}
+            onClick={() => workspace && void automation.run(workspace, { acceptAll: true })}>
+            {automation.busy ? "Saving pages…" : `Accept all (${proposals.length})`}
+          </Button>
           <h2 className="text-sm font-semibold">Proposals</h2>
           {proposals.length > 0 && (
             <span
@@ -116,10 +123,19 @@ export function ProposalQueue() {
         </div>
       </div>
 
-      <p className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-        A proposal is not knowledge. It lives in the derived index until you accept it, and
-        accepting is what writes the Markdown page — through the engine, never from this window.
-      </p>
+      <div className="space-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
+        <label className="flex items-center gap-2 text-foreground">
+          <input type="checkbox" checked={automation.workspace === workspace && automation.settings.acceptProposals}
+            disabled={!workspace || automation.busy}
+            onChange={(event) => workspace && void automation.run(workspace, {
+              settings: { ...automation.settings, acceptProposals: event.target.checked },
+            })} />
+          Automatically save proposals as pages
+        </label>
+        <p>New proposals save after a short pause while this wiki is open. Their verification status stays visible.</p>
+        <p className="break-all">Pages are saved in {workspace}/wiki</p>
+        {automation.error && <p role="alert" className="text-destructive">{automation.error}</p>}
+      </div>
 
       {error && engineState.kind !== "absent-vault" && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive">

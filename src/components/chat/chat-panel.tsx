@@ -10,7 +10,8 @@ import { useChatStore, type MessageImage, type MessageReference } from "@/stores
 import { useWikiStore } from "@/stores/wiki-store"
 import { openConnectors } from "@/stores/connectors-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
-import { harnessRouteFor } from "@/lib/harness-route"
+import { harnessRouteFor, nativeRouteFor } from "@/lib/harness-route"
+import { useUiPreference } from "@/hooks/useUiPreference"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, openPathInProject, readFile } from "@/commands/fs"
@@ -438,7 +439,11 @@ export function ChatPanel() {
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
   // The chat agent follows the provider chosen in Settings for chat.
-  const chatRoute = useMemo(() => harnessRouteFor(llmConfig), [llmConfig])
+  const [agentRuntime, setAgentRuntime] = useUiPreference<"native" | "harness">("chat-agent-runtime", "native", (value) => value === "native" || value === "harness")
+  const [approval, setApproval] = useState<{ id: string; title: string; detail: string } | null>(null)
+  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const [approvalBusy, setApprovalBusy] = useState(false)
+  const chatRoute = useMemo(() => agentRuntime === "native" ? nativeRouteFor(llmConfig) : harnessRouteFor(llmConfig), [llmConfig, agentRuntime])
   // A new route restarts the runtime, and a restarted runtime refuses the session ids
   // the old one held, so every conversation starts afresh (carrying its history).
   const chatRouteKey = chatRoute.ok ? JSON.stringify(chatRoute.route) : ""
@@ -690,6 +695,7 @@ export function ChatPanel() {
             .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
         const preamble = fresh ? historyPreamble(history) : ""
         let turnFailure: string | null = null
+        let streamedNative = false
         const backendEvents: BackendAgentToolEvent[] = []
         const toolsByCallId = new Map<string, string>()
         const addAgentActivity = (activity: ChatAgentEvent) => {
@@ -716,6 +722,16 @@ export function ChatPanel() {
           const agentEvent = asRecord(params.event)
           if (!agentEvent || typeof agentEvent.type !== "string") return
           const data = asRecord(agentEvent.data) ?? {}
+          if (agentEvent.type === "message/delta" && typeof data.text === "string") {
+            streamedNative = true
+            appendStreamToken(data.text)
+            return
+          }
+          if (agentEvent.type === "approval/request" && typeof data.id === "string") {
+            setApproval({ id: data.id, title: String(data.title ?? "Agent approval"), detail: String(data.detail ?? "") })
+            setApprovalError(null)
+            return
+          }
 
           if (agentEvent.type === "step/start") {
             addAgentActivity({
@@ -807,7 +823,7 @@ export function ChatPanel() {
           if (!isCurrentRun()) return
           if (!response.finalResponse.trim() && turnFailure) throw new Error(turnFailure)
           const steps = backendEvents.map(backendToolToAgentStep)
-          if (response.finalResponse) {
+          if (response.finalResponse && !streamedNative) {
             appendStreamToken(response.finalResponse)
           }
           finalized = true
@@ -819,6 +835,7 @@ export function ChatPanel() {
           activeRunSessionIdRef.current = null
           activeRunIdRef.current = null
         } finally {
+          setApproval(null)
           unlisten()
         }
         return
@@ -847,6 +864,7 @@ export function ChatPanel() {
   )
 
   const handleStop = useCallback(() => {
+    setApproval(null)
     runIdRef.current += 1
     const sessionId = activeRunSessionIdRef.current
     const backendRunId = activeRunIdRef.current
@@ -1016,7 +1034,7 @@ export function ChatPanel() {
       : t("chat.agent.offline")
 
   return (
-    <div className="flex h-full flex-row overflow-hidden">
+    <div className="relative flex h-full flex-row overflow-hidden">
       <ConversationSidebar
         onNewConversation={handleNewConversation}
         onSelectConversation={handleSelectConversation}
@@ -1025,6 +1043,16 @@ export function ChatPanel() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {mode === "chat" && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b bg-muted/20 px-3 py-2 text-xs">
+            <label className="flex items-center gap-2">
+              Agent
+              <select aria-label="Agent runtime" value={agentRuntime} disabled={activeStreaming}
+                className="max-w-48 rounded border bg-background px-2 py-1"
+                onChange={(event) => setAgentRuntime(event.target.value as "native" | "harness")}>
+                <option value="native">Athenaeum Agent</option>
+                <option value="harness">Harness (advanced)</option>
+              </select>
+            </label>
+            {agentRuntime === "native" && <span className="text-muted-foreground">Uses Athenaeum Agent’s model configuration or your OpenAI API settings.</span>}
             <span className="flex min-w-0 items-center gap-1.5" title={project?.path ?? t("chat.agent.noWorkspace")}>
               <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               <span className="truncate font-medium">{project?.path ?? t("chat.agent.noWorkspace")}</span>
@@ -1170,6 +1198,24 @@ export function ChatPanel() {
           onResize={setReferencePreviewWidth}
           onClose={() => setContextDetailReferences(null)}
         />
+      )}
+      {approval && (
+        <section role="region" aria-label={approval.title} className="absolute bottom-20 left-4 right-4 z-30 space-y-3 rounded-md border bg-background p-4">
+          <h3 className="text-sm font-medium">{approval.title}</h3>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{approval.detail}</pre>
+          {approvalError && <p role="alert" className="text-xs text-destructive">{approvalError}</p>}
+          <div className="flex gap-2">
+            {(["accept", "decline"] as const).map((decision) => (
+              <Button key={decision} variant={decision === "accept" ? "default" : "outline"} disabled={approvalBusy}
+                onClick={() => {
+                  setApprovalBusy(true)
+                  void invoke("agent_respond_approval", { approvalId: approval.id, decision })
+                    .then(() => setApproval(null)).catch((cause) => setApprovalError(String(cause)))
+                    .finally(() => setApprovalBusy(false))
+                }}>{decision === "accept" ? "Allow once" : "Deny"}</Button>
+            ))}
+          </div>
+        </section>
       )}
       {generatedOutputPreviews.length > 0 && (
         <GeneratedOutputsPanel

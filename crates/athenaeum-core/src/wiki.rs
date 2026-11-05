@@ -12,7 +12,6 @@ use crate::brief::KnowledgeBrief;
 use crate::error::{Error, Result};
 use crate::findings::{self, ReviewFindingView};
 use crate::graph::{self, NavigationOptions, Reached, Step};
-use crate::status::{self, IndexOutcome, IndexScope, SourceSummary, WorkspaceStatus};
 use crate::id::{EdgeId, NodeId, SessionId};
 use crate::journal::NodeUtility;
 use crate::model::{
@@ -20,6 +19,7 @@ use crate::model::{
     NodeVersion, Provenance, Scope, SourceAnchor,
 };
 use crate::portable::memory::{self, Accepted};
+use crate::status::{self, IndexOutcome, IndexScope, SourceSummary, WorkspaceStatus};
 use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter, SearchHit};
 pub use crate::vault::PageRef as WikiPage;
 use crate::workspace::Workspace;
@@ -802,19 +802,7 @@ impl<'a> WikiService<'a> {
     pub fn link(&mut self, input: WikiLinkCreate, caller: WikiCaller) -> Result<KnowledgeEdge> {
         let from = self.resolve(&input.from)?;
         let to = self.resolve(&input.to)?;
-        // A relationship between two pages is text in those pages. An edge made here would live
-        // only in the index, so it would be lost with it and never reach another device.
-        if self.is_page(&from)? && self.is_page(&to)? {
-            return Err(Error::Invalid {
-                id: from.id,
-                reason: format!(
-                    "both ends are pages of the vault, so the relationship belongs in their \
-                     canonical Markdown: add a [[wikilink]] or a `related:` / `relations:` entry \
-                     to one of them ({} and {})",
-                    from.title, to.title
-                ),
-            });
-        }
+        let both_pages = self.is_page(&from)? && self.is_page(&to)?;
         let mut edge = KnowledgeEdge::new(from.id, input.edge_type, to.id)
             .with_provenance(model_provenance(caller)?);
         if let Some(note) = input.note {
@@ -822,6 +810,9 @@ impl<'a> WikiService<'a> {
         }
         if let Some(confidence) = input.confidence {
             edge = edge.with_confidence(confidence);
+        }
+        if both_pages {
+            return memory::link_pages(self.store, edge);
         }
         self.store.connect(edge)
     }
@@ -1100,10 +1091,7 @@ fn related_node(store: &KnowledgeStore, neighbor: Neighbor) -> Result<WikiRelate
         node_type: node.node_type,
         edge_type: neighbor.edge_type,
         note: neighbor.edge.note.clone(),
-        confidence: neighbor
-            .edge
-            .confidence
-            .map(crate::model::wire_confidence),
+        confidence: neighbor.edge.confidence.map(crate::model::wire_confidence),
         edge_id: neighbor.edge.id.clone(),
         outbound: neighbor.outbound,
         established: neighbor.edge.is_traversable(),

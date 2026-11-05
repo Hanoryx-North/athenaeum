@@ -37,6 +37,7 @@
     "targets": "all",
     "resources": {
       "resources/harness-driver.mjs": "harness-driver.mjs",
+      "resources/native-agent-driver.mjs": "native-agent-driver.mjs",
       "../install/native.mjs": "install/native.mjs",
       "../install/install.mjs": "install/install.mjs"
     },

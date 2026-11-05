@@ -12,7 +12,7 @@ People working on local projects with their existing coding agent.
 
 ## Product Purpose
 
-Keep knowledge in a local Markdown wiki, review agent proposals, browse accepted pages and explicitly share with Library.
+Keep knowledge in a local Markdown wiki, save agent proposals automatically or review them manually, browse connected pages and sync with a private or public Library repository. The built-in Athenaeum Agent is the primary coding experience; its terminal is optional.
 
 ## Capabilities and Constraints
 

@@ -169,6 +169,7 @@ export function FileTree() {
         </div>
       </ScrollArea>
       <div className="shrink-0 border-t p-2">
+        <p className="mb-1 break-all px-2 text-xs text-muted-foreground">{project.path}</p>
         <button
           type="button"
           onClick={() => void handleOpenProjectFolder()}

@@ -1,7 +1,7 @@
-//! Desktop client for the installed DeepSeek Harness SDK runtime.
+//! Desktop transport for Athenaeum Agent and the optional Harness integration.
 //!
-//! The small Node driver uses the public `@deepseek-ai/dsh-sdk-client` package.
-//! This module only owns the app-to-driver process and relays SDK notifications;
+//! Small Node drivers adapt native app-server or the public Harness SDK.
+//! This module only owns the app-to-driver process and relays notifications;
 //! it contains no agent loop, tool execution, or model code.
 
 use std::collections::{HashMap, VecDeque};
@@ -99,9 +99,11 @@ struct HarnessRuntime {
     route: String,
     stdin: StdMutex<ChildStdin>,
     child: StdMutex<Child>,
-    pending: Arc<StdMutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>,
+    pending: PendingRequests,
     serial: AtomicU64,
 }
+
+type PendingRequests = Arc<StdMutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 
 #[derive(Deserialize)]
 struct InstallManifest {
@@ -190,41 +192,44 @@ impl HarnessRuntime {
         route: Option<&HarnessRoute>,
         identity: String,
     ) -> Result<Self, String> {
-        let (manifest_path, prefix, manifest) = locate_install()?;
-        let dsh_home = manifest
-            .dsh_home
-            .as_ref()
-            .map(|path| resolve_from(&prefix, path))
-            .unwrap_or_else(|| prefix.join("dsh-home"));
-        let profile = manifest.profile.as_deref().unwrap_or(DEFAULT_PROFILE);
-        let profile_dir = dsh_home.join("profiles").join(profile);
-        let sdk_client = profile_dir
-            .join("node_modules")
-            .join("@deepseek-ai")
-            .join("dsh-sdk-client")
-            .join("lib")
-            .join("index.js");
-        if !sdk_client.is_file() {
-            return Err(format!(
+        let mut command = if route.is_some_and(|route| route.provider == "athenaeum-native") {
+            native_command(app, &workspace, route)?
+        } else {
+            let (manifest_path, prefix, manifest) = locate_install()?;
+            let dsh_home = manifest
+                .dsh_home
+                .as_ref()
+                .map(|path| resolve_from(&prefix, path))
+                .unwrap_or_else(|| prefix.join("dsh-home"));
+            let profile = manifest.profile.as_deref().unwrap_or(DEFAULT_PROFILE);
+            let profile_dir = dsh_home.join("profiles").join(profile);
+            let sdk_client = profile_dir
+                .join("node_modules")
+                .join("@deepseek-ai")
+                .join("dsh-sdk-client")
+                .join("lib")
+                .join("index.js");
+            if !sdk_client.is_file() {
+                return Err(format!(
                 "The installed Athenaeum Agent is missing its Harness SDK client. Re-run its installer, then retry. ({})",
                 sdk_client.display()
             ));
-        }
-        let dsh_bin = prefix
-            .join("runtime")
-            .join("node_modules")
-            .join("@deepseek-ai")
-            .join("dsh")
-            .join("lib")
-            .join("bin.js");
-        if !dsh_bin.is_file() {
-            return Err(format!(
+            }
+            let dsh_bin = prefix
+                .join("runtime")
+                .join("node_modules")
+                .join("@deepseek-ai")
+                .join("dsh")
+                .join("lib")
+                .join("bin.js");
+            if !dsh_bin.is_file() {
+                return Err(format!(
                 "The installed Athenaeum Agent has no usable Harness CLI runtime. Re-run its installer. ({})",
                 dsh_bin.display()
             ));
-        }
+            }
 
-        let node = manifest
+            let node = manifest
             .node
             .as_ref()
             .map(|path| resolve_from(&prefix, path))
@@ -236,40 +241,43 @@ impl HarnessRuntime {
                     manifest_path.display()
                 )
             })?;
-        let driver = app
-            .path()
-            .resource_dir()
-            .ok()
-            .map(|directory| plain_path(directory.join(DRIVER_NAME)))
-            .filter(|path| path.is_file())
-            .unwrap_or_else(|| {
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("resources")
-                    .join(DRIVER_NAME)
-            });
-        if !driver.is_file() {
-            return Err(format!(
-                "The packaged Harness driver is missing: {}",
-                driver.display()
-            ));
-        }
+            let driver = app
+                .path()
+                .resource_dir()
+                .ok()
+                .map(|directory| plain_path(directory.join(DRIVER_NAME)))
+                .filter(|path| path.is_file())
+                .unwrap_or_else(|| {
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("resources")
+                        .join(DRIVER_NAME)
+                });
+            if !driver.is_file() {
+                return Err(format!(
+                    "The packaged Harness driver is missing: {}",
+                    driver.display()
+                ));
+            }
 
-        let mut command = Command::new(&node);
-        command
-            .arg(&driver)
-            .arg(&sdk_client)
-            .arg(&dsh_home)
-            .arg(profile)
-            .arg(&dsh_bin)
-            .current_dir(&workspace)
-            .env("DSH_HOME", &dsh_home)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        prepend_agent_path(&mut command, &prefix);
-        if let Some(route) = route {
-            apply_route(app, &mut command, route)?;
-        }
+            let mut command = Command::new(&node);
+            command
+                .arg(&driver)
+                .arg(&sdk_client)
+                .arg(&dsh_home)
+                .arg(profile)
+                .arg(&dsh_bin)
+                .current_dir(&workspace)
+                .env("DSH_HOME", &dsh_home)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            prepend_agent_path(&mut command, &prefix);
+            if let Some(route) = route {
+                apply_route(app, &mut command, route)?;
+            }
+
+            command
+        };
 
         let mut child = command.spawn().map_err(|error| {
             format!("Could not start the installed Athenaeum Agent runtime: {error}")
@@ -426,7 +434,7 @@ impl Drop for HarnessRuntime {
 fn read_driver_output(
     stdout: std::process::ChildStdout,
     app: &AppHandle,
-    pending: &Arc<StdMutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>,
+    pending: &PendingRequests,
     stderr_tail: &Arc<StdMutex<VecDeque<String>>>,
 ) {
     for line in BufReader::new(stdout).lines() {
@@ -448,7 +456,9 @@ fn read_driver_output(
                     .and_then(|mut pending| pending.remove(request_id));
                 let Some(sender) = sender else { continue };
                 let result = match kind {
-                    "ready" | "result" | "cancel-accepted" | "shutdown" => Ok(message),
+                    "ready" | "result" | "cancel-accepted" | "approval-accepted" | "shutdown" => {
+                        Ok(message)
+                    }
                     "cancelled" => Ok(json!({ "cancelled": true })),
                     "error" | "fatal" => Err(message
                         .get("message")
@@ -492,6 +502,81 @@ fn read_driver_stderr(stderr: std::process::ChildStderr, tail: &Arc<StdMutex<Vec
             }
         }
     }
+}
+
+/// Launch the source-built Athenaeum runtime as a headless service for our own UI.
+fn native_command(
+    app: &AppHandle,
+    workspace: &Path,
+    route: Option<&HarnessRoute>,
+) -> Result<Command, String> {
+    let prefix = default_prefix()?;
+    let executable = if cfg!(windows) {
+        "athenaeum-agent.exe"
+    } else {
+        "athenaeum-agent"
+    };
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("ATHENAEUM_AGENT_BIN") {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates.push(prefix.join("bin").join(executable));
+    // Development uses the sibling source build. Packaged apps use the installed binary.
+    if cfg!(debug_assertions) {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../athenaeum_agent/runtime/target/debug")
+                .join(executable),
+        );
+    }
+    let binary = candidates.into_iter().find(|path| path.is_file()).ok_or(
+        "Athenaeum Agent is not installed. Build or install its native runtime, or select the optional Harness integration."
+    )?;
+    let node = private_node_path(&prefix)
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("node"));
+    let driver = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|path| plain_path(path.join("native-agent-driver.mjs")))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/native-agent-driver.mjs")
+        });
+    let mut command = Command::new(node);
+    command
+        .arg(driver)
+        .arg(plain_path(binary))
+        .current_dir(workspace)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(cli) = crate::cli_tools::locate_cli() {
+        command.env("ATHENAEUM_BIN", cli);
+    }
+    if let Some(route) = route {
+        if route.model != "native-configuration" {
+            command.env("ATHENAEUM_AGENT_MODEL", &route.model);
+        }
+        if let Some(key) = &route.api_key {
+            command.env("ATHENAEUM_LLM_API_KEY", key);
+        }
+        if let Some(base) = route
+            .pi_provider
+            .as_ref()
+            .and_then(|p| p.get("baseURL"))
+            .and_then(Value::as_str)
+        {
+            command.env("ATHENAEUM_AGENT_RESPONSES_URL", base);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    Ok(command)
 }
 
 fn locate_install() -> Result<(PathBuf, PathBuf, InstallManifest), String> {
@@ -696,4 +781,24 @@ pub async fn harness_cancel_turn(
 #[tauri::command]
 pub fn harness_disconnect(state: State<'_, HarnessChatState>) {
     state.shutdown();
+}
+
+/// Resolve a native tool approval from Athenaeum's own chat controls.
+#[tauri::command]
+pub async fn agent_respond_approval(
+    state: State<'_, HarnessChatState>,
+    approval_id: String,
+    decision: String,
+) -> Result<(), String> {
+    if decision != "accept" && decision != "decline" {
+        return Err("Choose Allow or Deny".into());
+    }
+    let runtime = state.current_runtime().ok_or("The agent disconnected")?;
+    runtime
+        .request(
+            json!({ "type": "approval", "requestId": runtime.next_request_id("approval"),
+        "approvalId": approval_id, "decision": decision }),
+        )
+        .await?;
+    Ok(())
 }

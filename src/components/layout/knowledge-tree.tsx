@@ -5,7 +5,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
-import { listDirectory } from "@/commands/fs"
+import { listDirectory, openProjectFolder } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
@@ -163,6 +163,12 @@ export function KnowledgeTree() {
         <div className="mb-2 px-2 text-xs font-semibold uppercase text-muted-foreground">
           {project.name}
         </div>
+        <button className="mb-3 block w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50"
+          title={`Open wiki folder: ${project.path}/wiki`}
+          onClick={() => void openProjectFolder(`${project.path}/wiki`).catch((cause) => appDialog.alert({ message: String(cause) }))}>
+          <span className="block text-foreground">Saved on this computer</span>
+          <span className="block truncate">{project.path}/wiki</span>
+        </button>
 
         <MemoryBriefPanel workspace={normalizePath(project.path)} openPage={openPathInPreview} />
 

@@ -124,6 +124,9 @@ export async function buildWikiGraph(
   const visible = new Map<string, IndexGraphNode>()
   for (const node of index.nodes) {
     if (HIDDEN_KINDS.has(node.kind)) continue
+    // The page graph and Knowledge tree describe the same vault. Repository
+    // index artifacts and unsaved proposals are available in Files and Review.
+    if (node.origin !== "page" && node.origin !== "source") continue
     visible.set(node.id, node)
   }
   if (visible.size === 0) {

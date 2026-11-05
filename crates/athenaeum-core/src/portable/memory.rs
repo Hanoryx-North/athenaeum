@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 use crate::id::NodeId;
 use crate::journal::{EventKind, NewEvent};
 use crate::model::{
-    EdgeType, Evidence, EvidenceKind, KnowledgeNode, NodeStatus, ProvenanceSource, KnowledgeEdge,
+    EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, NodeStatus, ProvenanceSource,
 };
 use crate::store::{KnowledgeStore, NodeFilter};
 use crate::vault::{
@@ -69,6 +69,23 @@ pub fn is_proposal(node: &KnowledgeNode) -> bool {
 
 /// Accept a model's proposal: write it to the vault as a page.
 pub fn accept(store: &mut KnowledgeStore, id: &NodeId, accepted_by: &str) -> Result<Accepted> {
+    accept_impl(store, id, accepted_by, true)
+}
+
+pub(crate) fn accept_deferred(
+    store: &mut KnowledgeStore,
+    id: &NodeId,
+    accepted_by: &str,
+) -> Result<Accepted> {
+    accept_impl(store, id, accepted_by, false)
+}
+
+fn accept_impl(
+    store: &mut KnowledgeStore,
+    id: &NodeId,
+    accepted_by: &str,
+    reconcile: bool,
+) -> Result<Accepted> {
     let node = store.get_node(id)?;
     if is_vault_owned(&node) {
         return already_accepted(store, node);
@@ -87,7 +104,7 @@ pub fn accept(store: &mut KnowledgeStore, id: &NodeId, accepted_by: &str) -> Res
             reason: "it was rejected; propose it again if it should be reconsidered".into(),
         });
     }
-    write_node_as_page(store, node, accepted_by, "agent-proposal")
+    write_node_as_page_impl(store, node, accepted_by, "agent-proposal", reconcile)
 }
 
 /// Write a node a person stated to the vault as a page. A no-op for anything the vault owns.
@@ -123,9 +140,10 @@ pub fn reject(
         return Ok(node);
     }
     let node = store.set_node_status(id, NodeStatus::Archived)?;
-    store.record(NewEvent::about(EventKind::NodeRejected, &node.id).with_detail(
-        serde_json::json!({ "reason": reason, "by": rejected_by }),
-    ))?;
+    store.record(
+        NewEvent::about(EventKind::NodeRejected, &node.id)
+            .with_detail(serde_json::json!({ "reason": reason, "by": rejected_by })),
+    )?;
     Ok(node)
 }
 
@@ -170,21 +188,20 @@ pub fn materialize(store: &mut KnowledgeStore, apply: bool) -> Result<Materializ
 
     let nodes = store.list_nodes(&NodeFilter::all())?;
     for node in nodes {
-        let reason = if is_vault_owned(&node)
-            || node.provenance.source == ProvenanceSource::Deterministic
-        {
-            continue;
-        } else if !node.is_live() {
-            Some("it is not live knowledge")
-        } else if node.provenance.source == ProvenanceSource::Model
-            && node.last_verified_at.is_none()
-        {
-            Some("it is a model proposal nobody has verified or accepted")
-        } else if !is_valid_declared_id(node.id.as_str()) {
-            Some("its id cannot be declared in a page")
-        } else {
-            None
-        };
+        let reason =
+            if is_vault_owned(&node) || node.provenance.source == ProvenanceSource::Deterministic {
+                continue;
+            } else if !node.is_live() {
+                Some("it is not live knowledge")
+            } else if node.provenance.source == ProvenanceSource::Model
+                && node.last_verified_at.is_none()
+            {
+                Some("it is a model proposal nobody has verified or accepted")
+            } else if !is_valid_declared_id(node.id.as_str()) {
+                Some("its id cannot be declared in a page")
+            } else {
+                None
+            };
         if let Some(reason) = reason {
             report.left_alone.push(LeftAlone {
                 node: node.id,
@@ -222,7 +239,8 @@ fn already_accepted(store: &KnowledgeStore, node: KnowledgeNode) -> Result<Accep
     let project = store.project_root();
     let page = PageRef::of(&node, &evidence, project.as_deref()).ok_or_else(|| Error::Invalid {
         id: node.id.clone(),
-        reason: "it is owned by the vault but its page is not indexed yet; run `index-vault`".into(),
+        reason: "it is owned by the vault but its page is not indexed yet; run `index-vault`"
+            .into(),
     })?;
     Ok(Accepted {
         node,
@@ -254,6 +272,16 @@ fn write_node_as_page(
     node: KnowledgeNode,
     accepted_by: &str,
     origin: &str,
+) -> Result<Accepted> {
+    write_node_as_page_impl(store, node, accepted_by, origin, true)
+}
+
+fn write_node_as_page_impl(
+    store: &mut KnowledgeStore,
+    node: KnowledgeNode,
+    accepted_by: &str,
+    origin: &str,
+    reconcile: bool,
 ) -> Result<Accepted> {
     if !is_valid_declared_id(node.id.as_str()) {
         return Err(Error::Invalid {
@@ -287,18 +315,21 @@ fn write_node_as_page(
             store.promote_edge(&edge.id)?;
         }
     }
-    store.record(NewEvent::about(EventKind::NodeAccepted, &node.id).with_detail(
-        serde_json::json!({ "path": path, "by": accepted_by, "origin": origin }),
-    ))?;
+    store.record(
+        NewEvent::about(EventKind::NodeAccepted, &node.id)
+            .with_detail(serde_json::json!({ "path": path, "by": accepted_by, "origin": origin })),
+    )?;
 
     // Bring the edges and evidence the page declares into the index now rather than at the next
     // read. Accepting is a write the person asked for, so unlike a read it may build the first
     // index: without one the page could not say which file backs the node.
-    match VaultIndexer::sync_if_changed(store, &project, VaultScanOptions::default())? {
-        VaultSync::NotIndexed => {
-            VaultIndexer::scan_and_index(store, &project, VaultScanOptions::default())?;
+    if reconcile {
+        match VaultIndexer::sync_if_changed(store, &project, VaultScanOptions::default())? {
+            VaultSync::NotIndexed => {
+                VaultIndexer::scan_and_index(store, &project, VaultScanOptions::default())?;
+            }
+            VaultSync::Unchanged | VaultSync::Reconciled(_) => {}
         }
-        VaultSync::Unchanged | VaultSync::Reconciled(_) => {}
     }
 
     let node = store.get_node(&node.id)?;
@@ -318,6 +349,45 @@ fn write_node_as_page(
 }
 
 type Rels = (Vec<String>, Vec<String>, Vec<String>, Vec<KnowledgeEdge>);
+
+/// Explicit page-to-page links are canonical Markdown, including links made by
+/// connected agents. Re-indexing, export and sync must all retain them.
+pub fn link_pages(store: &mut KnowledgeStore, edge: KnowledgeEdge) -> Result<KnowledgeEdge> {
+    let project = require_project(store)?;
+    let _lock = RepoLock::acquire(store.root(), "vault")?;
+    let from = store.get_node(&edge.from)?;
+    let to = store.get_node(&edge.to)?;
+    let source = PageRef::of(&from, &store.evidence_for(&from.id)?, Some(&project))
+        .ok_or_else(|| portable_error("invalid_request", "The source has no saved page"))?;
+    let target = PageRef::of(&to, &store.evidence_for(&to.id)?, Some(&project))
+        .ok_or_else(|| portable_error("invalid_request", "The target has no saved page"))?;
+    let path = project.join(&source.path);
+    let content = std::fs::read_to_string(&path)?;
+    let page = VaultPage::parse(&source.path, &content);
+    let mut relations = page
+        .relations
+        .iter()
+        .map(|(kind, target)| format!("{} [[{}]]", kind.as_str(), target))
+        .collect::<Vec<_>>();
+    let reference = format!(
+        "{} [[{}]]",
+        edge.edge_type.as_str(),
+        target.path.trim_end_matches(".md")
+    );
+    if !relations.contains(&reference) {
+        relations.push(reference);
+    }
+    let updated = set_fields(&content, &[("relations", FieldValue::List(relations))]);
+    write_atomic(&path, updated.as_bytes())?;
+    VaultIndexer::scan_and_index(store, &project, VaultScanOptions::default())?;
+    store
+        .edges_of(&from.id)?
+        .into_iter()
+        .find(|found| {
+            found.from == edge.from && found.to == edge.to && found.edge_type == edge.edge_type
+        })
+        .ok_or_else(|| portable_error("invalid_request", "The page link could not be indexed"))
+}
 
 /// The relationships a node has that can be written into its page: outgoing edges to nodes that
 /// are themselves pages. Returns `related:` entries, typed `relations:` entries, descriptions of
@@ -340,11 +410,19 @@ fn relationships_for(store: &KnowledgeStore, node: &KnowledgeNode) -> Result<Rel
         }
         let target = store.get_node(&edge.to)?;
         let target_evidence = store.evidence_for(&target.id)?;
-        let Some(page) = PageRef::of(&target, &target_evidence, project.as_deref()) else {
-            left.push(format!("{} {}", edge.edge_type.as_str(), target.title));
-            continue;
-        };
-        let reference = format!("[[{}]]", page.path.trim_end_matches(".md"));
+        let reference =
+            if let Some(page) = PageRef::of(&target, &target_evidence, project.as_deref()) {
+                format!("[[{}]]", page.path.trim_end_matches(".md"))
+            } else if (is_proposal(&target) || is_vault_owned(&target))
+                && is_valid_declared_id(target.id.as_str())
+            {
+                // A declared id resolves as soon as the target becomes a page. Keep the
+                // reference in Markdown now, regardless of acceptance order.
+                format!("[[{}]]", target.id)
+            } else {
+                left.push(format!("{} {}", edge.edge_type.as_str(), target.title));
+                continue;
+            };
         if edge.edge_type == EdgeType::RelatedTo {
             related.push(reference);
         } else {
@@ -407,9 +485,12 @@ fn render_page(
     fields.push(("authority", Scalar(node.authority.as_str().into())));
     fields.push(("scope", Scalar(node.scope.as_str().into())));
     fields.push(("origin", Scalar(origin.into())));
-    if let Some(detail) = node.provenance.detail.as_deref().filter(|_| {
-        node.provenance.source == ProvenanceSource::Model
-    }) {
+    if let Some(detail) = node
+        .provenance
+        .detail
+        .as_deref()
+        .filter(|_| node.provenance.source == ProvenanceSource::Model)
+    {
         fields.push(("proposed_by", Scalar(detail.into())));
     }
     if let Some(session) = &node.provenance.session {
@@ -509,11 +590,7 @@ pub struct Drafted {
 /// The draft quotes the source's first non-empty line and cites the file with its content hash, so
 /// a later edit to the source makes the evidence stale and visible. It is a proposal: nothing is
 /// written to the vault until it is accepted.
-pub fn draft_from_source(
-    store: &mut KnowledgeStore,
-    source: &str,
-    title: &str,
-) -> Result<Drafted> {
+pub fn draft_from_source(store: &mut KnowledgeStore, source: &str, title: &str) -> Result<Drafted> {
     use crate::model::{NodeType, Scope, SourceAnchor};
     use crate::wiki::{WikiCaller, WikiEvidenceCreate, WikiNodeCreate, WikiService};
 
@@ -530,8 +607,10 @@ pub fn draft_from_source(
     let mut walked = project.clone();
     for segment in source.split('/') {
         walked.push(segment);
-        let metadata = std::fs::symlink_metadata(&walked)
-            .map_err(|_| Error::Invalid { id: NodeId::from_existing(&source), reason: "the source does not exist".into() })?;
+        let metadata = std::fs::symlink_metadata(&walked).map_err(|_| Error::Invalid {
+            id: NodeId::from_existing(&source),
+            reason: "the source does not exist".into(),
+        })?;
         if metadata.file_type().is_symlink() {
             return Err(portable_error(
                 "invalid_request",
@@ -543,7 +622,9 @@ pub fn draft_from_source(
     if !metadata.is_file() || metadata.len() > DRAFT_SOURCE_MAX_BYTES {
         return Err(portable_error(
             "invalid_request",
-            format!("{source} is not a regular text file of at most {DRAFT_SOURCE_MAX_BYTES} bytes"),
+            format!(
+                "{source} is not a regular text file of at most {DRAFT_SOURCE_MAX_BYTES} bytes"
+            ),
         ));
     }
     let bytes = std::fs::read(&walked)?;
@@ -559,7 +640,10 @@ pub fn draft_from_source(
         .find(|line| !line.is_empty())
         .unwrap_or("");
 
-    let caller = WikiCaller { model: DRAFT_PROPOSER.into(), session: None };
+    let caller = WikiCaller {
+        model: DRAFT_PROPOSER.into(),
+        session: None,
+    };
     let mut service = WikiService::new(store);
     let node = service.create(
         WikiNodeCreate {
@@ -634,25 +718,40 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
 
     let project = require_project(store)?;
     let path = project.join(".athenaeum").join(LEGACY_CORE_DATABASE);
-    let mut report = LegacyImportReport { dry_run: !apply, ..Default::default() };
+    let mut report = LegacyImportReport {
+        dry_run: !apply,
+        ..Default::default()
+    };
     if !path.is_file() {
         return Ok(report);
     }
     report.found = true;
-    let old = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|error| portable_error("io", format!("cannot open {}: {error}", path.display())))?;
+    let old =
+        Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|error| {
+            portable_error("io", format!("cannot open {}: {error}", path.display()))
+        })?;
 
     let bodies = |sql: &str| -> Vec<(String, serde_json::Value)> {
         // A table the old engine never created is simply empty.
-        let Ok(mut statement) = old.prepare(sql) else { return Vec::new() };
-        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)));
+        let Ok(mut statement) = old.prepare(sql) else {
+            return Vec::new();
+        };
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        });
         let Ok(rows) = rows else { return Vec::new() };
         rows.filter_map(|row| row.ok())
-            .filter_map(|(state, body)| serde_json::from_str(&body).ok().map(|value| (state, value)))
+            .filter_map(|(state, body)| {
+                serde_json::from_str(&body).ok().map(|value| (state, value))
+            })
             .collect()
     };
     let text = |value: &serde_json::Value, key: &str| -> String {
-        value.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
     };
 
     let proposals = bodies("SELECT state, body FROM proposals ORDER BY created_at, id");
@@ -671,7 +770,10 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
             continue;
         }
         let Some(node_type) = NodeType::parse_opt(&text(node, "type")) else {
-            report.left_alone.push(format!("{legacy_id} ({title}): unknown type {:?}", text(node, "type")));
+            report.left_alone.push(format!(
+                "{legacy_id} ({title}): unknown type {:?}",
+                text(node, "type")
+            ));
             continue;
         };
         let scope = Scope::parse_opt(&text(node, "scope")).unwrap_or_default();
@@ -681,7 +783,10 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
             .filter(|name| !name.trim().is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| "athenaeum-core-import".to_string());
-        let own_evidence = evidence.iter().filter(|(_, e)| text(e, "node") == legacy_id).count();
+        let own_evidence = evidence
+            .iter()
+            .filter(|(_, e)| text(e, "node") == legacy_id)
+            .count();
         let own_edges = edges
             .iter()
             .filter(|(_, e)| text(e, "from") == legacy_id || text(e, "to") == legacy_id)
@@ -699,20 +804,27 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
                 content: text(node, "content"),
                 scope,
             },
-            WikiCaller { model: proposer.clone(), session: None },
+            WikiCaller {
+                model: proposer.clone(),
+                session: None,
+            },
         );
         match created {
             Ok(created) => {
                 mapped.insert(legacy_id.clone(), created.id.clone());
                 staged.push((legacy_id, title, own_evidence, own_edges));
             }
-            Err(error) => report.left_alone.push(format!("{legacy_id} ({title}): {error}")),
+            Err(error) => report
+                .left_alone
+                .push(format!("{legacy_id} ({title}): {error}")),
         }
     }
 
     if apply {
         for (_, item) in &evidence {
-            let Some(new_id) = mapped.get(&text(item, "node")) else { continue };
+            let Some(new_id) = mapped.get(&text(item, "node")) else {
+                continue;
+            };
             let file = item
                 .get("anchor")
                 .and_then(|anchor| anchor.get("file"))
@@ -739,36 +851,72 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
                     node: new_id.as_str().to_string(),
                     kind: EvidenceKind::parse_opt(&text(item, "kind")).unwrap_or_default(),
                     anchor,
-                    excerpt: item.get("excerpt").and_then(|v| v.as_str()).map(str::to_string),
-                    note: item.get("note").and_then(|v| v.as_str()).map(str::to_string),
+                    excerpt: item
+                        .get("excerpt")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    note: item
+                        .get("note")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
                 },
-                WikiCaller { model: "athenaeum-core-import".into(), session: None },
+                WikiCaller {
+                    model: "athenaeum-core-import".into(),
+                    session: None,
+                },
             );
             if let Err(error) = result {
-                report.left_alone.push(format!("evidence {}: {error}", text(item, "id")));
+                report
+                    .left_alone
+                    .push(format!("evidence {}: {error}", text(item, "id")));
             }
         }
         for (_, edge) in &edges {
             let (from, to) = (text(edge, "from"), text(edge, "to"));
             // An endpoint is either another imported proposal or knowledge the new index already
             // holds under the same id (a page that declared its id).
-            let resolve = |old: &str| mapped.get(old).map(|id| id.as_str().to_string()).or_else(|| {
-                store.find_node(&NodeId::from_existing(old)).ok().flatten().map(|node| node.id.as_str().to_string())
-            });
+            let resolve = |old: &str| {
+                mapped
+                    .get(old)
+                    .map(|id| id.as_str().to_string())
+                    .or_else(|| {
+                        store
+                            .find_node(&NodeId::from_existing(old))
+                            .ok()
+                            .flatten()
+                            .map(|node| node.id.as_str().to_string())
+                    })
+            };
             let (Some(from_id), Some(to_id)) = (resolve(&from), resolve(&to)) else {
-                report.left_alone.push(format!("relationship {from} → {to}: an end is not known to this index"));
+                report.left_alone.push(format!(
+                    "relationship {from} → {to}: an end is not known to this index"
+                ));
                 continue;
             };
             let Some(edge_type) = EdgeType::parse_opt(&text(edge, "type")) else {
-                report.left_alone.push(format!("relationship {from} → {to}: unknown type {:?}", text(edge, "type")));
+                report.left_alone.push(format!(
+                    "relationship {from} → {to}: unknown type {:?}",
+                    text(edge, "type")
+                ));
                 continue;
             };
             let result = WikiService::new(store).link(
-                WikiLinkCreate { from: from_id, edge_type, to: to_id, note: None, confidence: None },
-                WikiCaller { model: "athenaeum-core-import".into(), session: None },
+                WikiLinkCreate {
+                    from: from_id,
+                    edge_type,
+                    to: to_id,
+                    note: None,
+                    confidence: None,
+                },
+                WikiCaller {
+                    model: "athenaeum-core-import".into(),
+                    session: None,
+                },
             );
             if let Err(error) = result {
-                report.left_alone.push(format!("relationship {from} → {to}: {error}"));
+                report
+                    .left_alone
+                    .push(format!("relationship {from} → {to}: {error}"));
             }
         }
     }

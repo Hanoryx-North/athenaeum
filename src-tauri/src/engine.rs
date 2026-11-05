@@ -34,6 +34,38 @@ use serde_json::{json, Value};
 use crate::core_bridge;
 use crate::panic_guard::{run_guarded, run_guarded_async};
 
+/// Project automation and batch acceptance share the CLI's core implementation.
+#[tauri::command]
+pub async fn wiki_automation(
+    workspace: String,
+    settings: Option<athenaeum_core::portable::automation::Automation>,
+    accept_all: Option<bool>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workspace = require_workspace(&workspace)?;
+        let root = std::path::Path::new(&workspace);
+        let project = athenaeum_core::workspace::Workspace::discover(root)
+            .ok_or("No wiki is open at this path")?;
+        let mut store = project.open().map_err(|e| e.to_string())?;
+        let root = store.project_root().ok_or("This wiki has no folder")?;
+        if let Some(settings) = settings {
+            settings.save(&root).map_err(|e| e.to_string())?;
+        }
+        let settings = athenaeum_core::portable::automation::Automation::load(&root)
+            .map_err(|e| e.to_string())?;
+        let batch = if accept_all.unwrap_or(false) {
+            athenaeum_core::portable::automation::accept_pending(&mut store, false)
+        } else {
+            athenaeum_core::portable::automation::maintain(&mut store)
+        }
+        .map_err(|e| e.to_string())?;
+        let revision = store.stats().map_err(|e| e.to_string())?.events;
+        Ok(serde_json::json!({ "settings": settings, "batch": batch, "revision": revision }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// What the desktop says when it accepts or rejects a proposal.
 ///
 /// The decision belongs to the person at the keyboard, so the caller recorded
@@ -79,11 +111,7 @@ pub enum EngineRequest {
         task: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         depth: Option<u8>,
-        #[serde(
-            rename = "maxNodes",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "maxNodes", default, skip_serializing_if = "Option::is_none")]
         max_nodes: Option<u32>,
     },
     /// The evidence records behind one node — its relationships, evidence,
@@ -97,11 +125,7 @@ pub enum EngineRequest {
         to: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         depth: Option<u8>,
-        #[serde(
-            rename = "maxNodes",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
+        #[serde(rename = "maxNodes", default, skip_serializing_if = "Option::is_none")]
         max_nodes: Option<u32>,
     },
 }
@@ -472,7 +496,7 @@ pub enum EngineResponse {
     Index { index: EngineIndex },
     Proposals { proposals: Vec<EngineProposal> },
     Context { context: EngineContext },
-    Open { detail: EngineNodeDetail },
+    Open { detail: Box<EngineNodeDetail> },
     History { versions: Vec<EngineVersion> },
     Path { path: EngineGraphPath },
 }
@@ -534,8 +558,8 @@ pub async fn engine_request(
     run_guarded_async("engine_request", async move {
         let workspace = require_workspace(&workspace)?;
         let method = method_of(&request);
-        let outbound = serde_json::to_value(&request)
-            .map_err(|error| format!("invalid_request: {error}"))?;
+        let outbound =
+            serde_json::to_value(&request).map_err(|error| format!("invalid_request: {error}"))?;
         let response = call(workspace, outbound).await?;
         parse_response(method, &response)
     })
@@ -684,10 +708,9 @@ pub fn library_link(workspace: String) -> Result<LibraryLink, String> {
         let workspace = require_workspace(&workspace)?;
         let root = std::path::Path::new(&workspace);
 
-        let manifest =
-            athenaeum_core::portable::manifest::RepositoryManifest::read(root).map_err(|error| {
-                format!("library_state_unreadable: could not read athenaeum.json: {error}")
-            })?;
+        let manifest = athenaeum_core::portable::manifest::RepositoryManifest::read(root).map_err(
+            |error| format!("library_state_unreadable: could not read athenaeum.json: {error}"),
+        )?;
         let state = athenaeum_core::portable::sync::SyncState::load(root).map_err(|error| {
             format!("library_state_unreadable: could not read the sync state: {error}")
         })?;

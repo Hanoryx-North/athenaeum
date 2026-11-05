@@ -233,6 +233,16 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: u32,
     },
+    /// Read or change this wiki's local automation settings.
+    Automation {
+        #[arg(long, action = clap::ArgAction::Set)]
+        accept_proposals: Option<bool>,
+        #[arg(long, action = clap::ArgAction::Set)]
+        auto_sync: Option<bool>,
+        /// Save every currently pending proposal as a page.
+        #[arg(long)]
+        accept_all: bool,
+    },
     /// Accept a proposal: write it to the vault as a page, so it is permanent and portable.
     ///
     /// Accepting is not verifying. The page records the authority the claim already had.
@@ -715,6 +725,35 @@ fn run(cli: &Cli) -> Result<Outcome> {
     }
 
     match &cli.command {
+        Command::Automation {
+            accept_proposals,
+            auto_sync,
+            accept_all,
+        } => {
+            let project = store.project_root().ok_or_else(|| Error::NoWorkspace {
+                path: cwd.display().to_string(),
+            })?;
+            let mut settings = athenaeum_core::portable::automation::Automation::load(&project)?;
+            if let Some(value) = accept_proposals {
+                settings.accept_proposals = *value;
+            }
+            if let Some(value) = auto_sync {
+                settings.auto_sync = *value;
+            }
+            if accept_proposals.is_some() || auto_sync.is_some() {
+                settings.save(&project)?;
+            }
+            let batch = if *accept_all {
+                athenaeum_core::portable::automation::accept_pending(&mut store, false)?
+            } else {
+                Default::default()
+            };
+            let result = serde_json::json!({ "settings": settings, "batch": batch });
+            emit(cli.json, &result, || {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                Ok(())
+            })?;
+        }
         Command::Init => unreachable!("handled before the workspace is opened"),
 
         Command::Stats => {
@@ -917,7 +956,17 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 edge = edge.with_confidence(confidence);
             }
 
-            let created = store.connect(edge)?;
+            let from_page = PageRef::of(
+                &from,
+                &store.evidence_for(&from.id)?,
+                workspace.project_root(),
+            );
+            let to_page = PageRef::of(&to, &store.evidence_for(&to.id)?, workspace.project_root());
+            let created = if from_page.is_some() && to_page.is_some() {
+                athenaeum_core::portable::memory::link_pages(&mut store, edge)?
+            } else {
+                store.connect(edge)?
+            };
             emit(cli.json, &created, || {
                 println!(
                     "{} → {} → {}  [{}]",

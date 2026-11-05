@@ -108,3 +108,14 @@ export function harnessRouteFor(config: LlmConfig): HarnessRouteResult {
       return { ok: false, reason: "Chat cannot use a local CLI provider. Pick an API provider for chat in Settings." }
   }
 }
+
+/** Native app-server configuration is isolated from any installed Codex app. */
+export function nativeRouteFor(config: LlmConfig): HarnessRouteResult {
+  if (config.provider === "openai" && config.apiKey.trim()) {
+    return { ok: true, route: { provider: "athenaeum-native", model: config.model.trim() || "native-configuration",
+      apiKeyEnv: SETTINGS_KEY_ENV, apiKey: config.apiKey,
+      piProvider: { baseURL: "https://api.openai.com/v1" } } }
+  }
+  // Native provider/auth configuration belongs to ~/.athenaeum-agent/config.toml.
+  return { ok: true, route: { provider: "athenaeum-native", model: "native-configuration" } }
+}

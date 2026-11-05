@@ -9,9 +9,9 @@
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::status;
 use crate::store::KnowledgeStore;
 use crate::vault::{VaultIndexer, VaultScanOptions};
-use crate::status;
 use crate::wiki::{
     WikiRequest, WikiRequestEnvelope, WikiResponse, WikiResponseEnvelope, WikiService,
     WIKI_PROTOCOL_VERSION,
@@ -56,10 +56,7 @@ pub fn execute(
     // does not know, and an ignored field is a client bug that would otherwise
     // go unnoticed until it mattered.
     if let Some((code, message)) = unknown_request_field(bytes) {
-        return (
-            WikiResponseEnvelope::error(None, code, message),
-            false,
-        );
+        return (WikiResponseEnvelope::error(None, code, message), false);
     }
 
     let request_id = envelope.request_id;
@@ -99,6 +96,16 @@ pub fn execute(
             Some(workspace) => match workspace.open() {
                 Ok(mut store) => {
                     if request.reads_knowledge() {
+                        if let Err(error) = crate::portable::automation::maintain(&mut store) {
+                            return (
+                                WikiResponseEnvelope::error(
+                                    request_id,
+                                    error_code(&error),
+                                    error.to_string(),
+                                ),
+                                false,
+                            );
+                        }
                         refresh_vault_index(&mut store, workspace);
                     }
                     WikiService::new(&mut store).handle(request)
@@ -121,7 +128,9 @@ pub fn execute(
                     error.to_string(),
                     details,
                 ),
-                None => WikiResponseEnvelope::error(request_id, error_code(&error), error.to_string()),
+                None => {
+                    WikiResponseEnvelope::error(request_id, error_code(&error), error.to_string())
+                }
             };
             (response, false)
         }

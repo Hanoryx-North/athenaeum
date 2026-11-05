@@ -973,6 +973,12 @@ export function GraphView() {
 
   return (
     <div className="relative flex h-full flex-col">
+      {edges.length === 0 && nodes.length > 0 && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground">
+          <p>These pages have no links yet. Link related pages with [[page name]] in their text, or ask your agent to connect them.</p>
+          <Button size="sm" variant="outline" onClick={() => useWikiStore.getState().setActiveView("review")}>Review unsaved proposals</Button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 shrink-0">
         <div className="flex min-w-0 flex-wrap items-center gap-3">

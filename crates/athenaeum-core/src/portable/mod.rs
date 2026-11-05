@@ -13,6 +13,7 @@
 //! The contract these types implement is `docs/portable-format.md`.
 
 pub mod archive;
+pub mod automation;
 pub mod ledger;
 pub mod lock;
 pub mod manifest;

@@ -14,6 +14,9 @@ import { useEffect, useRef } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useEngineStore } from "@/stores/engine-store"
 import { useProposalStore } from "@/stores/proposal-store"
+import { useAutomationStore } from "@/stores/automation-store"
+import { useSetupStore } from "@/stores/setup-store"
+import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
 const REFRESH_DEBOUNCE_MS = 500
 
@@ -29,6 +32,40 @@ export function useEngineWorkspace(): void {
   const refresh = useEngineStore((s) => s.refresh)
   const attachProposals = useProposalStore((s) => s.attach)
   const detachProposals = useProposalStore((s) => s.detach)
+
+  useEffect(() => {
+    if (!projectPath) return
+    let stopped = false
+    let running = false
+    let lastSync = 0
+    const tick = async () => {
+      if (stopped || running || document.visibilityState !== "visible") return
+      running = true
+      try {
+        await useAutomationStore.getState().run(projectPath)
+        if (stopped) return
+        const automation = useAutomationStore.getState()
+        if (automation.workspace !== projectPath || !automation.settings.autoSync) return
+        const engine = useEngineStore.getState()
+        if (!engine.library?.linked || engine.library.conflicts.length || useSetupStore.getState().busy) return
+        if (Date.now() - lastSync < 60_000) return
+        lastSync = Date.now()
+        const result = await useSetupStore.getState().operate(projectPath, { job: "sync" })
+        if (stopped) return
+        await engine.loadLibrary()
+        if (result?.exitCode === 0) {
+          await refreshProjectFileTree(projectPath, { bumpDataVersion: true })
+        }
+      } catch (cause) {
+        if (!stopped) console.error("Wiki automation failed:", cause)
+      } finally { running = false }
+    }
+    void tick()
+    const timer = setInterval(() => void tick(), 15_000)
+    const online = () => { lastSync = 0; void tick() }
+    window.addEventListener("online", online)
+    return () => { stopped = true; clearInterval(timer); window.removeEventListener("online", online) }
+  }, [projectPath])
 
   useEffect(() => {
     if (!projectPath) {

@@ -20,12 +20,12 @@ try {
   mkdirSync(staging, { recursive: true })
   copyFileSync(join(target, 'debug', executable), join(staging, executable))
   // These resources are normally copied beside the binary by tauri-build.
-  for (const resource of ['harness-driver.mjs', 'install', 'pdfium']) {
+  for (const resource of ['harness-driver.mjs', 'native-agent-driver.mjs', 'install', 'pdfium']) {
     const source = join(target, 'debug', resource)
     if (existsSync(source)) cpSync(source, join(staging, resource), { recursive: true })
   }
   mkdirSync(snapshot, { recursive: true })
-  for (const resource of ['harness-driver.mjs', 'install', 'pdfium']) {
+  for (const resource of ['harness-driver.mjs', 'native-agent-driver.mjs', 'install', 'pdfium']) {
     const source = join(staging, resource)
     if (existsSync(source)) cpSync(source, join(snapshot, resource), { recursive: true })
   }
