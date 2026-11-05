@@ -5,6 +5,8 @@ import { readFileSync } from "fs"
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+// @ts-expect-error Build-time plugin runs directly as ESM.
+import desktopCatalogPlugin from "./scripts/desktop-catalog.mjs"
 
 const host = process.env.TAURI_DEV_HOST
 
@@ -14,7 +16,7 @@ const pkgJson = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"),
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), desktopCatalogPlugin()],
 
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },

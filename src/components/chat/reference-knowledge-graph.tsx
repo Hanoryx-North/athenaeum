@@ -3,6 +3,7 @@ import Graph from "graphology"
 import { SigmaContainer, useLoadGraph, useRegisterEvents, useSigma } from "@react-sigma/core"
 import "@react-sigma/core/lib/style.css"
 import type { MessageReference } from "@/stores/chat-store"
+import { graphLabel } from "@/lib/graph-label"
 
 interface ReferenceKnowledgeGraphProps {
   references: MessageReference[]
@@ -53,8 +54,8 @@ function ReferenceGraphLoader({ data }: { data: ReferenceGraphData }) {
         y: Math.sin(angle),
         size: node.graphResult ? 11 : 8,
         color: node.graphResult ? "#2dd4bf" : "#60a5fa",
-        label: node.label,
-        forceLabel: true,
+        label: graphLabel(node.label),
+        fullTitle: node.label,
       })
     })
     data.edges.forEach((edge, index) => {
@@ -80,12 +81,15 @@ function ReferenceGraphEvents({ data, onOpenReference }: ReferenceKnowledgeGraph
 
   useEffect(() => {
     return registerEvents({
-      enterNode: ({ event }) => {
+      enterNode: ({ node, event }) => {
         event.original.preventDefault()
-        sigma.getContainer().style.cursor = "pointer"
+        const container = sigma.getContainer()
+        container.style.cursor = referencesByNode.get(node) && onOpenReference ? "pointer" : "default"
+        container.title = sigma.getGraph().getNodeAttribute(node, "fullTitle")
       },
       leaveNode: () => {
         sigma.getContainer().style.cursor = "default"
+        sigma.getContainer().removeAttribute("title")
       },
       clickNode: ({ node }) => {
         const reference = referencesByNode.get(node)
@@ -96,6 +100,7 @@ function ReferenceGraphEvents({ data, onOpenReference }: ReferenceKnowledgeGraph
 
   useEffect(() => () => {
     sigma.getContainer().style.cursor = "default"
+    sigma.getContainer().removeAttribute("title")
   }, [sigma])
 
   return null
@@ -133,9 +138,7 @@ export function ReferenceKnowledgeGraph({ references, onOpenReference }: Referen
         }}
       >
         <ReferenceGraphLoader data={data} />
-        {onOpenReference && (
-          <ReferenceGraphEvents data={data} references={references} onOpenReference={onOpenReference} />
-        )}
+        <ReferenceGraphEvents data={data} references={references} onOpenReference={onOpenReference} />
       </SigmaContainer>
     </div>
   )

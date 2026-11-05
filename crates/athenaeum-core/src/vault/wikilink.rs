@@ -97,7 +97,7 @@ fn parse_inner(inner: &str) -> Option<WikiLink> {
 /// Handles fenced blocks (``` and ~~~, with any info string) and inline
 /// code spans of any backtick run length, which is the same rule
 /// CommonMark uses.
-fn prose_spans(body: &str) -> Vec<&str> {
+pub(super) fn prose_spans(body: &str) -> Vec<&str> {
     let mut spans = Vec::new();
     let mut in_fence: Option<(char, usize)> = None;
     let mut pending_start: Option<usize> = None;

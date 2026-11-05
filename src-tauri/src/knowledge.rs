@@ -261,7 +261,9 @@ pub fn remove_edge(
     state: tauri::State<'_, AppState>,
     id: EdgeId,
 ) -> std::result::Result<(), String> {
-    run_guarded("remove_edge", || state.with(|store| store.remove_edge(&id)))
+    run_guarded("remove_edge", || {
+        state.with(|store| athenaeum_core::portable::memory::unlink(store, &id))
+    })
 }
 
 #[tauri::command]

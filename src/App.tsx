@@ -23,6 +23,7 @@ import { QuickStartGuide } from "@/components/project/quick-start-guide"
 import { loadOnboardingComplete, saveOnboardingComplete } from "@/lib/project-store"
 import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
+import { useDesktopControl } from "@/hooks/use-desktop-control"
 
 function applyDocumentZoom(level: number) {
   document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * level}px`
@@ -40,6 +41,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [firstLaunch, setFirstLaunch] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
+  useDesktopControl(!loading, handleProjectOpened)
 
   async function completeOnboarding() {
     await saveOnboardingComplete()

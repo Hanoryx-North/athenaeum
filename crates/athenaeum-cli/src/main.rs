@@ -5,6 +5,7 @@ mod api_cmd;
 mod bridge;
 mod catalog;
 mod config_cmd;
+mod desktop_cmd;
 mod dev_cmd;
 mod library;
 mod portable_cmd;
@@ -52,6 +53,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect and control the live desktop through its local command interface.
+    Desktop(desktop_cmd::DesktopArgs),
     /// Open the compiled desktop app, or use --dev for live UI updates while editing.
     Start(start_cmd::StartArgs),
     /// List every command and option, generated from the actual parser.
@@ -124,6 +127,9 @@ enum Command {
     Remove { id: String },
     /// Assert a relationship: `link <from> <type> <to>`.
     Link(LinkArgs),
+    /// Disconnect an edge by id, updating saved Markdown as well as the index.
+    #[command(visible_alias = "disconnect-node")]
+    Unlink { id: String },
     /// Attach evidence to a node.
     Evidence(EvidenceArgs),
     /// Confirm a claim against its evidence, optionally raising what it
@@ -662,6 +668,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
         Command::Config(args) => return config_cmd::run(cli.json, args),
         Command::Start(args) => return start_cmd::run(cli.json, &cwd, args),
         Command::Dev(args) => return dev_cmd::run(cli.json, &cwd, args),
+        Command::Desktop(args) => return desktop_cmd::run(cli.json, args),
         Command::Api(args) => return api_cmd::run(cli.json, args),
         Command::Agent { args } => return process::launch(cli.json, &cwd, "agent", args),
         Command::Mcp { args } => return process::launch(cli.json, &cwd, "mcp", args),
@@ -930,6 +937,20 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
+        Command::Unlink { id } => {
+            athenaeum_core::portable::memory::unlink(
+                &mut store,
+                &EdgeId::from_existing(id.clone()),
+            )?;
+            emit(
+                cli.json,
+                &serde_json::json!({"removed": true, "id": id}),
+                || {
+                    println!("Disconnected {id}.");
+                    Ok(())
+                },
+            )?;
+        }
         Command::Link(args) => {
             let from = resolve(&store, &args.from)?;
             let to = resolve(&store, &args.to)?;
@@ -1107,6 +1128,7 @@ fn run(cli: &Cli) -> Result<Outcome> {
         | Command::Config(_)
         | Command::Start(_)
         | Command::Dev(_)
+        | Command::Desktop(_)
         | Command::Api(_)
         | Command::Agent { .. }
         | Command::Mcp { .. }

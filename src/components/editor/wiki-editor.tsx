@@ -13,6 +13,7 @@ import { streamChat } from "@/lib/llm-client"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { searchWiki, type SearchResult } from "@/lib/search"
 import { normalizePath } from "@/lib/path-utils"
+import { registerDesktopAction } from "@/lib/desktop-control"
 
 interface EditorSelectionRequest {
   id: string
@@ -90,6 +91,29 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
   const saveLatestNow = useCallback(() => {
     onSave(latestMarkdownRef.current, { immediate: true })
   }, [onSave])
+
+  useEffect(() => {
+    const stop = [
+      registerDesktopAction("editor.snapshot", "(): { filePath, mode, markdown }", () => ({ filePath, mode, markdown: latestMarkdownRef.current })),
+      registerDesktopAction("editor.setContent", "(markdown: string): void", markdown => {
+        if (typeof markdown !== "string") throw new Error("markdown must be a string")
+        latestMarkdownRef.current = markdown
+        setDraftMarkdown(markdown)
+        setMode("edit")
+      }),
+      registerDesktopAction("editor.save", "(): void", saveLatestNow),
+      registerDesktopAction("editor.setMode", "(mode: 'read' | 'edit'): void", next => {
+        if (next !== "read" && next !== "edit") throw new Error("mode must be read or edit")
+        if (mode === "edit") saveLatestNow()
+        setMode(next)
+      }),
+      registerDesktopAction("editor.showLinks", "(visible: boolean): void", visible => {
+        if (typeof visible !== "boolean") throw new Error("visible must be a boolean")
+        setShowPageLinks(visible)
+      }),
+    ]
+    return () => stop.forEach(unregister => unregister())
+  }, [filePath, mode, saveLatestNow])
 
   const captureSelection = useCallback((markdown: string, start: number, end: number) => {
     if (!filePath || start === end) {

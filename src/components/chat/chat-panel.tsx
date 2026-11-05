@@ -8,6 +8,7 @@ import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePrevie
 import { ChatInput, type ChatSendOptions, type ChatSkillOption } from "./chat-input"
 import { useChatStore, type MessageImage, type MessageReference } from "@/stores/chat-store"
 import { useWikiStore } from "@/stores/wiki-store"
+import { registerDesktopAction } from "@/lib/desktop-control"
 import { openConnectors } from "@/stores/connectors-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
 import { harnessRouteFor, nativeRouteFor } from "@/lib/harness-route"
@@ -1025,6 +1026,25 @@ export function ChatPanel() {
   }, [project, llmConfig])
 
   const hasAssistantMessages = activeMessages.some((m) => m.role === "assistant")
+  useEffect(() => {
+    const stop = [
+      registerDesktopAction("chat.send", "(text: string): { started: true }", text => {
+        if (typeof text !== "string" || !text.trim()) throw new Error("text must be a nonempty string")
+        if (useChatStore.getState().isStreaming) throw new Error("A chat turn is already active")
+        // Turns can outlive a CLI request. Progress/results remain in chat state.
+        void handleSend(text).catch(error => console.error("CLI chat turn failed:", error))
+        return { started: true }
+      }),
+      registerDesktopAction("chat.stop", "(): void", handleStop),
+      registerDesktopAction("chat.newConversation", "(): void", handleNewConversation),
+      registerDesktopAction("chat.regenerate", "(): { started: true }", () => {
+        void handleRegenerate().catch(error => console.error("CLI regeneration failed:", error))
+        return { started: true }
+      }),
+      registerDesktopAction("chat.writeToWiki", "(): Promise<void>", handleWriteToWiki),
+    ]
+    return () => stop.forEach(unregister => unregister())
+  }, [handleSend, handleStop, handleNewConversation, handleRegenerate, handleWriteToWiki])
   const showWriteButton = mode === "ingest" && !activeStreaming && hasAssistantMessages
 
   const runtimeLabel = harnessStatus.state === "checking"

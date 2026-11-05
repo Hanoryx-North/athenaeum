@@ -350,6 +350,20 @@ fn write_node_as_page_impl(
 
 type Rels = (Vec<String>, Vec<String>, Vec<String>, Vec<KnowledgeEdge>);
 
+/// Disconnect a relationship in both the derived index and its owning Markdown.
+pub fn unlink(store: &mut KnowledgeStore, id: &crate::id::EdgeId) -> Result<()> {
+    let edge = store.get_edge(id)?;
+    let from = store.get_node(&edge.from)?;
+    let Some(project) = store.project_root() else {
+        return store.remove_edge(id);
+    };
+    let Some(page) = PageRef::of(&from, &store.evidence_for(&from.id)?, Some(&project)) else {
+        return store.remove_edge(id);
+    };
+    let _lock = RepoLock::acquire(store.root(), "vault")?;
+    crate::vault::unlink_page_edge(store, &project, &edge, &page)
+}
+
 /// Explicit page-to-page links are canonical Markdown, including links made by
 /// connected agents. Re-indexing, export and sync must all retain them.
 pub fn link_pages(store: &mut KnowledgeStore, edge: KnowledgeEdge) -> Result<KnowledgeEdge> {

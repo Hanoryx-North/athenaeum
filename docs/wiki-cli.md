@@ -7,19 +7,27 @@ knowledge operations. Agent/MCP launchers and source builds use their own runtim
 
 ## Install and start
 
-For local development, launch the compiled desktop from the command line:
+Source development defaults to a live desktop:
 
 ```sh
-wiki start                 # build once if missing, otherwise just open the app
-wiki start --build         # refresh frontend + desktop using the existing cache
-wiki start --dev           # optional foreground developer session with live updates
+wiki start                 # start or reuse the managed Vite/Tauri session
+wiki start --dev           # foreground live session with build/HMR logs
+wiki start --standalone    # deliberately open the frozen offline snapshot
+wiki start --build         # refresh that snapshot using the incremental cache
 wiki start --onboarding    # replay the opening flow; keep saved projects and account
 wiki start --dry-run --json
 ```
 
-This workflow creates no installer packages or desktop shortcuts. It keeps a
+The managed session writes logs to `.athenaeum-dev/live.log`. Frontend edits
+hot-update the running webview. Rust changes rebuild incrementally and restart
+the native process. `wiki desktop status --json` reports whether the running app
+is live. Do not leave source changes verified only in a bundle while the user
+is looking at a stale snapshot.
+
+These commands create no installer packages or desktop shortcuts. The explicit
+standalone workflow keeps a
 ready app in `athenaeum/target/standalone` (or `$CARGO_TARGET_DIR/standalone`).
-The frontend is embedded; ordinary starts run no compiler or development server
+Its frontend is embedded; standalone starts run no compiler or development server
 and return immediately while the app stays open. Source changes take effect after
 `wiki start --build` (quit the running desktop first on Windows). Keep the Cargo
 cache to reuse dependencies; no `cargo clean` is needed. Preparation uses an
@@ -268,6 +276,59 @@ stream their own protocols and reject the outer `--json` flag. Launchers come
 from the install directory or PATH, or `ATHENAEUM_AGENT_BIN` /
 `ATHENAEUM_INTEGRATIONS`. No extra agent runtime is implemented in this CLI.
 
-The current CLI covers the headless engine, saved settings, integrations, hosted
-API, and source workflow. Desktop-only rendering and browser-orchestrated ingest,
-research and embedding jobs are not implemented as headless CLI jobs here.
+## Running desktop operations
+
+Every desktop operation must be reachable through CLI/API access. Agents must
+not control the user's PC to operate or inspect Athenaeum. Read the bundled
+[Athenaeum skill](../skills/athenaeum/SKILL.md) for command selection.
+
+```powershell
+wiki desktop status --json
+wiki desktop actions --json
+wiki desktop actions fs. --json
+wiki desktop state wiki --json
+'["graph"]' | wiki desktop call wiki.setActiveView --stdin --json
+wiki desktop call graph.snapshot --json
+'["C:/path/to/project", {"maxDepth":3}]' | wiki desktop call fs.listDirectory --stdin --json
+'["C:/path/to/page.md"]' | wiki desktop call fs.readFile --stdin --json
+wiki desktop reload
+wiki desktop quit
+```
+
+`call` accepts a positional JSON argument array. `invoke` accepts named JSON
+arguments for a registered native command. Use `--stdin` in PowerShell to avoid
+native argument quote stripping, and for credentials so they stay off argv.
+`--args` works when the caller preserves JSON quotes. Both commands support
+`--json`. `actions` includes generated argument signatures and schemas.
+
+The catalog comes from TypeScript exports, Zustand state methods and registered
+Tauri commands. Callback-based APIs with required non-JSON arguments are excluded;
+their domain operation needs a JSON-compatible action. App, graph, chat and editor
+lifecycles register extra actions while those surfaces are mounted. For example,
+switch to the graph, wait for `graph.snapshot` to appear, then inspect the actual
+Sigma graph and rendered attributes. State inspection is not a screenshot review.
+
+`project.open` and `project.create` run the full desktop project lifecycle.
+`fs.openProject` only returns project metadata. Queue services run in the desktop
+and use its existing processors; they are CLI-accessible while the app is running,
+not new headless model runtimes. Long chat turns return a start acknowledgement;
+read `desktop state chat` for their progress and output.
+
+Standalone knowledge commands still work without a desktop. `wiki unlink EDGE_ID`
+disconnects saved page relationships in their canonical Markdown and updates the
+derived index. It preserves code examples and replaces prose wikilinks with their
+display text. `wiki link` creates the corresponding saved relationship.
+
+The live transport binds only to IPv4 loopback on an ephemeral port. A private
+`desktop-control.json` beside `app-state.json` carries the same-user bearer token.
+The CLI rejects remote endpoints, ignores proxy variables, and follows no
+redirects. The server refuses browser-origin requests and oversized bodies.
+Do not print the descriptor. State and results redact credential fields by
+default; `--reveal` is explicit. A timeout leaves mutation outcome unknown, so
+inspect state before retrying. Saved `wiki config` writes still require closing
+the desktop; use its live state methods and matching save service for live edits.
+
+Adding a UI feature requires exposing its domain operation in a cataloged service
+or store, or through `registerDesktopAction`. Generated discovery prevents a copied
+command list drifting. It does not prove that every historical button has been
+behaviorally tested; validate the relevant UI/CLI path together.

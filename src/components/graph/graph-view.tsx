@@ -21,6 +21,8 @@ import { getFileName, normalizePath } from "@/lib/path-utils"
 import { getFileCategory } from "@/lib/file-types"
 import { applyGraphFilters, hasActiveGraphFilters, type GraphFilterState } from "@/lib/graph-filters"
 import { applyGraphSearch } from "@/lib/graph-search"
+import { graphLabel } from "@/lib/graph-label"
+import { registerDesktopAction } from "@/lib/desktop-control"
 import { wikiTypeLabel } from "@/lib/wiki-page-types"
 import { useTranslation } from "react-i18next"
 
@@ -339,7 +341,8 @@ function GraphLoader({
         y: cached?.y ?? Math.random() * 100,
         size: nodeSize(node.linkCount, maxLinks, nodes.length, nodeScale),
         color,
-        label: node.label,
+        label: graphLabel(node.label),
+        fullTitle: node.label,
         nodeType: node.type,
         nodePath: node.path,
         community: node.community,
@@ -558,11 +561,13 @@ function EventHandler({
         const container = sigma.getContainer()
         container.style.cursor = "pointer"
         const graph = sigma.getGraph()
+        container.title = graph.getNodeAttribute(node, "fullTitle")
         onHoverChange({ node, neighbors: new Set(graph.neighbors(node)) })
       },
       leaveNode: () => {
         const container = sigma.getContainer()
         container.style.cursor = "default"
+        container.removeAttribute("title")
         onHoverChange(null)
       },
     })
@@ -583,6 +588,20 @@ function clientPointFromEvent(event: MouseEvent | TouchEvent): { x: number; y: n
 
 function ZoomControls() {
   const sigma = useSigma()
+
+  useEffect(() => {
+    const stop = [
+      registerDesktopAction("graph.snapshot", "(): { nodes, edges, camera }", () => ({
+        nodes: sigma.getGraph().mapNodes((id, attributes) => ({ id, ...attributes, rendered: sigma.getNodeDisplayData(id) })),
+        edges: sigma.getGraph().mapEdges((id, attributes, source, target) => ({ id, source, target, ...attributes })),
+        camera: sigma.getCamera().getState(),
+      })),
+      registerDesktopAction("graph.zoomIn", "(): Promise<void>", () => sigma.getCamera().animatedZoom({ duration: 200 })),
+      registerDesktopAction("graph.zoomOut", "(): Promise<void>", () => sigma.getCamera().animatedUnzoom({ duration: 200 })),
+      registerDesktopAction("graph.resetCamera", "(): Promise<void>", () => sigma.getCamera().animatedReset({ duration: 200 })),
+    ]
+    return () => stop.forEach(unregister => unregister())
+  }, [sigma])
 
   return (
     <div className="absolute top-3 right-3 flex flex-col gap-1">
@@ -721,6 +740,26 @@ export function GraphView() {
       if (requestId === graphLoadRequest.current) setLoading(false)
     }
   }, [project])
+
+  useEffect(() => {
+    const stop = [
+      registerDesktopAction("graph.refresh", "(): Promise<void>", loadGraph),
+      registerDesktopAction("graph.search", "(query: string): void", query => {
+        if (typeof query !== "string") throw new Error("query must be a string")
+        setGraphSearchOpen(!!query)
+        setGraphSearch(query)
+      }),
+      registerDesktopAction("graph.showInsights", "(visible: boolean): void", visible => {
+        if (typeof visible !== "boolean") throw new Error("visible must be a boolean")
+        setShowInsights(visible)
+      }),
+      registerDesktopAction("graph.showFilters", "(visible: boolean): void", visible => {
+        if (typeof visible !== "boolean") throw new Error("visible must be a boolean")
+        setShowFilters(visible)
+      }),
+    ]
+    return () => stop.forEach(unregister => unregister())
+  }, [loadGraph])
 
   // Initialize node type labels when i18n is ready
   useEffect(() => {

@@ -1,5 +1,14 @@
 # AGENTS.md — Athenaeum
 
+> **CLI and live development direction updated 2026-11-05:** every desktop
+> action must have a discoverable CLI equivalent. Agents operate and inspect
+> Athenaeum through CLI/API access, without controlling the user's PC. Use
+> `wiki commands --json` for standalone commands and `wiki desktop actions --json`
+> for the running app's generated action catalog. Read
+> `skills/athenaeum/SKILL.md` before operating the app. New features must expose
+> their domain operation to the CLI alongside the UI. Keep source development
+> live so frontend edits appear in the running desktop without a native rebuild.
+
 > **Product direction updated 2026-11-05:** the built-in Athenaeum Agent chat is
 > the primary agent experience. Its native app-server supplies turns, tools,
 > approvals and sessions; the desktop owns their UI. Keep the native terminal
@@ -103,7 +112,8 @@ During current local development, use `npm start` (or `wiki start --dev`) for th
 live desktop: Vite updates UI changes without Rust compilation, and native changes
 rebuild incrementally. Keep this process running while editing. The first launch
 builds native dependencies once and subsequent launches reuse `target/debug`.
-Use `wiki start` to open the cached standalone app. If missing, it prepares it
+Use `wiki start` to start or reuse the managed live source session. Use
+`wiki start --standalone` to open the cached standalone app. If missing, it prepares it
 once; `wiki start --build` refreshes it deliberately. Local snapshots use the
 incremental debug cache and embed the frontend in `target/standalone`, separate
 from the live `target/debug` app. No release optimization runs on this path. Do not

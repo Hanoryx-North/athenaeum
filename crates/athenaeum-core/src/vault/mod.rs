@@ -62,6 +62,8 @@ mod page;
 mod pointer;
 mod scan;
 mod wikilink;
+mod unlink;
+pub(crate) use unlink::unlink_page_edge;
 
 pub use frontmatter::{set_fields, FieldValue, Frontmatter, FrontmatterValue};
 pub use graph::{GraphEdge, GraphNode, GraphOrigin, KnowledgeGraph};

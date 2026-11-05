@@ -16,6 +16,7 @@
 mod cli_tools;
 mod commands;
 mod core_bridge;
+mod desktop_control;
 mod engine;
 mod harness;
 mod knowledge;
@@ -129,6 +130,8 @@ pub fn run() {
             app.manage(harness::HarnessChatState::default());
             app.manage(cli_tools::CliRun::default());
             app.manage(knowledge::AppState::default());
+            app.manage(desktop_control::DesktopControl::default());
+            desktop_control::start(app.handle())?;
             app.manage(CloseBehaviorState(Mutex::new("minimize".to_string())));
             app.manage(TrayAvailabilityState(Mutex::new(false)));
             let tray_available = match tray::create_tray(app.handle()) {
@@ -149,6 +152,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            desktop_control::desktop_control_respond,
+            desktop_control::desktop_control_ready,
+            desktop_control::desktop_control_quit,
             startup_onboarding_requested,
             commands::fs::read_file,
             commands::fs::write_file,

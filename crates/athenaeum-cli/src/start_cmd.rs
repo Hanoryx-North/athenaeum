@@ -1,4 +1,4 @@
-//! Local source-checkout launcher. Cached starts never invoke a build tool.
+//! Source work stays live; explicit standalone starts reuse the offline snapshot.
 use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
@@ -18,6 +18,9 @@ pub struct StartArgs {
     /// Run the live desktop in the foreground (Vite UI updates, incremental Rust).
     #[arg(long, conflicts_with = "build")]
     dev: bool,
+    /// Open the frozen offline snapshot instead of the live source desktop.
+    #[arg(long, conflicts_with = "dev")]
+    standalone: bool,
     /// Refresh the standalone app with an incremental build (no installers).
     #[arg(long)]
     build: bool,
@@ -40,6 +43,19 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
             ));
         }
         return process::run_steps(json_out, args.dry_run, &[dev_cmd::desktop_serve(&root)?]);
+    }
+    if !args.standalone && !args.build && !args.onboarding {
+        let node = process::executable("node").ok_or_else(|| portable_error("missing_tool", "Node is required for live source development; use wiki start --standalone for the cached app"))?;
+        let step = process::Step::new(
+            "desktop",
+            &repo,
+            &node.to_string_lossy(),
+            &["scripts/live-desktop.mjs", "--supervise"],
+        );
+        if args.dry_run {
+            return process::run_steps(json_out, true, &[step]);
+        }
+        return start_live(json_out, &repo, &node);
     }
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .filter(|value| !value.is_empty())
@@ -100,7 +116,12 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
             binary.display()
         )));
     }
-    let pid = spawn_desktop(&binary, &repo, args.onboarding)?;
+    let arguments = if args.onboarding {
+        vec!["--onboarding"]
+    } else {
+        Vec::new()
+    };
+    let pid = spawn_detached(&binary, &repo, &arguments)?;
     crate::emit(
         json_out,
         &json!({"started": true, "pid": pid,
@@ -113,12 +134,54 @@ pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
     Ok(Outcome::Ok)
 }
 
+fn start_live(json_out: bool, repo: &Path, node: &Path) -> Result<Outcome> {
+    let directory = repo.join(".athenaeum-dev");
+    std::fs::create_dir_all(&directory)?;
+    let existing = std::fs::read(directory.join("live.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let active = existing.and_then(|saved| {
+        let port = u16::try_from(saved["port"].as_u64()?).ok()?;
+        let token = saved["token"].as_str()?;
+        let status: serde_json::Value = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()
+            .ok()?
+            .get(format!("http://127.0.0.1:{port}/status"))
+            .bearer_auth(token)
+            .send()
+            .ok()?
+            .error_for_status()
+            .ok()?
+            .json()
+            .ok()?;
+        let root = PathBuf::from(status["root"].as_str()?)
+            .canonicalize()
+            .ok()?;
+        (root == repo.canonicalize().ok()? && status["pid"] == saved["pid"]).then_some(status)
+    });
+    let log = directory.join("live.log");
+    let report = match active {
+        Some(status) => json!({"live": true, "reused": true, "pid": status["pid"], "logPath": log}),
+        None => {
+            let pid = spawn_detached(node, repo, &["scripts/live-desktop.mjs", "--supervise"])?;
+            json!({"live": true, "started": true, "pid": pid, "logPath": log,
+                "note": "Starting the live desktop. Inspect wiki desktop status for frontend readiness."})
+        }
+    };
+    crate::emit(json_out, &report, || {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        Ok(())
+    })?;
+    Ok(Outcome::Ok)
+}
+
 #[cfg(not(windows))]
-fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result<u32> {
+fn spawn_detached(binary: &Path, cwd: &Path, arguments: &[&str]) -> std::io::Result<u32> {
     let mut command = Command::new(binary);
-    if onboarding {
-        command.arg("--onboarding");
-    }
+    command.args(arguments);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -135,7 +198,7 @@ fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result
 }
 
 #[cfg(windows)]
-fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result<u32> {
+fn spawn_detached(binary: &Path, cwd: &Path, arguments: &[&str]) -> std::io::Result<u32> {
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null;
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -145,12 +208,23 @@ fn spawn_desktop(binary: &Path, cwd: &Path, onboarding: bool) -> std::io::Result
     };
 
     let program: Vec<u16> = binary.as_os_str().encode_wide().chain(Some(0)).collect();
-    let directory: Vec<u16> = cwd.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Node resolves its entrypoint incorrectly when GetCurrentDirectory retains
+    // Rust canonicalize's Windows device prefix. Use the ordinary spelling.
+    let cwd_text = cwd.to_string_lossy();
+    let directory_text = cwd_text.strip_prefix(r"\\?\").unwrap_or(&cwd_text);
+    let directory: Vec<u16> = directory_text.encode_utf16().chain(Some(0)).collect();
     let mut command_line = vec![b'"' as u16];
     command_line.extend(binary.as_os_str().encode_wide());
     command_line.push(b'"' as u16);
-    if onboarding {
-        command_line.extend(" --onboarding".encode_utf16());
+    for argument in arguments {
+        // All callers supply fixed launcher flags/relative filenames, never shell text.
+        if argument.contains('"') || argument.ends_with('\\') {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Invalid launcher argument",
+            ));
+        }
+        command_line.extend(format!(" \"{argument}\"").encode_utf16());
     }
     command_line.push(0);
     let startup = STARTUPINFOW {

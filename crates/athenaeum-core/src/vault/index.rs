@@ -416,7 +416,7 @@ fn page_node_id(path: &str) -> NodeId {
 }
 
 /// The node id each page ends up with, keyed by vault-relative path.
-struct PageIds(HashMap<String, NodeId>);
+pub(super) struct PageIds(HashMap<String, NodeId>);
 
 impl PageIds {
     fn of(&self, path: &str) -> NodeId {
@@ -442,7 +442,7 @@ impl PageIds {
 ///   Ownership moves to the vault only through an explicit accept.
 ///
 /// The page that loses falls back to its path id and the report says why.
-fn assign_ids(
+pub(super) fn assign_ids(
     store: &KnowledgeStore,
     snapshot: &VaultSnapshot,
     report: &mut VaultIndexReport,
@@ -529,13 +529,13 @@ fn human_bytes(bytes: u64) -> String {
 /// is what makes `[[Chain of Thought]]` find `chain-of-thought.md` without
 /// letting a loose case-folded match beat an exact filename.
 #[derive(Debug, Default)]
-struct Resolver {
+pub(super) struct Resolver {
     pages: HashMap<String, NodeId>,
     sources: HashMap<String, NodeId>,
 }
 
 impl Resolver {
-    fn build(snapshot: &VaultSnapshot, ids: &PageIds) -> Self {
+    pub(super) fn build(snapshot: &VaultSnapshot, ids: &PageIds) -> Self {
         let mut resolver = Resolver::default();
 
         // Tiers, most exact first. Within a tier the first page to claim a
@@ -585,7 +585,7 @@ impl Resolver {
         self.pages.entry(key).or_insert_with(|| id.clone());
     }
 
-    fn page(&self, raw: &str) -> Option<&NodeId> {
+    pub(super) fn page(&self, raw: &str) -> Option<&NodeId> {
         let target = raw
             .trim()
             .replace('\\', "/")
@@ -621,7 +621,7 @@ impl Resolver {
         None
     }
 
-    fn source(&self, identity: &str) -> Option<&NodeId> {
+    pub(super) fn source(&self, identity: &str) -> Option<&NodeId> {
         self.sources.get(&identity.to_ascii_lowercase())
     }
 }
