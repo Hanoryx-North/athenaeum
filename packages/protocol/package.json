@@ -1,0 +1,48 @@
+{
+  "name": "@athenaeum/protocol",
+  "version": "1.0.0",
+  "description": "Language-neutral wire contracts for Athenaeum: the local bridge, hosted sync, and the Library API. Owns no behaviour.",
+  "private": false,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./bridge": {
+      "types": "./dist/types/bridge.d.ts",
+      "default": "./src/bridge.js"
+    },
+    "./sync": {
+      "types": "./dist/types/sync.d.ts",
+      "default": "./src/sync.js"
+    },
+    "./library": {
+      "types": "./dist/types/library.d.ts",
+      "default": "./src/library.js"
+    },
+    "./fixtures/*": "./fixtures/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "dist/types",
+    "fixtures",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "build": "tsc -p tsconfig.json",
+    "check": "node scripts/check.mjs",
+    "test": "node --test --test-reporter=spec \"test/*.test.ts\"",
+    "verify": "npm run build && npm run check && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.2"
+  }
+}

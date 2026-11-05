@@ -1,0 +1,58 @@
+{
+  "serverInfo": {
+    "service": "athenaeum-api",
+    "apiVersion": 1,
+    "syncProtocol": 1,
+    "limits": { "maxFileBytes": 1048576, "maxRepositoryBytes": 52428800 }
+  },
+  "manifest": {
+    "formatVersion": 1,
+    "repositoryId": "repo_example",
+    "name": "Example",
+    "createdAt": "2026-10-09T00:00:00Z"
+  },
+  "createRepository": {
+    "id": "repo_example",
+    "name": "Example",
+    "visibility": "private"
+  },
+  "createRepositoryWithoutId": {
+    "name": "Example",
+    "visibility": "private"
+  },
+  "repositoryIds": {
+    "valid": [
+      "repo_example",
+      "repo_3f9c2b7a-1d4e-4c8a-9b55-6a0e7d2c1f44",
+      "repo_A_b-9",
+      "repo_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "repo",
+      "repo_",
+      "Repo_example",
+      "repo_has space",
+      "repo_slash/x",
+      "repo_dot.x",
+      "../repo_example",
+      "repo_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+  },
+  "push": {
+    "base": null,
+    "message": "Publish accepted knowledge",
+    "changes": [
+      { "path": "wiki/example.md", "content": "# Example\n" },
+      { "path": "wiki/old.md", "delete": true }
+    ]
+  },
+  "staleBase": {
+    "error": {
+      "code": "stale_base",
+      "message": "The repository head has changed.",
+      "details": { "head": "rev_new" }
+    },
+    "requestId": "push-1"
+  }
+}

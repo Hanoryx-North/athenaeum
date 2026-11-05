@@ -520,15 +520,15 @@ fn native_command(
     if let Some(path) = env::var_os("ATHENAEUM_AGENT_BIN") {
         candidates.push(PathBuf::from(path));
     }
-    candidates.push(prefix.join("bin").join(executable));
-    // Development uses the sibling source build. Packaged apps use the installed binary.
+    // Development uses the one checkout's native runtime build.
     if cfg!(debug_assertions) {
         candidates.push(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../athenaeum_agent/runtime/target/debug")
+                .join("../target/native-runtime/debug")
                 .join(executable),
         );
     }
+    candidates.push(prefix.join("bin").join(executable));
     let binary = candidates.into_iter().find(|path| path.is_file()).ok_or(
         "Athenaeum Agent is not installed. Build or install its native runtime, or select the optional Harness integration."
     )?;

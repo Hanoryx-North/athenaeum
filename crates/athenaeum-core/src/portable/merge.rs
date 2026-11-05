@@ -170,3 +170,71 @@ fn matches(a: &[&str], b: &[&str]) -> Option<Vec<Option<usize>>> {
     }
     Some(mapping)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = "one\ntwo\nthree\nfour\nfive\n";
+
+    #[test]
+    fn edits_to_different_lines_combine() {
+        let ours = "ONE\ntwo\nthree\nfour\nfive\n";
+        let theirs = "one\ntwo\nthree\nfour\nFIVE\n";
+        assert_eq!(
+            merge3(BASE, ours, theirs),
+            Merged::Clean("ONE\ntwo\nthree\nfour\nFIVE\n".into())
+        );
+    }
+
+    #[test]
+    fn edits_to_the_same_line_conflict() {
+        let ours = "one\nTWO\nthree\nfour\nfive\n";
+        let theirs = "one\n2\nthree\nfour\nfive\n";
+        assert_eq!(merge3(BASE, ours, theirs), Merged::Conflicted);
+    }
+
+    #[test]
+    fn identical_edits_are_not_a_conflict() {
+        let both = "one\nTWO\nthree\nfour\nfive\n";
+        assert_eq!(merge3(BASE, both, both), Merged::Clean(both.into()));
+    }
+
+    #[test]
+    fn insertions_at_both_ends_combine() {
+        let ours = "zero\none\ntwo\nthree\nfour\nfive\n";
+        let theirs = "one\ntwo\nthree\nfour\nfive\nsix\n";
+        assert_eq!(
+            merge3(BASE, ours, theirs),
+            Merged::Clean("zero\none\ntwo\nthree\nfour\nfive\nsix\n".into())
+        );
+    }
+
+    #[test]
+    fn a_deletion_on_one_side_applies() {
+        let ours = "one\nthree\nfour\nfive\n";
+        assert_eq!(
+            merge3(BASE, ours, BASE),
+            Merged::Clean("one\nthree\nfour\nfive\n".into())
+        );
+    }
+
+    #[test]
+    fn markers_keep_both_sides_of_a_conflict() {
+        let ours = "one\nTWO\nthree\nfour\nfive\n";
+        let theirs = "one\n2\nthree\nfour\nfive\n";
+        let text = merge3_with_markers(BASE, ours, theirs, ("local", "remote"));
+        assert!(
+            text.contains("<<<<<<< local\nTWO\n=======\n2\n>>>>>>> remote\n"),
+            "{text}"
+        );
+        assert!(has_conflict_markers(&text));
+        assert!(!has_conflict_markers(BASE));
+    }
+
+    #[test]
+    fn two_files_that_were_both_created_conflict_unless_equal() {
+        assert_eq!(merge3("", "a\n", "b\n"), Merged::Conflicted);
+        assert_eq!(merge3("", "a\n", "a\n"), Merged::Clean("a\n".into()));
+    }
+}

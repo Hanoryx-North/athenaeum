@@ -231,9 +231,11 @@ fn scan_pages(
                 "Stopped after the configured {} page limit",
                 options.max_pages
             ));
-            snapshot
-                .skipped
-                .push(SkippedFile::new(&relative, "budget", "the page limit was reached"));
+            snapshot.skipped.push(SkippedFile::new(
+                &relative,
+                "budget",
+                "the page limit was reached",
+            ));
             snapshot.complete = false;
             break;
         }

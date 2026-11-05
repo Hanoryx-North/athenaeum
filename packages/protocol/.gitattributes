@@ -1,0 +1,3 @@
+# Generated JavaScript and declarations are compared with TypeScript's LF output.
+src/*.js text eol=lf
+dist/types/*.d.ts text eol=lf

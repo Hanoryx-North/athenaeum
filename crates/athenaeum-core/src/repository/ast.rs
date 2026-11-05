@@ -347,8 +347,15 @@ mod rust {
                         }
                     }
                 }
-                "struct_item" | "enum_item" | "trait_item" | "type_item" | "union_item"
-                | "function_item" | "function_signature_item" | "const_item" | "static_item" => {
+                "struct_item"
+                | "enum_item"
+                | "trait_item"
+                | "type_item"
+                | "union_item"
+                | "function_item"
+                | "function_signature_item"
+                | "const_item"
+                | "static_item" => {
                     record_item(node, content, out, owner.as_deref());
                 }
                 "call_expression" => {
@@ -601,7 +608,9 @@ mod javascript {
         stack.reverse();
         while let Some(child) = stack.pop() {
             match child.kind() {
-                "class_heritage" | "extends_clause" | "implements_clause"
+                "class_heritage"
+                | "extends_clause"
+                | "implements_clause"
                 | "extends_type_clause" => {
                     for inner in child.named_children(&mut child.walk()) {
                         if inner.kind().ends_with("comment") {
@@ -660,7 +669,13 @@ mod python {
                     if let Some(name) = field_text(node, "name", content) {
                         let name = name.to_string();
                         let exported = !name.starts_with('_');
-                        out.symbol(name.clone(), name.clone(), SymbolKind::Class, node, exported);
+                        out.symbol(
+                            name.clone(),
+                            name.clone(),
+                            SymbolKind::Class,
+                            node,
+                            exported,
+                        );
                         record_bases(node, content, out, &name);
                         next_owner = Some(name);
                     }

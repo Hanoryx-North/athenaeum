@@ -257,10 +257,9 @@ impl Cache {
 
     /// The recorded facts for `path`, when they are still valid.
     fn reuse(&self, path: &str, bytes: u64, mtime_ns: i64) -> Option<(RepositoryFile, Extraction)> {
-        let cached = self
-            .files
-            .iter()
-            .find(|cached| cached.path == path && cached.bytes == bytes && cached.mtime_ns == mtime_ns)?;
+        let cached = self.files.iter().find(|cached| {
+            cached.path == path && cached.bytes == bytes && cached.mtime_ns == mtime_ns
+        })?;
         let mut file = cached.file.clone();
         // Path-derived facts are cheap to recompute and are the ones a moved
         // file could have changed, so they never come from the cache.
@@ -272,7 +271,12 @@ impl Cache {
         Some((file, extraction))
     }
 
-    fn store(&self, root: &Path, files: &[RepositoryFile], extractions: &BTreeMap<String, Extraction>) -> Result<()> {
+    fn store(
+        &self,
+        root: &Path,
+        files: &[RepositoryFile],
+        extractions: &BTreeMap<String, Extraction>,
+    ) -> Result<()> {
         let cache = Cache {
             version: CACHE_VERSION,
             files: files
@@ -653,4 +657,66 @@ fn normalize_join(base: &Path, relative: &Path) -> Option<String> {
         }
     }
     Some(components.join("/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scans_files_symbols_and_resolved_imports_with_stable_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "mod store;\npub fn open() {}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/store.rs"), "pub struct Store;\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules/noise")).unwrap();
+        std::fs::write(
+            dir.path().join("node_modules/noise/index.js"),
+            "export function ignored() {}",
+        )
+        .unwrap();
+
+        let snapshot = scan(dir.path(), RepositoryScanOptions::default()).unwrap();
+        assert_eq!(
+            snapshot
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/lib.rs", "src/store.rs"]
+        );
+        assert_eq!(
+            snapshot.files[0].imports[0].target.as_deref(),
+            Some("src/store.rs")
+        );
+        assert!(snapshot.files[0]
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "open"));
+    }
+
+    #[test]
+    fn file_and_total_limits_are_enforced_without_reading_generated_trees() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn b() {}").unwrap();
+        let snapshot = scan(
+            dir.path(),
+            RepositoryScanOptions {
+                max_files: 1,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(snapshot.files.len(), 1);
+        assert!(!snapshot.complete);
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("file limit")));
+    }
 }

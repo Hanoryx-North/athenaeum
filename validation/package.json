@@ -1,0 +1,10 @@
+{
+  "name": "athenaeum-validation",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "verify:all": "python3 verify_all.py",
+    "verify:list": "python3 verify_all.py --list",
+    "test:setup-ui": "node product_tests/setup_ui_smoke.cjs"
+  }
+}

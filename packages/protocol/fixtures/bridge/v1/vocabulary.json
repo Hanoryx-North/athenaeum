@@ -1,0 +1,19 @@
+{
+  "protocolVersion": 1,
+  "methods": [
+    "capabilities", "search", "open", "navigate", "related", "evidence", "history", "context",
+    "create", "update", "link", "attach_evidence", "record_use", "proposals", "accept", "reject",
+    "status", "review", "sources", "index", "path"
+  ],
+  "errorCodes": [
+    "invalid_request", "not_found", "incompatible_store", "knowledge_error",
+    "request_too_large", "unsupported_protocol", "workspace_not_found"
+  ],
+  "reviewKinds": [
+    "contradiction", "dispute", "stale_anchor", "unsupported_rule", "unreviewed_proposal",
+    "duplicate", "near_duplicate", "superseded", "incomplete_scan", "orphan"
+  ],
+  "reviewSeverities": ["blocking", "warning", "info"],
+  "indexScopes": ["vault", "repository", "all"],
+  "sourceScopes": ["vault", "repository"]
+}

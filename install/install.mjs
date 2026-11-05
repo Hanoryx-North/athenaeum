@@ -143,7 +143,8 @@ function removeFromWindowsPath(dir) {
   run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script])
 }
 
-const LINKS = (l) => [['wiki', l.wiki], ['athenaeum', l.cli], ['athenaeum-integrations', l.integrations], ['athenaeum-mcp', l.mcp]]
+const LINKS = (l) => [['wiki', l.wiki], ['athenaeum', l.cli], ['athenaeum-integrations', l.integrations], ['athenaeum-mcp', l.mcp],
+  ...[['athenaeum-agent', 'athenaeum-agent'], ['athenaeum-harness', 'athenaeum-harness']].filter(([, file]) => existsSync(join(l.bin, file))).map(([name, file]) => [name, join(l.bin, file)])]
 
 function linkLaunchers(l, home) {
   const dir = join(home, '.local', 'bin')
@@ -269,7 +270,7 @@ export function uninstall(args, { env = process.env, home = homedir(), platform 
   }
   try { run(process.execPath, [l.bundle, 'disconnect']) } catch { console.log('  (could not remove the agent settings; run `athenaeum-integrations disconnect` if they remain)') }
   const agentName = platform === 'win32' ? 'athenaeum-agent.cmd' : 'athenaeum-agent'
-  for (const [name, target] of [...LINKS(l), ['athenaeum-agent', join(l.bin, agentName)]]) {
+  for (const [name, target] of [...LINKS(l), ['athenaeum-agent', join(l.bin, agentName)], ['athenaeum-harness', join(l.bin, platform === 'win32' ? 'athenaeum-harness.cmd' : 'athenaeum-harness')]]) {
     const link = join(home, '.local', 'bin', name)
     try {
       // Remove a link only if it is ours: a file the person put there themselves is theirs.

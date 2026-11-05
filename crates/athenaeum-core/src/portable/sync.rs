@@ -1142,3 +1142,6 @@ fn ensure_inside(root: &Path, target: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

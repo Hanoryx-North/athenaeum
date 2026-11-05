@@ -72,3 +72,19 @@ fn is_stale(path: &Path) -> bool {
         .and_then(|modified| SystemTime::now().duration_since(modified).ok())
         .is_some_and(|age| age > STALE_AFTER)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_lock_is_released_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let _held = RepoLock::acquire(dir.path(), "vault").unwrap();
+            assert!(dir.path().join("vault.lock").exists());
+        }
+        assert!(!dir.path().join("vault.lock").exists());
+        RepoLock::acquire(dir.path(), "vault").unwrap();
+    }
+}

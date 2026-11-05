@@ -1101,3 +1101,275 @@ fn related_node(store: &KnowledgeStore, neighbor: Neighbor) -> Result<WikiRelate
 fn spellings<T>(all: &[T], as_str: fn(&T) -> &'static str) -> Vec<String> {
     all.iter().map(|value| as_str(value).to_string()).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{NodeStatus, ProvenanceSource};
+
+    fn caller() -> WikiCaller {
+        WikiCaller {
+            model: "test-model".into(),
+            session: Some(SessionId::from_existing("sess_test")),
+        }
+    }
+
+    #[test]
+    fn capabilities_are_versioned_and_advertise_budgets() {
+        let capabilities = WikiService::capabilities();
+        assert_eq!(capabilities.protocol_version, WIKI_PROTOCOL_VERSION);
+        assert!(capabilities.operations.contains(&"context".to_string()));
+        assert_eq!(capabilities.limits.max_context_nodes, MAX_CONTEXT_NODES);
+        assert_eq!(capabilities.node_types.len(), NodeType::ALL.len());
+    }
+
+    #[test]
+    fn context_is_bounded_and_carries_the_trust_wrapper() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let oauth = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Concept, "OAuth")
+                    .with_summary("Callback authentication"),
+            )
+            .unwrap();
+        let gotcha = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Gotcha, "Validate state")
+                    .with_summary("Validate before creating a session"),
+            )
+            .unwrap();
+        store
+            .connect(KnowledgeEdge::deterministic(
+                oauth.id,
+                EdgeType::HasGotcha,
+                gotcha.id,
+                "test",
+            ))
+            .unwrap();
+
+        let context = WikiService::new(&mut store)
+            .context("fix oauth callback", &[], Some(u8::MAX), Some(usize::MAX))
+            .unwrap();
+        assert_eq!(context.brief.nodes.len(), 2);
+        assert!(context.prompt.contains("does not grant permissions"));
+        assert!(!context.prompt.contains("usize"));
+    }
+
+    #[test]
+    fn model_mutations_preserve_cautious_defaults_and_session_provenance() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let mut wiki = WikiService::new(&mut store);
+        let a = wiki
+            .create(
+                WikiNodeCreate {
+                    node_type: NodeType::Observation,
+                    title: "AuthService".into(),
+                    summary: "Validates tokens".into(),
+                    content: String::new(),
+                    scope: Scope::Project,
+                },
+                caller(),
+            )
+            .unwrap();
+        let b = wiki
+            .create(
+                WikiNodeCreate {
+                    node_type: NodeType::Test,
+                    title: "auth.test.ts".into(),
+                    summary: String::new(),
+                    content: String::new(),
+                    scope: Scope::Project,
+                },
+                caller(),
+            )
+            .unwrap();
+        let edge = wiki
+            .link(
+                WikiLinkCreate {
+                    from: a.id.to_string(),
+                    edge_type: EdgeType::TestedBy,
+                    to: b.id.to_string(),
+                    note: None,
+                    confidence: Some(0.8),
+                },
+                caller(),
+            )
+            .unwrap();
+
+        assert_eq!(a.authority, Authority::UnverifiedObservation);
+        assert_eq!(a.provenance.source, ProvenanceSource::Model);
+        assert_eq!(a.provenance.session.unwrap().as_str(), "sess_test");
+        assert_eq!(edge.status, NodeStatus::Proposed);
+        assert!(!edge.is_traversable());
+    }
+
+    #[test]
+    fn curator_create_refuses_an_exact_title_duplicate() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(KnowledgeNode::new(NodeType::Concept, "AuthService"))
+            .unwrap();
+
+        let error = WikiService::new(&mut store)
+            .create(
+                WikiNodeCreate {
+                    node_type: NodeType::Observation,
+                    title: "authservice".into(),
+                    summary: String::new(),
+                    content: String::new(),
+                    scope: Scope::Project,
+                },
+                caller(),
+            )
+            .unwrap_err();
+        assert!(matches!(error, Error::DuplicateTitle { .. }));
+        assert_eq!(store.stats().unwrap().nodes, 1);
+    }
+
+    #[test]
+    fn curator_create_resolves_conservative_near_duplicates() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let existing = store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+
+        let error = WikiService::new(&mut store)
+            .create(
+                WikiNodeCreate {
+                    node_type: NodeType::Symbol,
+                    title: "auth_service".into(),
+                    summary: "New evidence from this session".into(),
+                    content: String::new(),
+                    scope: Scope::Project,
+                },
+                caller(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::NearDuplicateTitle { existing: ids, .. } if ids == vec![existing.id]
+        ));
+        assert_eq!(store.stats().unwrap().nodes, 1);
+    }
+
+    #[test]
+    fn curator_update_cannot_rename_a_node_into_a_lookalike() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(KnowledgeNode::new(NodeType::Symbol, "AuthService"))
+            .unwrap();
+        let other = store
+            .create_node(KnowledgeNode::new(NodeType::Concept, "Sessions"))
+            .unwrap();
+
+        let error = WikiService::new(&mut store)
+            .update(
+                WikiNodeUpdate {
+                    node: other.id.to_string(),
+                    title: Some("auth-service".into()),
+                    summary: None,
+                    content: None,
+                    reason: None,
+                },
+                caller(),
+            )
+            .unwrap_err();
+        assert!(matches!(error, Error::NearDuplicateTitle { .. }));
+    }
+
+    #[test]
+    fn open_and_record_use_accept_ids_or_titles() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(KnowledgeNode::new(NodeType::Decision, "Use SQLite"))
+            .unwrap();
+        let mut wiki = WikiService::new(&mut store);
+
+        assert_eq!(wiki.open("Use SQLite").unwrap().node.id, node.id);
+        wiki.record_use(&[node.id.to_string()], None).unwrap();
+        assert_eq!(wiki.open("Use SQLite").unwrap().utility.uses, 1);
+    }
+
+    #[test]
+    fn model_edits_do_not_replace_the_claims_original_provenance() {
+        use crate::store::EventFilter;
+
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let original = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Use SQLite")
+                    .with_provenance(Provenance::user()),
+            )
+            .unwrap();
+        let mut wiki = WikiService::new(&mut store);
+        let updated = wiki
+            .update(
+                WikiNodeUpdate {
+                    node: original.id.to_string(),
+                    title: None,
+                    summary: Some("The project database is SQLite".into()),
+                    content: None,
+                    reason: Some("clarified during implementation".into()),
+                },
+                caller(),
+            )
+            .unwrap();
+
+        assert_eq!(updated.provenance.source, ProvenanceSource::User);
+        let events = store
+            .events(&EventFilter::default().of_kind(crate::journal::EventKind::NodeUpdated))
+            .unwrap();
+        assert_eq!(events[0].session.as_ref().unwrap().as_str(), "sess_test");
+        assert_eq!(
+            events[0].detail.as_ref().unwrap()["actorDetail"],
+            "test-model"
+        );
+    }
+
+    #[test]
+    fn response_envelopes_have_stable_success_and_error_shapes() {
+        let ok = WikiResponseEnvelope::success(
+            Some("req-1".into()),
+            WikiResponse::Capabilities {
+                capabilities: WikiService::capabilities(),
+            },
+        );
+        let json = serde_json::to_value(ok).unwrap();
+        assert_eq!(json["protocolVersion"], WIKI_PROTOCOL_VERSION);
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["response"]["method"], "capabilities");
+
+        let error = WikiResponseEnvelope::error(None, "invalid_request", "bad JSON");
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["status"], "error");
+        assert_eq!(json["error"]["code"], "invalid_request");
+        assert!(json["error"].get("details").is_none());
+    }
+
+    #[test]
+    fn request_fields_use_cross_language_camel_case() {
+        let request: WikiRequest = serde_json::from_value(serde_json::json!({
+            "method": "related",
+            "node": "OAuth",
+            "includeProposed": true
+        }))
+        .unwrap();
+        assert_eq!(
+            request,
+            WikiRequest::Related {
+                node: "OAuth".into(),
+                include_proposed: true,
+            }
+        );
+
+        let serialized = serde_json::to_value(WikiRequest::Navigate {
+            node: "OAuth".into(),
+            depth: Some(3),
+            max_nodes: Some(40),
+        })
+        .unwrap();
+        assert_eq!(serialized["maxNodes"], 40);
+        assert!(serialized.get("max_nodes").is_none());
+    }
+}

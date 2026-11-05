@@ -58,15 +58,20 @@ installer. `package-tools.mjs` stages them under `src-tauri/tools/` before Tauri
 The guided setup runs Node directly, without `sh`, a PowerShell bootstrap, or a system Node.
 Base setup works offline; the optional agent setup installs its pinned Harness runtime from npm.
 
-The `integrations` job builds `athenaeum_integrations`; `agent-package` builds the MIT agent
-adapter against its pinned, unmodified upstream Harness. `package-agent.mjs` bundles the MIT
-protocol dependency into the adapter tarball so the installed package needs no sibling checkout.
-These stay separate artifacts and processes; no GPL engine code goes into either MIT adapter.
-Revisions come from `integrations.pin.json`.
+The `integrations` job builds `packages/integrations`; `agent-package` builds the
+optional MIT Harness adapter from `packages/agent` against its registry-pinned
+upstream dependencies. `package-agent.mjs` bundles the shared MIT protocol into
+that tarball. The platform jobs compile the native source runtime from
+`packages/agent/runtime/native-cli` and put it in the same CLI archive used by
+native setup and standalone downloads, retaining its Apache-2.0 licence/notice.
+The optional Harness launcher is named `athenaeum-harness` so it cannot replace
+the primary native agent.
 
-`ATHENAEUM_PROTOCOL_TOKEN` must read `athenaeum_protocol`, `athenaeum_integrations`, and
-`athenaeum_agent`. The platform jobs wait for both adapters and download their workflow artifacts.
-Merge protocol and adapter changes before updating the app's pins.
+All local components come from this one Git revision. The workflow no longer
+checks out sibling Athenaeum repositories or needs `ATHENAEUM_PROTOCOL_TOKEN`.
+The native runtime's upstream source and adaptations remain recorded in its own
+hash manifests; the optional Harness release is pinned in `harness.pin.json`.
+Platform jobs wait for and download the local adapter artifacts.
 
 On macOS, `package-macos.mjs` uses Apple's `pkgbuild` and `productbuild` to wrap the built
 `.app` in a native Installer wizard with welcome and completion instructions. The `.dmg`

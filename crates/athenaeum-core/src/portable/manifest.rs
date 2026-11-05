@@ -123,3 +123,48 @@ pub fn default_name(root: &Path) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "knowledge".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_manifest_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(RepositoryManifest::read(dir.path()).unwrap(), None);
+    }
+
+    #[test]
+    fn unknown_fields_survive_a_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MANIFEST_FILE),
+            r#"{"formatVersion":1,"repositoryId":"repo_abc-123","name":"x","createdAt":"2026-01-01T00:00:00Z","license":"MIT"}"#,
+        )
+        .unwrap();
+        let manifest = RepositoryManifest::read(dir.path()).unwrap().unwrap();
+        manifest.write(dir.path()).unwrap();
+        let text = std::fs::read_to_string(dir.path().join(MANIFEST_FILE)).unwrap();
+        assert!(text.contains("\"license\": \"MIT\""), "{text}");
+    }
+
+    #[test]
+    fn a_newer_format_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MANIFEST_FILE),
+            r#"{"formatVersion":9,"repositoryId":"repo_abc","name":"x","createdAt":"t"}"#,
+        )
+        .unwrap();
+        let error = RepositoryManifest::read(dir.path()).unwrap_err();
+        assert!(error.to_string().contains("supports up to 1"), "{error}");
+    }
+
+    #[test]
+    fn a_repository_id_cannot_escape_a_path() {
+        assert!(is_valid_repository_id("repo_3f9c2b7a-1d4e"));
+        assert!(!is_valid_repository_id("repo_../etc"));
+        assert!(!is_valid_repository_id("../repo_x"));
+        assert!(!is_valid_repository_id("repo_"));
+    }
+}

@@ -870,3 +870,415 @@ pub async fn vector_drop_legacy(project_path: String) -> Result<(), String> {
 // early — they are NOT end-to-end tests of the embedding pipeline
 // (that lives on the TS side).
 // ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests_v2 {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    /// Unique temp project dir per test. `tokio::test` runs tests in
+    /// parallel threads so wall-clock nanoseconds aren't sufficient — a
+    /// process-wide atomic counter guarantees uniqueness even when two
+    /// tests call this at the same tick. Not cleaned up on purpose:
+    /// LanceDB's internal file handles can linger briefly after `drop`
+    /// and aggressive removal introduces flaky failures on CI.
+    fn tmp_project() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let id = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let p = std::env::temp_dir().join(format!("athenaeum-vtest-{}-{}", ts, id));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Deterministic toy embedding of fixed dim. Different seeds produce
+    /// different vectors so nearest-neighbour ordering is stable but
+    /// non-trivial.
+    fn fake_embedding(seed: u32, dim: usize) -> Vec<f32> {
+        (0..dim)
+            .map(|i| {
+                let x = ((seed.wrapping_mul(2654435761)) ^ (i as u32)) as f32;
+                (x / u32::MAX as f32).sin()
+            })
+            .collect()
+    }
+
+    fn make_chunks(page_id: &str, n: u32, dim: usize) -> Vec<ChunkUpsertInput> {
+        (0..n)
+            .map(|i| ChunkUpsertInput {
+                chunk_index: i,
+                chunk_text: format!("{} chunk {}", page_id, i),
+                heading_path: format!("## Heading {}", i),
+                embedding: fake_embedding(i, dim),
+            })
+            .collect()
+    }
+
+    fn chunk_table_version_count(project_path: &Path) -> usize {
+        let versions_dir = project_path
+            .join(".athenaeum")
+            .join("lancedb")
+            .join(format!("{TABLE_V2}.lance"))
+            .join("_versions");
+        std::fs::read_dir(versions_dir)
+            .map(|entries| entries.filter_map(Result::ok).count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn page_id_validation_allows_unicode_wiki_stems() {
+        let page_id = "反硝化除磷·A2O：DPAO + 50% & x（测试），v1.2";
+        assert!(validate_page_id(page_id).is_ok());
+        assert!(validate_page_id_for_v2(page_id).is_ok());
+    }
+
+    #[test]
+    fn page_id_validation_rejects_filter_and_path_footguns() {
+        for page_id in [
+            "bad'quote",
+            "bad\"quote",
+            "bad/slash",
+            "bad\\slash",
+            "bad\nnewline",
+            "bad\ttab",
+            "bad\0nul",
+            "soft\u{00AD}hyphen",
+            "arabic\u{061C}mark",
+            "zero\u{200B}width",
+            "line\u{2028}sep",
+            "para\u{2029}sep",
+            "bidi\u{202E}override",
+            "\u{FEFF}bom",
+            "annotation\u{FFF9}mark",
+            "tag\u{E0041}char",
+        ] {
+            assert!(
+                validate_page_id(page_id).is_err(),
+                "{page_id:?} should be rejected"
+            );
+            assert!(
+                validate_page_id_for_v2(page_id).is_err(),
+                "{page_id:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn page_id_validation_rejects_empty_and_overlong_ids() {
+        assert!(validate_page_id("").is_err());
+        assert!(validate_page_id_for_v2("").is_err());
+
+        let ascii_boundary = "a".repeat(MAX_PAGE_ID_CHARS);
+        assert!(validate_page_id(&ascii_boundary).is_ok());
+        assert!(validate_page_id_for_v2(&ascii_boundary).is_ok());
+
+        let cjk_boundary = "测".repeat(MAX_PAGE_ID_CHARS);
+        assert!(validate_page_id(&cjk_boundary).is_ok());
+        assert!(validate_page_id_for_v2(&cjk_boundary).is_ok());
+
+        let too_long = "测".repeat(MAX_PAGE_ID_CHARS + 1);
+        assert!(validate_page_id(&too_long).is_err());
+        assert!(validate_page_id_for_v2(&too_long).is_err());
+    }
+
+    #[test]
+    fn page_id_validation_allows_hash_in_debug_chunk_ids() {
+        let page_id = "source#section";
+        assert!(validate_page_id(page_id).is_ok());
+        assert!(validate_page_id_for_v2(page_id).is_ok());
+    }
+
+    #[tokio::test]
+    async fn v2_upsert_then_count() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        let chunks = make_chunks("my-page", 3, 16);
+        vector_upsert_chunks(pp.clone(), "my-page".into(), chunks)
+            .await
+            .unwrap();
+
+        let count = vector_count_chunks(pp.clone()).await.unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[tokio::test]
+    async fn v2_upsert_replaces_existing_chunks_for_page() {
+        // First insert 5 chunks, then re-upsert 2 — the final count
+        // should be 2, not 7 (old rows deleted before insert).
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 5, 16))
+            .await
+            .unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 5);
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 2, 16))
+            .await
+            .unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn v2_different_pages_coexist() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 3, 16))
+            .await
+            .unwrap();
+        vector_upsert_chunks(pp.clone(), "page-b".into(), make_chunks("page-b", 4, 16))
+            .await
+            .unwrap();
+
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 7);
+    }
+
+    #[tokio::test]
+    async fn v2_delete_page_removes_only_its_chunks() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 3, 16))
+            .await
+            .unwrap();
+        vector_upsert_chunks(pp.clone(), "page-b".into(), make_chunks("page-b", 2, 16))
+            .await
+            .unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 5);
+
+        vector_delete_page(pp.clone(), "page-a".into())
+            .await
+            .unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn v2_search_returns_chunks_with_metadata() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 3, 16))
+            .await
+            .unwrap();
+
+        let query = fake_embedding(1, 16);
+        let results = vector_search_chunks(pp.clone(), query, 10).await.unwrap();
+        assert!(!results.is_empty());
+        // Every result should carry page_id, chunk_id, chunk_text, heading_path.
+        for r in &results {
+            assert_eq!(r.page_id, "page-a");
+            assert!(r.chunk_id.starts_with("page-a#"));
+            assert!(r.chunk_text.contains("chunk"));
+            assert!(r.heading_path.starts_with("## Heading"));
+        }
+    }
+
+    #[tokio::test]
+    async fn v2_empty_upsert_is_a_noop_not_an_error() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // Upserting [] should succeed and NOT wipe existing rows — this
+        // is the "transient ingest failure shouldn't nuke index" contract.
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 3, 16))
+            .await
+            .unwrap();
+        vector_upsert_chunks(pp.clone(), "page-a".into(), vec![])
+            .await
+            .unwrap();
+
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 3);
+    }
+
+    #[tokio::test]
+    async fn v2_search_on_missing_table_returns_empty() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        let query = fake_embedding(1, 16);
+        let results = vector_search_chunks(pp, query, 10).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn v2_count_on_missing_table_returns_zero() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        assert_eq!(vector_count_chunks(pp).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn v2_delete_page_is_idempotent() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // Delete on missing table: ok.
+        vector_delete_page(pp.clone(), "never-existed".into())
+            .await
+            .unwrap();
+
+        // Insert + delete + delete again: ok.
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 2, 16))
+            .await
+            .unwrap();
+        vector_delete_page(pp.clone(), "page-a".into())
+            .await
+            .unwrap();
+        vector_delete_page(pp.clone(), "page-a".into())
+            .await
+            .unwrap();
+
+        assert_eq!(vector_count_chunks(pp).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn v2_clear_chunks_drops_entire_chunk_table_and_is_idempotent() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert_chunks(pp.clone(), "page-a".into(), make_chunks("page-a", 3, 16))
+            .await
+            .unwrap();
+        vector_upsert_chunks(pp.clone(), "page-b".into(), make_chunks("page-b", 4, 16))
+            .await
+            .unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 7);
+
+        vector_clear_chunks(pp.clone()).await.unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 0);
+
+        vector_clear_chunks(pp.clone()).await.unwrap();
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn v2_optimize_chunks_prunes_versions_and_preserves_rows() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_optimize_chunks(pp.clone()).await.unwrap();
+
+        for i in 0..6 {
+            let page_id = format!("page-{i}");
+            vector_upsert_chunks(pp.clone(), page_id.clone(), make_chunks(&page_id, 2, 16))
+                .await
+                .unwrap();
+        }
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 12);
+        let versions_before = chunk_table_version_count(&p);
+        assert!(
+            versions_before > 1,
+            "expected multiple LanceDB versions before optimize"
+        );
+
+        vector_optimize_chunks(pp.clone()).await.unwrap();
+        let versions_after = chunk_table_version_count(&p);
+        assert!(
+            versions_after < versions_before,
+            "expected optimize to prune old versions ({versions_before} -> {versions_after})"
+        );
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 12);
+    }
+
+    #[tokio::test]
+    async fn v2_rejects_mismatched_embedding_dimensions() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // First chunk sets dim=16; second chunk has dim=8 → should error.
+        let bad = vec![
+            ChunkUpsertInput {
+                chunk_index: 0,
+                chunk_text: "ok".into(),
+                heading_path: "".into(),
+                embedding: fake_embedding(0, 16),
+            },
+            ChunkUpsertInput {
+                chunk_index: 1,
+                chunk_text: "bad".into(),
+                heading_path: "".into(),
+                embedding: fake_embedding(1, 8),
+            },
+        ];
+        let result = vector_upsert_chunks(pp, "page-a".into(), bad).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_lowercase().contains("dim"));
+    }
+
+    #[tokio::test]
+    async fn v2_rejects_invalid_page_id() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // Quote would be a SQL-injection footgun for the delete filter.
+        let result = vector_upsert_chunks(pp, "bad'; DROP".into(), make_chunks("x", 1, 16)).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_row_count_returns_zero_when_absent() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // v1 table doesn't exist in a fresh temp project.
+        assert_eq!(vector_legacy_row_count(pp).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn legacy_row_count_sees_v1_rows() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // Populate v1 via the legacy vector_upsert.
+        vector_upsert(pp.clone(), "old-page".into(), fake_embedding(0, 16))
+            .await
+            .unwrap();
+
+        let count = vector_legacy_row_count(pp.clone()).await.unwrap();
+        assert_eq!(count, 1);
+
+        // v2 count is untouched.
+        assert_eq!(vector_count_chunks(pp).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn drop_legacy_removes_v1_but_leaves_v2() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        vector_upsert(pp.clone(), "old-page".into(), fake_embedding(0, 16))
+            .await
+            .unwrap();
+        vector_upsert_chunks(
+            pp.clone(),
+            "new-page".into(),
+            make_chunks("new-page", 2, 16),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(vector_legacy_row_count(pp.clone()).await.unwrap(), 1);
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 2);
+
+        vector_drop_legacy(pp.clone()).await.unwrap();
+
+        assert_eq!(vector_legacy_row_count(pp.clone()).await.unwrap(), 0);
+        assert_eq!(vector_count_chunks(pp.clone()).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn drop_legacy_is_noop_when_v1_missing() {
+        let p = tmp_project();
+        let pp = p.to_string_lossy().to_string();
+
+        // Should just return Ok(()), not error.
+        vector_drop_legacy(pp).await.unwrap();
+    }
+}

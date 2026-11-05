@@ -110,3 +110,93 @@ pub fn is_trustworthy(node: &KnowledgeNode) -> bool {
 pub fn is_trustworthy_parts(status: NodeStatus, authority: Authority) -> bool {
     status == NodeStatus::Valid && authority.rank() <= Authority::VerifiedKnowledge.rank()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{NodeType, Scope};
+
+    fn node(title: &str, authority: Authority, scope: Scope) -> KnowledgeNode {
+        KnowledgeNode::new(NodeType::Rule, title)
+            .with_authority(authority)
+            .with_scope(scope)
+    }
+
+    #[test]
+    fn higher_authority_wins_regardless_of_scope() {
+        let candidates = vec![
+            node("Use SQLite", Authority::UnverifiedObservation, Scope::File),
+            node(
+                "Use PostgreSQL",
+                Authority::UserInstruction,
+                Scope::Universal,
+            ),
+        ];
+        assert_eq!(resolve(&candidates).unwrap().title, "Use PostgreSQL");
+    }
+
+    #[test]
+    fn at_equal_authority_the_narrower_scope_wins() {
+        // The plan's own example: a global preference loses to the project
+        // rule that contradicts it.
+        let candidates = vec![
+            node("Use PostgreSQL", Authority::ProjectRule, Scope::Universal),
+            node("Use SQLite", Authority::ProjectRule, Scope::Project),
+        ];
+        assert_eq!(resolve(&candidates).unwrap().title, "Use SQLite");
+    }
+
+    #[test]
+    fn superseded_claims_are_never_returned() {
+        let mut stale = node("Old rule", Authority::UserInstruction, Scope::Project);
+        stale.status = NodeStatus::Superseded;
+        let current = node("New rule", Authority::UnverifiedObservation, Scope::Project);
+        let candidates = vec![stale, current];
+        assert_eq!(resolve(&candidates).unwrap().title, "New rule");
+    }
+
+    #[test]
+    fn nothing_live_resolves_to_nothing() {
+        let mut archived = node("Gone", Authority::UserInstruction, Scope::Project);
+        archived.status = NodeStatus::Archived;
+        assert!(resolve(&[archived]).is_none());
+        assert!(resolve(&[]).is_none());
+    }
+
+    #[test]
+    fn ranking_is_consistent_with_resolution() {
+        let candidates = vec![
+            node("c", Authority::ExternalKnowledge, Scope::Project),
+            node("a", Authority::UserInstruction, Scope::Project),
+            node("b", Authority::ProjectRule, Scope::Project),
+        ];
+        let ranked = rank(&candidates);
+        assert_eq!(ranked[0].title, "a");
+        assert_eq!(ranked.last().unwrap().title, "c");
+        assert_eq!(resolve(&candidates).unwrap().id, ranked[0].id);
+    }
+
+    #[test]
+    fn different_scopes_are_not_treated_as_conflicting() {
+        let global = node("Immutability", Authority::ProjectRule, Scope::Technology);
+        let local = node("Immutability", Authority::ProjectRule, Scope::File);
+        assert!(!conflicts(&global, &local));
+
+        let same_scope_a = node("Immutability", Authority::ProjectRule, Scope::Project);
+        let same_scope_b = node("immutability", Authority::ProjectRule, Scope::Project);
+        assert!(conflicts(&same_scope_a, &same_scope_b));
+    }
+
+    #[test]
+    fn model_proposals_are_not_trustworthy_on_their_own() {
+        let guessed = node(
+            "Probably fine",
+            Authority::UnverifiedObservation,
+            Scope::Project,
+        );
+        assert!(!is_trustworthy(&guessed));
+
+        let verified = node("Established", Authority::VerifiedEvidence, Scope::Project);
+        assert!(is_trustworthy(&verified));
+    }
+}

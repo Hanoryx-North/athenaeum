@@ -578,3 +578,30 @@ fn reasons(note: Option<&str>, confidence: Option<f64>) -> String {
     }
     tail
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_text_is_left_alone() {
+        assert_eq!(truncate("oauth", 40), "oauth");
+        // Exactly at the limit still fits: nothing was left out.
+        assert_eq!(truncate("abcde", 5), "abcde");
+    }
+
+    #[test]
+    fn long_text_is_ellipsized_within_budget() {
+        let out = truncate("abcdefghij", 5);
+        assert_eq!(out, "abcd…");
+        assert_eq!(out.chars().count(), 5);
+    }
+
+    #[test]
+    fn multibyte_titles_are_cut_on_character_boundaries() {
+        // Byte-based truncation would panic or produce invalid UTF-8 here.
+        let out = truncate("知識グラフのノード", 4);
+        assert_eq!(out.chars().count(), 4);
+        assert!(out.ends_with('…'));
+    }
+}

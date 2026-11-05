@@ -23,8 +23,8 @@ use crate::findings;
 use crate::repository::{RepositoryIndexer, RepositoryScanOptions, RepositorySnapshot};
 use crate::store::{KnowledgeStore, SourceRecord, SourceScope};
 use crate::vault::{VaultIndexReport, VaultIndexer, VaultScanOptions};
-use crate::workspace::{Workspace, WORKSPACE_DIR};
 use crate::wiki::WIKI_PROTOCOL_VERSION;
+use crate::workspace::{Workspace, WORKSPACE_DIR};
 
 /// The `meta` key holding when the vault index last ran.
 pub(crate) const VAULT_INDEXED_AT: &str = "vault_indexed_at";
@@ -194,7 +194,8 @@ pub enum IndexScope {
 }
 
 impl IndexScope {
-    pub const ALL: &'static [IndexScope] = &[IndexScope::Vault, IndexScope::Repository, IndexScope::All];
+    pub const ALL: &'static [IndexScope] =
+        &[IndexScope::Vault, IndexScope::Repository, IndexScope::All];
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -320,13 +321,17 @@ pub fn index_status(store: &KnowledgeStore) -> Result<IndexStatus> {
     let vault_state = scan_state(store, SourceScope::Vault)?;
     let repository_state = scan_state(store, SourceScope::Repository)?;
     let vault_scan_incomplete = vault_state.as_ref().is_some_and(|state| !state.complete);
-    let repository_scan_incomplete = repository_state.as_ref().is_some_and(|state| !state.complete);
+    let repository_scan_incomplete = repository_state
+        .as_ref()
+        .is_some_and(|state| !state.complete);
 
     let vault_moved = match (store.project_root(), &vault_indexed_at) {
         (Some(project), Some(_)) => {
             match crate::vault::fingerprint(&project) {
-                Ok(current) => store.meta_get(crate::vault::FINGERPRINT_KEY)?.as_deref()
-                    != Some(current.as_str()),
+                Ok(current) => {
+                    store.meta_get(crate::vault::FINGERPRINT_KEY)?.as_deref()
+                        != Some(current.as_str())
+                }
                 // A vault that cannot be walked cannot be compared. Reporting
                 // "stale" would be a guess; the incomplete-scan finding is the
                 // honest place for the failure, and it is raised separately.
@@ -413,13 +418,15 @@ pub fn index_scopes(
     paths: &[String],
 ) -> Result<IndexOutcome> {
     let started = Instant::now();
-    let project = workspace.project_root().ok_or_else(|| Error::InvalidValue {
-        field: "workspace",
-        value: format!(
-            "{} is not a project workspace (its directory is not named {WORKSPACE_DIR})",
-            workspace.root().display()
-        ),
-    })?;
+    let project = workspace
+        .project_root()
+        .ok_or_else(|| Error::InvalidValue {
+            field: "workspace",
+            value: format!(
+                "{} is not a project workspace (its directory is not named {WORKSPACE_DIR})",
+                workspace.root().display()
+            ),
+        })?;
     if !paths.is_empty() && scope == IndexScope::Vault {
         return Err(Error::InvalidValue {
             field: "paths",

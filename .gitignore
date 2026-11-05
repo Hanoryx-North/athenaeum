@@ -41,3 +41,12 @@ Thumbs.db
 # Local design-review fixtures and captures
 .impeccable/review/
 /.athenaeum-dev/
+
+# Workspace outputs and test/runtime caches
+/packages/*/lib/
+/packages/*/dist/
+.cache/
+__pycache__/
+*.pyc
+/validation/results*.json
+/validation/benchmarks/run-*/

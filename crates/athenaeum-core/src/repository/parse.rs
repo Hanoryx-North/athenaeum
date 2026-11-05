@@ -13,11 +13,11 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use super::ExtractionMethod;
 use super::{
     RepositoryCall, RepositoryImport, RepositoryRelation, RepositorySymbol, SourceLanguage,
     SymbolKind,
 };
-use super::ExtractionMethod;
 
 static RUST_DECL: LazyLock<std::result::Result<Regex, regex::Error>> = LazyLock::new(|| {
     Regex::new(
@@ -215,14 +215,13 @@ pub(super) fn parse_with_path(
         SourceLanguage::Python => parse_python(content)?,
         SourceLanguage::Go => parse_go(content)?,
     };
-    Ok(parsed
-        .with_method(
-            ExtractionMethod::Fallback,
-            format!(
-                "the {} parser reported syntax errors, so this file was read line by line",
-                language.as_str()
-            ),
-        ))
+    Ok(parsed.with_method(
+        ExtractionMethod::Fallback,
+        format!(
+            "the {} parser reported syntax errors, so this file was read line by line",
+            language.as_str()
+        ),
+    ))
 }
 
 /// Read a file of a language this build has no parser for.
@@ -267,7 +266,8 @@ pub(super) fn parse_unsupported(path: &str, content: &str) -> crate::Result<Pars
                 spans.open(symbols.len() - 1, depth);
             }
         }
-        if let Some(captures) = compiled(&GENERIC_IMPORT, "unsupported language")?.captures(trimmed) {
+        if let Some(captures) = compiled(&GENERIC_IMPORT, "unsupported language")?.captures(trimmed)
+        {
             if let Some(specifier) = captures.get(1).or_else(|| captures.get(2)) {
                 imports.push(import(specifier.as_str(), line_number));
             }
@@ -1101,4 +1101,368 @@ fn deduplicate(symbols: &mut Vec<RepositorySymbol>, imports: &mut Vec<Repository
     symbols.dedup_by(|a, b| a.line_start == b.line_start && a.qualified_name == b.qualified_name);
     imports.sort_by_key(|value| (value.line, value.specifier.clone()));
     imports.dedup_by(|a, b| a.line == b.line && a.specifier == b.specifier);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbols_of(language: SourceLanguage, source: &str) -> Vec<RepositorySymbol> {
+        parse(language, source).unwrap().symbols
+    }
+
+    /// The names a declaration invokes, ignoring how they were written.
+    fn calls_of(symbols: &[RepositorySymbol], qualified: &str) -> Vec<String> {
+        named(symbols, qualified)
+            .calls
+            .iter()
+            .map(|call| call.name.clone())
+            .collect()
+    }
+
+    fn named<'a>(symbols: &'a [RepositorySymbol], qualified: &str) -> &'a RepositorySymbol {
+        symbols
+            .iter()
+            .find(|symbol| symbol.qualified_name == qualified)
+            .unwrap_or_else(|| panic!("no symbol {qualified} in {symbols:#?}"))
+    }
+
+    #[test]
+    fn rust_parser_finds_containment_and_import_facts() {
+        let source = r#"
+use crate::store::{KnowledgeStore, NodeFilter};
+pub struct WikiService;
+impl WikiService {
+    pub fn open(&self) {}
+}
+mod protocol;
+"#;
+        let parsed = parse(SourceLanguage::Rust, source).unwrap();
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|value| value.qualified_name == "WikiService"));
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|value| value.qualified_name == "WikiService::open"));
+        assert!(parsed
+            .imports
+            .iter()
+            .any(|value| value.specifier == "crate::store::{KnowledgeStore, NodeFilter}"));
+        assert!(parsed
+            .imports
+            .iter()
+            .any(|value| value.specifier == "mod:protocol"));
+    }
+
+    #[test]
+    fn typescript_parser_finds_methods_and_relative_imports() {
+        let source = r#"
+import { Store } from "./store";
+export class WikiService {
+  async open(id: string): Promise<void> {}
+}
+export const createWiki = () => new WikiService();
+"#;
+        let parsed = parse(SourceLanguage::TypeScript, source).unwrap();
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|value| value.qualified_name == "WikiService.open"));
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|value| value.qualified_name == "createWiki"));
+        assert_eq!(parsed.imports[0].specifier, "./store");
+    }
+
+    #[test]
+    fn python_parser_qualifies_methods() {
+        let source = "from .store import Store\nclass Wiki:\n    def open(self):\n        pass\n";
+        let parsed = parse(SourceLanguage::Python, source).unwrap();
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|value| value.qualified_name == "Wiki.open"));
+        assert_eq!(parsed.imports[0].specifier, ".store");
+    }
+
+    #[test]
+    fn declarations_inside_comments_and_docstrings_are_not_indexed() {
+        let rust = "/*\npub fn imaginary() {}\n*/\npub fn real() {}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, rust);
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["real"]
+        );
+
+        let python = "\"\"\"\ndef imaginary():\n    pass\n\"\"\"\ndef real():\n    pass\n";
+        let symbols = symbols_of(SourceLanguage::Python, python);
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| symbol.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["real"]
+        );
+    }
+
+    #[test]
+    fn multiline_imports_are_extracted_once() {
+        let rust = "use crate::{\n    store::KnowledgeStore,\n    wiki::WikiService,\n};\n";
+        let imports = parse(SourceLanguage::Rust, rust).unwrap().imports;
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].line, 1);
+        assert!(imports[0].specifier.contains("store::KnowledgeStore"));
+
+        let typescript = "import {\n  WikiService,\n  WikiRequest,\n} from './wiki';\n";
+        let imports = parse(SourceLanguage::TypeScript, typescript)
+            .unwrap()
+            .imports;
+        assert_eq!(imports.len(), 1);
+        assert_eq!(imports[0].specifier, "./wiki");
+        assert_eq!(imports[0].line, 1);
+    }
+
+    #[test]
+    fn rust_tests_living_inside_the_file_they_cover_are_recognised() {
+        // Rust does not put its tests in test files, so nothing file-level
+        // can find them (§19, §29).
+        let source = "pub fn authenticate() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn it_authenticates() {\n        authenticate();\n    }\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+
+        assert!(!named(&symbols, "authenticate").test_scoped);
+        assert!(named(&symbols, "tests").test_scoped);
+        assert!(named(&symbols, "it_authenticates").test_scoped);
+        assert_eq!(
+            calls_of(&symbols, "it_authenticates"),
+            vec!["authenticate".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_ordinary_module_is_not_test_code() {
+        let source = "mod store {\n    pub fn open() {}\n}\n#[derive(Debug)]\npub struct Plain;\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert!(
+            symbols.iter().all(|symbol| !symbol.test_scoped),
+            "{symbols:#?}"
+        );
+        // An attribute line is not a declaration, and must not swallow the
+        // one beneath it.
+        assert!(symbols.iter().any(|symbol| symbol.name == "Plain"));
+    }
+
+    #[test]
+    fn a_symbol_span_covers_its_body_not_just_its_signature() {
+        // Line 1 is blank because the literal opens with a newline.
+        let source = r#"
+pub fn open() {
+    let value = 1;
+    value
+}
+pub struct Marker;
+pub fn empty() {}
+"#;
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        let open = named(&symbols, "open");
+        assert_eq!((open.line_start, open.line_end), (2, 5));
+        // A declaration with no body ends on the line that terminates it,
+        // rather than hanging open to the end of the file.
+        let marker = named(&symbols, "Marker");
+        assert_eq!((marker.line_start, marker.line_end), (6, 6));
+        // Opening and closing on one line is still a body.
+        let empty = named(&symbols, "empty");
+        assert_eq!((empty.line_start, empty.line_end), (7, 7));
+    }
+
+    #[test]
+    fn a_signature_spread_over_lines_does_not_end_the_span_early() {
+        let source = "pub fn wide(\n    a: u32,\n    b: u32,\n) -> u32 {\n    a + b\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        let wide = named(&symbols, "wide");
+        assert_eq!((wide.line_start, wide.line_end), (1, 6));
+    }
+
+    #[test]
+    fn nested_declarations_close_before_the_declarations_that_hold_them() {
+        let source = "impl Service {\n    pub fn one(&self) {\n        ();\n    }\n    pub fn two(&self) {\n    }\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        let one = named(&symbols, "Service::one");
+        let two = named(&symbols, "Service::two");
+        assert_eq!((one.line_start, one.line_end), (2, 4));
+        assert_eq!((two.line_start, two.line_end), (5, 6));
+    }
+
+    #[test]
+    fn a_brace_inside_a_string_does_not_open_a_body() {
+        let source =
+            "pub fn render() {\n    let brace = \"{\";\n    drop(brace);\n}\npub fn after() {}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        let render = named(&symbols, "render");
+        assert_eq!((render.line_start, render.line_end), (1, 4));
+        let after = named(&symbols, "after");
+        assert_eq!(after.line_start, 5);
+    }
+
+    #[test]
+    fn python_spans_follow_indentation() {
+        let source =
+            "class Wiki:\n    def open(self):\n        return 1\n\n    def close(self):\n        return 2\n\nVALUE = 3\n";
+        let symbols = symbols_of(SourceLanguage::Python, source);
+        let class = named(&symbols, "Wiki");
+        assert_eq!((class.line_start, class.line_end), (1, 6));
+        let open = named(&symbols, "Wiki.open");
+        assert_eq!((open.line_start, open.line_end), (2, 3));
+        let close = named(&symbols, "Wiki.close");
+        assert_eq!((close.line_start, close.line_end), (5, 6));
+    }
+
+    #[test]
+    fn calls_are_attributed_to_the_declaration_that_makes_them() {
+        let source = r#"
+pub fn authenticate() {
+    validate_token();
+    create_session();
+}
+pub fn validate_token() {}
+pub fn create_session() {}
+"#;
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert_eq!(
+            calls_of(&symbols, "authenticate"),
+            vec!["create_session".to_string(), "validate_token".to_string()]
+        );
+        assert!(named(&symbols, "validate_token").calls.is_empty());
+    }
+
+    #[test]
+    fn a_declaration_is_not_recorded_as_calling_itself() {
+        // The declaration line itself reads as `name(`, and so does recursion.
+        let source = "pub fn recurse(n: u32) {\n    recurse(n - 1);\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert!(named(&symbols, "recurse").calls.is_empty());
+    }
+
+    #[test]
+    fn control_flow_and_macros_are_not_call_sites() {
+        let source = "pub fn guard(n: u32) {\n    if (n > 1) {\n        println!(\"{n}\");\n    }\n    match (n) {\n        _ => {}\n    }\n}\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert!(
+            named(&symbols, "guard").calls.is_empty(),
+            "unexpected calls: {:?}",
+            named(&symbols, "guard").calls
+        );
+    }
+
+    #[test]
+    fn calls_outside_any_declaration_are_dropped_rather_than_misattributed() {
+        let source = "pub fn first() {\n    ();\n}\ntop_level_call();\n";
+        let symbols = symbols_of(SourceLanguage::Rust, source);
+        assert!(named(&symbols, "first").calls.is_empty());
+    }
+
+    #[test]
+    fn method_calls_are_recorded_by_the_name_that_was_invoked() {
+        let source =
+            "export function handle() {\n  service.authenticate();\n  Session.create();\n}\n";
+        let symbols = symbols_of(SourceLanguage::TypeScript, source);
+        assert_eq!(
+            calls_of(&symbols, "handle"),
+            vec!["authenticate".to_string(), "create".to_string()]
+        );
+        // Both were reached through something, which is what stops them
+        // being matched against a unique name in an unrelated file.
+        assert!(named(&symbols, "handle")
+            .calls
+            .iter()
+            .all(|call| call.on_receiver));
+    }
+
+    #[test]
+    fn rust_records_the_trait_an_impl_block_satisfies() {
+        let source = "pub struct Sqlite;\nimpl Store for Sqlite {\n    fn open(&self) {}\n}\nimpl Sqlite {\n    fn helper(&self) {}\n}\n";
+        let implements = parse(SourceLanguage::Rust, source).unwrap().implements;
+        assert_eq!(implements.len(), 1, "{implements:#?}");
+        assert_eq!(implements[0].subject, "Sqlite");
+        assert_eq!(implements[0].object, "Store");
+    }
+
+    #[test]
+    fn rust_generic_impls_are_simplified_to_bare_names() {
+        let source = "impl<T> From<T> for Wrapper {\n}\n";
+        let implements = parse(SourceLanguage::Rust, source).unwrap().implements;
+        assert_eq!(implements[0].subject, "Wrapper");
+        assert_eq!(implements[0].object, "From");
+    }
+
+    #[test]
+    fn typescript_records_both_extends_and_implements() {
+        let source = "export class AuthService extends BaseService implements AuthProvider, Disposable {\n}\nexport interface Reader extends Closeable {\n}\n";
+        let implements = parse(SourceLanguage::TypeScript, source)
+            .unwrap()
+            .implements;
+        let pairs = implements
+            .iter()
+            .map(|relation| (relation.subject.as_str(), relation.object.as_str()))
+            .collect::<Vec<_>>();
+        assert!(pairs.contains(&("AuthService", "BaseService")), "{pairs:?}");
+        assert!(
+            pairs.contains(&("AuthService", "AuthProvider")),
+            "{pairs:?}"
+        );
+        assert!(pairs.contains(&("AuthService", "Disposable")), "{pairs:?}");
+        assert!(pairs.contains(&("Reader", "Closeable")), "{pairs:?}");
+    }
+
+    #[test]
+    fn python_records_base_classes_but_not_class_arguments() {
+        let source =
+            "class Wiki(Store, metaclass=Meta):\n    pass\nclass Plain(object):\n    pass\n";
+        let implements = parse(SourceLanguage::Python, source).unwrap().implements;
+        let pairs = implements
+            .iter()
+            .map(|relation| (relation.subject.as_str(), relation.object.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(pairs, vec![("Wiki", "Store")]);
+    }
+
+    #[test]
+    fn visibility_is_recorded_per_language() {
+        let rust = symbols_of(SourceLanguage::Rust, "pub fn open() {}\nfn hidden() {}\n");
+        assert!(named(&rust, "open").exported);
+        assert!(!named(&rust, "hidden").exported);
+
+        let typescript = symbols_of(
+            SourceLanguage::TypeScript,
+            "export function open() {}\nfunction hidden() {}\n",
+        );
+        assert!(named(&typescript, "open").exported);
+        assert!(!named(&typescript, "hidden").exported);
+
+        let python = symbols_of(
+            SourceLanguage::Python,
+            "def open():\n    pass\ndef _hidden():\n    pass\n",
+        );
+        assert!(named(&python, "open").exported);
+        assert!(!named(&python, "_hidden").exported);
+
+        let go = symbols_of(SourceLanguage::Go, "func Open() {}\nfunc hidden() {}\n");
+        assert!(named(&go, "Open").exported);
+        assert!(!named(&go, "hidden").exported);
+    }
+
+    #[test]
+    fn go_spans_and_calls_survive_method_receivers() {
+        let source = "func (s *Store) Open() {\n\tvalidate()\n}\nfunc validate() {}\n";
+        let symbols = symbols_of(SourceLanguage::Go, source);
+        let open = named(&symbols, "Open");
+        assert_eq!((open.line_start, open.line_end), (1, 3));
+        assert_eq!(calls_of(&symbols, "Open"), vec!["validate".to_string()]);
+        assert!(!open.calls[0].on_receiver);
+    }
 }

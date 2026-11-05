@@ -358,3 +358,179 @@ fn aggregate_status(resolutions: &[AnchorResolution]) -> NodeStatus {
         NodeStatus::Valid
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Evidence, EvidenceKind, KnowledgeNode, NodeType};
+
+    fn options() -> RepositoryScanOptions {
+        RepositoryScanOptions {
+            max_commits: 0,
+            ..RepositoryScanOptions::default()
+        }
+    }
+
+    #[test]
+    fn resolves_exact_symbol_and_fingerprint_outcomes() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = "export class OAuthCallback {\n  handle() {}\n}\n";
+        std::fs::write(dir.path().join("oauth.ts"), original).unwrap();
+        let exact = SourceAnchor::file("oauth.ts")
+            .with_symbol("OAuthCallback.handle")
+            .with_lines(2, 2)
+            .fingerprint("  handle() {}", original);
+        let relocator = AnchorRelocator::scan(dir.path(), options()).unwrap();
+        assert_eq!(
+            relocator.resolve(&exact).unwrap().resolution,
+            AnchorResolution::Exact
+        );
+
+        let changed = "// moved\nexport class OAuthCallback {\n  handle() { return; }\n}\n";
+        std::fs::write(dir.path().join("oauth.ts"), changed).unwrap();
+        let relocator = AnchorRelocator::scan(dir.path(), options()).unwrap();
+        let by_symbol = relocator.resolve(&exact).unwrap();
+        assert_eq!(by_symbol.resolution, AnchorResolution::RelocatedBySymbol);
+        assert_eq!(by_symbol.anchor.line_start, Some(3));
+
+        std::fs::write(dir.path().join("oauth.ts"), "// removed\n").unwrap();
+        std::fs::write(
+            dir.path().join("callback.ts"),
+            "const prefix = true;\n  handle() {}\n",
+        )
+        .unwrap();
+        let relocator = AnchorRelocator::scan(dir.path(), options()).unwrap();
+        let by_fingerprint = relocator.resolve(&exact).unwrap();
+        assert_eq!(
+            by_fingerprint.resolution,
+            AnchorResolution::RelocatedByFingerprint
+        );
+        assert_eq!(by_fingerprint.anchor.file, "callback.ts");
+        assert_eq!(by_fingerprint.anchor.line_start, Some(2));
+    }
+
+    #[test]
+    fn unresolved_and_escaping_anchors_fail_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("source.rs"), "fn replacement() {}\n").unwrap();
+        let relocator = AnchorRelocator::scan(dir.path(), options()).unwrap();
+        let stale = SourceAnchor::file("missing.rs")
+            .with_symbol("gone")
+            .with_lines(1, 1)
+            .fingerprint("fn gone() {}", "fn gone() {}\n");
+        assert_eq!(
+            relocator.resolve(&stale).unwrap().resolution,
+            AnchorResolution::Stale
+        );
+        let escaping = SourceAnchor::file("../outside.rs");
+        assert!(matches!(
+            relocator.resolve(&escaping),
+            Err(Error::InvalidValue {
+                field: "anchor file",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn an_incomplete_scan_never_turns_missing_search_results_into_staleness() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "fn b() {}\n").unwrap();
+        let relocator = AnchorRelocator::scan(
+            dir.path(),
+            RepositoryScanOptions {
+                max_files: 1,
+                max_commits: 0,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+        let anchor = SourceAnchor::file("missing.rs")
+            .with_symbol("moved")
+            .with_lines(1, 1)
+            .fingerprint("fn moved() {}", "fn moved() {}\n");
+        assert!(matches!(
+            relocator.resolve(&anchor),
+            Err(Error::IncompleteRepositoryScan { .. })
+        ));
+    }
+
+    #[test]
+    fn relocation_persists_new_anchors_and_updates_node_staleness() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = "export class Wiki {\n  open() {}\n}\n";
+        std::fs::write(dir.path().join("wiki.ts"), old).unwrap();
+        let anchor = SourceAnchor::file("wiki.ts")
+            .with_symbol("Wiki.open")
+            .with_lines(2, 2)
+            .fingerprint("  open() {}", old);
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(KnowledgeNode::new(NodeType::Fact, "Wiki opens nodes"))
+            .unwrap();
+        let evidence = store
+            .attach_evidence(
+                Evidence::new(node.id.clone(), EvidenceKind::Symbol).with_anchor(anchor),
+            )
+            .unwrap();
+
+        std::fs::write(
+            dir.path().join("wiki.ts"),
+            "export class Wiki {\n  open() { return true; }\n}\n",
+        )
+        .unwrap();
+        let report = AnchorRelocator::scan(dir.path(), options())
+            .unwrap()
+            .relocate_store(&mut store)
+            .unwrap();
+        assert_eq!(report.relocated_by_symbol, 1);
+        assert_eq!(store.get_node(&node.id).unwrap().status, NodeStatus::Stale);
+        assert_ne!(
+            store
+                .find_evidence(&evidence.id)
+                .unwrap()
+                .unwrap()
+                .anchor
+                .unwrap()
+                .region_hash,
+            evidence.anchor.unwrap().region_hash
+        );
+    }
+
+    #[test]
+    fn symbol_only_anchors_are_exact_and_enriched_when_the_symbol_has_not_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("wiki.ts"),
+            "export class Wiki {\n  open() {}\n}\n",
+        )
+        .unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let node = store
+            .create_node(KnowledgeNode::new(NodeType::Fact, "Wiki opens nodes"))
+            .unwrap();
+        let evidence = store
+            .attach_evidence(
+                Evidence::new(node.id.clone(), EvidenceKind::Symbol)
+                    .with_anchor(SourceAnchor::file("wiki.ts").with_symbol("Wiki.open")),
+            )
+            .unwrap();
+
+        let report = AnchorRelocator::scan(dir.path(), options())
+            .unwrap()
+            .relocate_store(&mut store)
+            .unwrap();
+        assert_eq!(report.exact, 1);
+        assert_eq!(store.get_node(&node.id).unwrap().status, NodeStatus::Valid);
+        let enriched = store
+            .find_evidence(&evidence.id)
+            .unwrap()
+            .unwrap()
+            .anchor
+            .unwrap();
+        assert_eq!(enriched.line_start, Some(2));
+        assert!(enriched.region_hash.is_some());
+        assert!(enriched.content_hash.is_some());
+    }
+}

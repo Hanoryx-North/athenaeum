@@ -205,59 +205,56 @@ mutations, like direct use of the service itself, happen immediately when invoke
 
 ## Work on Athenaeum itself
 
-Developer commands operate on the sibling source checkouts and delegate to their
-existing build tools. They do not create a separate product implementation.
-Discover the root from the working directory, set `WIKI_DEV_ROOT`, or pass
-`wiki dev --root /path/to/parent …`.
+Developer commands operate on components inside this source checkout. Discover
+its root from the working directory, set `WIKI_DEV_ROOT`, or pass
+`wiki dev --root /path/to/athenaeum …`. The old parent-root form is also accepted.
 
 ```sh
 wiki dev components --json
 wiki dev doctor --json
 wiki dev tasks --json
 wiki dev status
-wiki dev install cli,library,agent
-wiki dev build cli,library,admin --release
-wiki dev check cli,api
+wiki dev install
+wiki dev build protocol,integrations,cli,app
+wiki dev build agent
+wiki dev check cli,integrations
 wiki dev fmt cli
 wiki dev test cli
 wiki dev test --suite product-cli,product-engine
-wiki dev test --suite product-local-to-cloud -- --results sync-tests.json
-wiki dev serve api
-wiki dev serve library -- --host 127.0.0.1
+wiki dev test --suite native-agent-config,native-agent-smoke
+wiki dev serve app -- --host 127.0.0.1
 wiki dev serve desktop
-wiki dev run api reference:typecheck
+wiki dev run agent native:verify-source
 wiki dev --dry-run build all --release --json
 ```
 
 Components: `protocol`, `engine`, `cli`, `integrations`, `agent`, `app` (web
-frontend), `desktop` (native shell), `library`, `admin`, `api`, `validation`.
-Multiple names may be comma-separated or space-separated. Omitted targets mean
-`all`. Builds run in dependency order. `--release` applies to native Rust builds.
-The retired core and agent runtime are excluded. The Harness stays an upstream
-dependency; its normal setup requirements still apply.
+frontend), `desktop` (native shell), and `validation`. Comma-separated or multiple
+names are accepted; omitted targets mean `all`. There is one npm dependency
+installation and root lockfile. Builds run in dependency order. Agent builds
+compile the TypeScript adapter and the one source native runtime; `--release`
+optimizes native builds. The separate `athenaeum_core` repository is excluded.
+Hosted projects are not local build targets; the deployed Library client remains.
 
-`dev tasks` exposes package scripts directly from the checked-out manifests, so
-specialized scripts remain reachable through `dev run COMPONENT SCRIPT -- ARGS`.
-Native Rust components also support cargo build, fmt and clippy through the named
-commands. `dev fmt all` formats native workspaces and packages that declare a
-formatter; a component with no formatter is rejected when selected on its own.
-The validation component has no build artifact.
+`dev tasks` exposes each component's package scripts. Native runtime commands such
+as `native:build`, `native:check` and `native:verify-source` are available through
+`dev run agent SCRIPT`. The native source has an intentionally isolated manifest
+and pinned dependency graph, avoiding unrelated upstream workspace programs.
 
-`dev test` runs the central validation runner and treats skipped steps as failures.
-API selection also runs the production Rust API's own tests. Explicit `--suite`
-runs exactly the selected validation steps. Heavy optional suites such as desktop
-are selected explicitly. `dev test all` runs the runner's default suites and Rust
-API tests; use `--suite app-desktop` for the optional desktop build.
+`dev test` runs `validation/verify_all.py` against current sources and fails on
+skipped tests. Heavy platform/upstream runtime suites are explicit. Use
+`--suite app-desktop` for native desktop compilation and `--suite harness-runtime`
+with `DSH_REPO` for the optional upstream Harness test. Validation holds the product
+suite; unit tests live next to their owners. There is no scratch reconstruction
+from historical Git revisions.
 
-`--dry-run` prints the exact executable, argument array and working directory
-without running commands. `--json` keeps child logs on stderr and emits a final
-JSON report with exit codes and durations. A failed child stops the plan and
-returns nonzero. Servers run in the foreground with inherited Ctrl+C; omit
-`--json` for a running server. Nothing starts a background deployment or publishes
-a release on its own. Deployment scripts, if present, remain explicit `dev run` tasks.
+`--dry-run` prints executables, arguments and working directories without running
+them. `--json` puts child logs on stderr and returns a JSON execution report.
+Failures stop the plan. Development servers stay in the foreground; omit `--json`
+when starting one. These commands do not deploy or publish releases.
 
-Install `wiki` outside the checkout's build directory before using it to rebuild
-the CLI, particularly on Windows where a running executable cannot be replaced.
+Use an installed `wiki` or `cargo run` to rebuild the CLI on Windows, where a
+running executable cannot be replaced. See [the consolidation guide](consolidation.md).
 
 ## Completion and integration launchers
 

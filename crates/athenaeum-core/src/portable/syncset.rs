@@ -227,7 +227,10 @@ pub fn scan(root: &Path, limits: &SyncLimits) -> Result<SyncSet> {
         }
         if relative == MANIFEST_FILE {
             let manifest: RepositoryManifest = serde_json::from_slice(&bytes).map_err(|error| {
-                portable_error("invalid_content", format!("{MANIFEST_FILE} cannot sync: {error}"))
+                portable_error(
+                    "invalid_content",
+                    format!("{MANIFEST_FILE} cannot sync: {error}"),
+                )
             })?;
             if manifest.format_version != FORMAT_VERSION || !manifest.extra.is_empty() {
                 return Err(portable_error(
@@ -267,4 +270,74 @@ fn relative(root: &Path, path: &Path) -> Option<String> {
         out.push_str(part);
     }
     (!out.is_empty()).then_some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths_that_could_escape_the_repository_are_refused() {
+        for bad in [
+            "",
+            "/etc/passwd",
+            "../x.md",
+            "a/../b.md",
+            "a//b.md",
+            "./a.md",
+            "C:/x.md",
+            "a\\b.md",
+            "a/\u{7}b.md",
+            ".git/config.toml",
+            "wiki/.hidden.md",
+        ] {
+            assert!(validate_path(bad).is_err(), "{bad:?} should be refused");
+        }
+        assert!(validate_path("wiki/concepts/retry-policy.md").is_ok());
+    }
+
+    #[test]
+    fn only_text_files_outside_hidden_directories_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("wiki")).unwrap();
+        std::fs::create_dir_all(root.join(".athenaeum")).unwrap();
+        std::fs::create_dir_all(root.join("raw/sources")).unwrap();
+        std::fs::write(root.join("wiki/a.md"), "# A\n").unwrap();
+        std::fs::write(root.join(".athenaeum/knowledge.db.json"), "{}").unwrap();
+        std::fs::write(root.join("raw/sources/paper.pdf"), b"%PDF").unwrap();
+        std::fs::write(root.join("raw/sources/blob.md"), b"a\0b").unwrap();
+        std::fs::write(root.join("raw/sources/latin.txt"), [0xff, 0xfe]).unwrap();
+
+        let set = scan(root, &SyncLimits::default()).unwrap();
+        let paths: Vec<_> = set.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["wiki/a.md"]);
+        let skipped: Vec<_> = set.skipped.iter().map(|s| s.path.as_str()).collect();
+        assert!(skipped.contains(&"raw/sources/paper.pdf"));
+        assert!(skipped.contains(&"raw/sources/blob.md"));
+        assert!(skipped.contains(&"raw/sources/latin.txt"));
+        assert!(!skipped.iter().any(|p| p.starts_with(".athenaeum")));
+    }
+
+    #[test]
+    fn the_tree_hash_does_not_depend_on_input_order() {
+        let a = ManifestEntry {
+            path: "a.md".into(),
+            sha256: "1".into(),
+            size: 1,
+        };
+        let b = ManifestEntry {
+            path: "b.md".into(),
+            sha256: "2".into(),
+            size: 2,
+        };
+        assert_eq!(
+            tree_hash(&[a.clone(), b.clone()]),
+            tree_hash(&[b.clone(), a.clone()])
+        );
+        assert_eq!(
+            canonical_manifest(&[b, a]),
+            r#"[{"path":"a.md","sha256":"1","size":1},{"path":"b.md","sha256":"2","size":2}]"#
+        );
+    }
 }

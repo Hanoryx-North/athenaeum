@@ -34,7 +34,7 @@ pub struct StartArgs {
 
 pub fn run(json_out: bool, cwd: &Path, args: &StartArgs) -> Result<Outcome> {
     let root = dev_cmd::root(cwd, args.root.as_deref())?;
-    let repo = root.join("athenaeum");
+    let repo = root.clone();
     if args.dev {
         if json_out && !args.dry_run {
             return Err(portable_error(

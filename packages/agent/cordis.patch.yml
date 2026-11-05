@@ -1,0 +1,47 @@
+# The athenaeum-agent bundle: the knowledge capability seam and its two consumers.
+#
+# Every row is patchable from a profile's own cordis.patch.yml. The two a deployment
+# usually sets are the provider's `workspace` (which knowledge base) and the tools'
+# `curation` (whether the model may write to it).
+
+- insert:
+    # Service Definition. Mounting this alone leaves the agent working exactly as it does
+    # with no knowledge layer at all: the seam simply has no usable provider.
+    - id: wiki
+      name: 'athenaeum-agent/wiki'
+
+    # Service Provider. `workspace` defaults to the runtime's working directory.
+    - id: wiki-athenaeum
+      name: 'athenaeum-agent/wiki-athenaeum'
+      config:
+        command: athenaeum
+
+    # Consumer: the model-facing wiki_* tools. Curation is ON here: the model may propose and
+    # attach evidence, and every proposal is attributed to `curatorModel`. Nothing here accepts
+    # one — acceptance is a person's review in Athenaeum, and the tools offer no way around it.
+    # A profile that wants read-only memory sets `curation: false` in its own patch.
+    - id: tool-wiki
+      name: 'athenaeum-agent/tool-wiki'
+      config:
+        read: true
+        curation: true
+        curatorModel: harness-agent
+
+    # Consumer: the knowledge brief that opens a task, and the utility report that closes it.
+    - id: wiki-context
+      name: 'athenaeum-agent/wiki-context'
+      config:
+        recordUse: true
+
+    # The Wiki Agent role: the primary agent delegates knowledge discovery to a child agent
+    # that runs on its own model route with only the wiki_* read tools. Left unconfigured, the
+    # child inherits a compatible parent route; a profile sets `modelProvider` and `model` to
+    # make knowledge discovery cheaper than the task itself. On a profile whose base bundle
+    # mounts no delegation seam, this row simply never applies.
+    - id: wiki-agent
+      name: 'athenaeum-agent/wiki-agent'
+      config:
+        enabled: true
+        toolName: wiki_agent
+        provider: spawn
+        maxDepth: 0

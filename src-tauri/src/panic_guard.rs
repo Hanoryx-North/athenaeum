@@ -46,3 +46,34 @@ fn report(label: &str, payload: Box<dyn Any + Send>) -> String {
     eprintln!("[panic_guard] {label} panicked: {message}");
     format!("{label} failed: {message}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panic_becomes_an_error_naming_the_command() {
+        let result: Result<(), String> = run_guarded("do_thing", || panic!("boom"));
+        let message = result.unwrap_err();
+        assert!(message.contains("do_thing"), "got {message}");
+        assert!(message.contains("boom"), "got {message}");
+    }
+
+    #[test]
+    fn success_passes_straight_through() {
+        let result = run_guarded("do_thing", || Ok(7));
+        assert_eq!(result, Ok(7));
+    }
+
+    #[tokio::test]
+    async fn an_async_panic_after_an_await_point_becomes_an_error() {
+        let result: Result<(), String> = run_guarded_async("do_thing", async {
+            tokio::task::yield_now().await;
+            panic!("boom");
+        })
+        .await;
+        let message = result.unwrap_err();
+        assert!(message.contains("do_thing"), "got {message}");
+        assert!(message.contains("boom"), "got {message}");
+    }
+}

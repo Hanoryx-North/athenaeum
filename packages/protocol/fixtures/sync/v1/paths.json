@@ -1,0 +1,79 @@
+{
+  "valid": [
+    "wiki/concepts/retry-policy.md",
+    "athenaeum.json",
+    "wiki/café.md",
+    "wiki/日本語.md",
+    "wiki/x-y_z.1.md"
+  ],
+  "invalid": [
+    {
+      "path": "",
+      "why": "empty"
+    },
+    {
+      "path": "/etc/passwd.md",
+      "why": "absolute"
+    },
+    {
+      "path": "../x.md",
+      "why": "dot-dot"
+    },
+    {
+      "path": "a/../b.md",
+      "why": "dot-dot"
+    },
+    {
+      "path": "a/./b.md",
+      "why": "dot"
+    },
+    {
+      "path": "a//b.md",
+      "why": "empty segment"
+    },
+    {
+      "path": "a/b/",
+      "why": "empty segment"
+    },
+    {
+      "path": "C:/x.md",
+      "why": "drive letter"
+    },
+    {
+      "path": "c:x.md",
+      "why": "drive letter"
+    },
+    {
+      "path": "a\\b.md",
+      "why": "backslash"
+    },
+    {
+      "path": "wiki/\u0007.md",
+      "why": "control"
+    },
+    {
+      "path": "wiki/.md",
+      "why": "control"
+    },
+    {
+      "path": "wiki/.md",
+      "why": "control"
+    },
+    {
+      "path": ".git/config.toml",
+      "why": "hidden"
+    },
+    {
+      "path": "wiki/.hidden.md",
+      "why": "hidden"
+    },
+    {
+      "path": "a/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.md",
+      "why": "segment too long"
+    },
+    {
+      "path": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.md",
+      "why": "path too long"
+    }
+  ]
+}

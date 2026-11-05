@@ -1065,3 +1065,111 @@ pub async fn extract_and_save_office_images_cmd(
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_media_path_recognizes_pptx_docx_xlsx() {
+        assert!(is_media_path("ppt/media/image1.png"));
+        assert!(is_media_path("word/media/image2.jpeg"));
+        assert!(is_media_path("xl/media/image3.gif"));
+        assert!(!is_media_path("ppt/slides/slide1.xml"));
+        assert!(!is_media_path("word/document.xml"));
+        assert!(!is_media_path("docProps/thumbnail.jpeg"));
+    }
+
+    #[test]
+    fn guess_mime_from_name_covers_common_formats() {
+        assert_eq!(
+            guess_mime_from_name("ppt/media/image1.PNG"),
+            Some("image/png".to_string())
+        );
+        assert_eq!(
+            guess_mime_from_name("word/media/image2.jpeg"),
+            Some("image/jpeg".to_string())
+        );
+        assert_eq!(
+            guess_mime_from_name("ppt/media/image3.jpg"),
+            Some("image/jpeg".to_string())
+        );
+        // Vector formats deliberately rejected — we don't rasterize
+        // SVG/EMF/WMF in this phase, surfacing them as strings would
+        // mislead the caption pipeline.
+        assert_eq!(guess_mime_from_name("ppt/media/foo.svg"), None);
+        assert_eq!(guess_mime_from_name("ppt/media/foo.emf"), None);
+    }
+
+    #[test]
+    fn sha256_hex_is_deterministic_and_64_chars() {
+        let h1 = sha256_hex(b"hello world");
+        let h2 = sha256_hex(b"hello world");
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 64);
+        // Known SHA-256 of "hello world".
+        assert_eq!(
+            h1,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn extract_options_defaults_match_plan() {
+        // Plan documents 100×100 / 500 as the v1 defaults. Pinning
+        // these here so a casual change is visible.
+        let o = ExtractOptions::default();
+        assert_eq!(o.min_width, 100);
+        assert_eq!(o.min_height, 100);
+        assert_eq!(o.max_images, 500);
+        assert!(o.skip_full_page_images);
+        assert_eq!(o.full_page_coverage_ratio, 0.90);
+        assert_eq!(o.full_page_min_text_chars, 80);
+    }
+
+    #[test]
+    fn full_page_image_bounds_detects_page_scans() {
+        assert!(is_full_page_image_bounds(
+            900.0, 900.0, 1000.0, 1000.0, 0.90
+        ));
+        assert!(is_full_page_image_bounds(
+            950.0, 910.0, 1000.0, 1000.0, 0.90
+        ));
+        assert!(!is_full_page_image_bounds(
+            899.0, 1000.0, 1000.0, 1000.0, 0.90
+        ));
+        assert!(!is_full_page_image_bounds(
+            1000.0, 899.0, 1000.0, 1000.0, 0.90
+        ));
+        assert!(!is_full_page_image_bounds(
+            400.0, 300.0, 1000.0, 1000.0, 0.90
+        ));
+        assert!(!is_full_page_image_bounds(900.0, 900.0, 0.0, 1000.0, 0.90));
+        assert!(is_full_page_image_bounds(500.0, 500.0, 1000.0, 1000.0, 0.0));
+        assert!(is_full_page_image_bounds(
+            500.0, 500.0, 1000.0, 1000.0, -1.0
+        ));
+        assert!(!is_full_page_image_bounds(
+            999.0, 1000.0, 1000.0, 1000.0, 1.5
+        ));
+    }
+
+    #[test]
+    fn meaningful_page_text_ignores_short_stamp_layers() {
+        assert!(!has_meaningful_page_text(" 12 \n", 80));
+        assert!(!has_meaningful_page_text("confidential watermark", 80));
+        assert!(has_meaningful_page_text(
+            "This page has enough extracted words to be treated as a real text page rather than a scanned page with only a short OCR stamp.",
+            80
+        ));
+    }
+
+    #[test]
+    fn full_page_skip_decision_requires_all_conditions() {
+        assert!(should_skip_full_page_image_decision(true, true, true));
+        assert!(!should_skip_full_page_image_decision(false, true, true));
+        assert!(!should_skip_full_page_image_decision(true, false, true));
+        assert!(!should_skip_full_page_image_decision(true, true, false));
+        assert!(!should_skip_full_page_image_decision(false, false, false));
+    }
+}

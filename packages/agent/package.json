@@ -1,0 +1,93 @@
+{
+  "name": "athenaeum-agent",
+  "version": "0.1.0",
+  "description": "The Athenaeum agent layer: a DeepSeek Harness bundle that gives a coding agent the Athenaeum knowledge library as a capability seam",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./protocol": {
+      "types": "./lib/types/protocol/index.d.ts",
+      "default": "./lib/protocol/index.js"
+    },
+    "./wiki": {
+      "types": "./lib/types/wiki/index.d.ts",
+      "default": "./lib/wiki/index.js"
+    },
+    "./wiki-athenaeum": {
+      "types": "./lib/types/wiki-athenaeum/index.d.ts",
+      "default": "./lib/wiki-athenaeum/index.js"
+    },
+    "./tool-wiki": {
+      "types": "./lib/types/tool-wiki/index.d.ts",
+      "default": "./lib/tool-wiki/index.js"
+    },
+    "./wiki-context": {
+      "types": "./lib/types/wiki-context/index.d.ts",
+      "default": "./lib/wiki-context/index.js"
+    },
+    "./wiki-agent": {
+      "types": "./lib/types/wiki-agent/index.d.ts",
+      "default": "./lib/wiki-agent/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./profile/cordis.patch.yml": "./profile/cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "profile/cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run build && npm test && npm run native:verify-source",
+    "native:build": "node runtime/manage.mjs build",
+    "native:check": "node runtime/manage.mjs check",
+    "native:start": "node runtime/manage.mjs run",
+    "native:verify-source": "python runtime/verify_source.py"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.5-alpha.1",
+    "@deepseek-ai/dsh-agent": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-session": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-subagent": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tools": "0.2.1-alpha.1",
+    "@deepseek-ai/schemastery": "3.18.5-alpha.1"
+  },
+  "dependencies": {
+    "@athenaeum/protocol": "file:../protocol"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5-alpha.1",
+    "@deepseek-ai/dsh-agent": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-llm": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-session": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tool-subagent": "0.2.1-alpha.1",
+    "@deepseek-ai/dsh-tools": "0.2.1-alpha.1",
+    "@deepseek-ai/schemastery": "3.18.5-alpha.1",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.4",
+    "vite-tsconfig-paths": "^5.1.4"
+  }
+}

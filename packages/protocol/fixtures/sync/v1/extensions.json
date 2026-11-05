@@ -1,0 +1,18 @@
+{
+  "allowed": ["wiki/a.md", "wiki/concepts/a.md", "athenaeum.json"],
+  "refused": [
+    { "path": "wiki/UPPER.MD", "why": "wiki Markdown extension is lowercase" },
+    { "path": "README.md", "why": "root Markdown is local" },
+    { "path": "index.md", "why": "root Markdown is local" },
+    { "path": "raw/sources/notes.txt", "why": "raw sources stay local" },
+    { "path": "notes.txt", "why": "only wiki pages sync" },
+    { "path": "wiki/data.json", "why": "wiki pages are Markdown" },
+    { "path": "wiki/athenaeum.json", "why": "identity manifest is root only" },
+    { "path": "wiki/image.png", "why": "not text" },
+    { "path": "wiki/noextension", "why": "no extension" },
+    { "path": "wiki/archive.md.zip", "why": "last extension counts" },
+    { "path": "dir.md/file", "why": "extension of a directory is not the file's" },
+    { "path": "wiki/script.sh", "why": "not text" },
+    { "path": ".athenaeum/knowledge.md", "why": "dot-directory is never stored" }
+  ]
+}

@@ -207,3 +207,199 @@ fn marks_of(detail: Option<&str>) -> (Option<String>, Option<String>) {
         (!declared.is_empty()).then(|| declared.to_string()),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{KnowledgeEdge, KnowledgeNode, Provenance};
+    use crate::vault::{VaultIndexer, VaultScanOptions};
+
+    fn write(root: &std::path::Path, relative: &str, content: &str) {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn indexed_vault() -> (tempfile::TempDir, KnowledgeStore) {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "wiki/concepts/chain-of-thought.md",
+            "---\ntype: concept\ntitle: Chain of Thought\nsources: [\"wei.pdf\"]\n---\n\n# Chain of Thought\n\nLinks to [[openai]].\n",
+        );
+        write(
+            dir.path(),
+            "wiki/entities/openai.md",
+            "---\ntype: entity\ntitle: OpenAI\n---\n\n# OpenAI\n",
+        );
+        write(
+            dir.path(),
+            "wiki/queries/does-it-scale.md",
+            "# Does it scale\n",
+        );
+        write(dir.path(), "raw/sources/wei.pdf", "%PDF");
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        VaultIndexer::scan_and_index(&mut store, dir.path(), VaultScanOptions::default()).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn nodes_keep_the_vaults_own_vocabulary_and_their_paths() {
+        let (_dir, store) = indexed_vault();
+        let graph = project(&store).unwrap();
+
+        let cot = graph
+            .nodes
+            .iter()
+            .find(|node| node.title == "Chain of Thought")
+            .unwrap();
+        assert_eq!(cot.kind, "concept");
+        assert_eq!(cot.node_type, NodeType::Concept);
+        assert_eq!(
+            cot.path.as_deref(),
+            Some("wiki/concepts/chain-of-thought.md")
+        );
+        assert_eq!(cot.origin, GraphOrigin::Page);
+
+        // `query` has no equivalent in the knowledge model's vocabulary and
+        // reduces to an observation there — but the view still sees the
+        // distinction the user made.
+        let query = graph
+            .nodes
+            .iter()
+            .find(|node| node.title == "Does it scale")
+            .unwrap();
+        assert_eq!(query.kind, "query");
+        assert_eq!(query.node_type, NodeType::Observation);
+
+        let source = graph
+            .nodes
+            .iter()
+            .find(|node| node.title == "wei.pdf")
+            .unwrap();
+        assert_eq!(source.origin, GraphOrigin::Source);
+        assert_eq!(source.path.as_deref(), Some("raw/sources/wei.pdf"));
+    }
+
+    #[test]
+    fn a_page_says_where_it_came_from() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            "wiki/queries/what-scales.md",
+            "---\ntype: query\ntitle: What scales\norigin: deep-research\n---\n\n# What scales\n",
+        );
+        write(
+            dir.path(),
+            "wiki/concepts/plain.md",
+            "---\ntype: concept\ntitle: Plain\n---\n\n# Plain\n",
+        );
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        VaultIndexer::scan_and_index(&mut store, dir.path(), VaultScanOptions::default()).unwrap();
+
+        let graph = project(&store).unwrap();
+        let researched = graph
+            .nodes
+            .iter()
+            .find(|n| n.title == "What scales")
+            .unwrap();
+        assert_eq!(researched.kind, "query");
+        assert_eq!(researched.declared_origin.as_deref(), Some("deep-research"));
+
+        let plain = graph.nodes.iter().find(|n| n.title == "Plain").unwrap();
+        assert_eq!(plain.kind, "concept");
+        assert_eq!(plain.declared_origin, None);
+    }
+
+    #[test]
+    fn edges_carry_their_type_and_whether_a_model_proposed_them() {
+        let (_dir, mut store) = indexed_vault();
+        let curated = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Use SQLite")
+                    .with_provenance(Provenance::user()),
+            )
+            .unwrap();
+        let cot = project(&store)
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| node.title == "Chain of Thought")
+            .unwrap();
+        store
+            .connect(
+                KnowledgeEdge::new(curated.id.clone(), EdgeType::RelatedTo, cot.id.clone())
+                    .with_provenance(Provenance::model("some-model")),
+            )
+            .unwrap();
+
+        let graph = project(&store).unwrap();
+        let derived = graph
+            .edges
+            .iter()
+            .find(|edge| edge.edge_type == EdgeType::References)
+            .unwrap();
+        assert!(derived.deterministic);
+
+        let proposed = graph
+            .edges
+            .iter()
+            .find(|edge| edge.from == curated.id)
+            .expect("a proposal is drawn so it can be reviewed in the graph");
+        assert!(!proposed.deterministic);
+
+        // Knowledge that is not a file is in the same graph — that is the
+        // point of there being one model rather than two.
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == curated.id)
+            .unwrap();
+        assert_eq!(node.origin, GraphOrigin::Curated);
+        assert_eq!(node.kind, "decision");
+        assert_eq!(node.path, None);
+    }
+
+    #[test]
+    fn link_counts_include_both_directions() {
+        let (_dir, store) = indexed_vault();
+        let graph = project(&store).unwrap();
+        let openai = graph.nodes.iter().find(|n| n.title == "OpenAI").unwrap();
+        // Linked from chain-of-thought and nowhere else.
+        assert_eq!(openai.link_count, 1);
+        let orphan = graph
+            .nodes
+            .iter()
+            .find(|n| n.title == "Does it scale")
+            .unwrap();
+        assert_eq!(orphan.link_count, 0);
+    }
+
+    #[test]
+    fn archived_knowledge_is_kept_but_not_drawn() {
+        let (_dir, mut store) = indexed_vault();
+        let openai = project(&store)
+            .unwrap()
+            .nodes
+            .into_iter()
+            .find(|node| node.title == "OpenAI")
+            .unwrap();
+        store
+            .set_node_status(&openai.id, NodeStatus::Archived)
+            .unwrap();
+
+        let graph = project(&store).unwrap();
+        assert!(!graph.nodes.iter().any(|node| node.id == openai.id));
+        // And no edge is left dangling into it.
+        assert!(!graph
+            .edges
+            .iter()
+            .any(|edge| edge.to == openai.id || edge.from == openai.id));
+    }
+
+    #[test]
+    fn an_empty_store_projects_an_empty_graph() {
+        let store = KnowledgeStore::open_in_memory().unwrap();
+        assert_eq!(project(&store).unwrap(), KnowledgeGraph::default());
+    }
+}

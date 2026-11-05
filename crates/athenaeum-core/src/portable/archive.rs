@@ -163,8 +163,9 @@ pub fn import(archive: &Path, destination: &Path) -> Result<ImportReport> {
     }
 
     let file = std::fs::File::open(archive)?;
-    let mut zip = zip::ZipArchive::new(file)
-        .map_err(|error| portable_error("invalid_request", format!("not a zip archive: {error}")))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|error| {
+        portable_error("invalid_request", format!("not a zip archive: {error}"))
+    })?;
     if zip.len() > MAX_ENTRIES {
         return Err(portable_error(
             "limit_exceeded",
@@ -197,7 +198,9 @@ pub fn import(archive: &Path, destination: &Path) -> Result<ImportReport> {
             ));
         }
         let mut bytes = Vec::with_capacity(member.size() as usize);
-        (&mut member).take(MAX_MEMBER_BYTES + 1).read_to_end(&mut bytes)?;
+        (&mut member)
+            .take(MAX_MEMBER_BYTES + 1)
+            .read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_MEMBER_BYTES {
             return Err(unsafe_member(&name, "it is larger than the member limit"));
         }
@@ -210,18 +213,25 @@ pub fn import(archive: &Path, destination: &Path) -> Result<ImportReport> {
         .remove(ARCHIVE_MANIFEST)
         .ok_or_else(|| portable_error("invalid_request", "the archive has no MANIFEST.json"))?;
     let manifest: ArchiveManifest = serde_json::from_slice(&manifest_bytes).map_err(|error| {
-        portable_error("invalid_request", format!("MANIFEST.json is not valid: {error}"))
+        portable_error(
+            "invalid_request",
+            format!("MANIFEST.json is not valid: {error}"),
+        )
     })?;
     if manifest.format_version > 1 {
         return Err(portable_error(
             "unsupported_format",
-            format!("the archive is format {}; this build reads 1", manifest.format_version),
+            format!(
+                "the archive is format {}; this build reads 1",
+                manifest.format_version
+            ),
         ));
     }
 
     let listed: BTreeSet<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
     for entry in &manifest.files {
-        syncset::validate_path(&entry.path).map_err(|reason| unsafe_member(&entry.path, &reason))?;
+        syncset::validate_path(&entry.path)
+            .map_err(|reason| unsafe_member(&entry.path, &reason))?;
         let bytes = members.get(&entry.path).ok_or_else(|| {
             portable_error(
                 "invalid_request",
@@ -247,7 +257,10 @@ pub fn import(archive: &Path, destination: &Path) -> Result<ImportReport> {
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty());
     let parent = parent.unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
-    let staging: PathBuf = parent.join(format!(".athenaeum-import-{}", uuid::Uuid::new_v4().simple()));
+    let staging: PathBuf = parent.join(format!(
+        ".athenaeum-import-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
     let written = (|| -> Result<()> {
         for (path, bytes) in &members {
             write_atomic(&staging.join(path), bytes)?;
@@ -298,4 +311,140 @@ fn unsafe_member(name: &str, reason: &str) -> crate::error::Error {
 
 fn zip_error(error: zip::result::ZipError) -> crate::error::Error {
     portable_error("invalid_request", format!("zip: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(root: &Path) {
+        std::fs::create_dir_all(root.join("wiki")).unwrap();
+        std::fs::create_dir_all(root.join("raw/sources")).unwrap();
+        std::fs::create_dir_all(root.join(".athenaeum")).unwrap();
+        std::fs::write(root.join("wiki/a.md"), "---\nid: A_1\n---\n# A\n").unwrap();
+        std::fs::write(root.join("raw/sources/p.pdf"), b"%PDF-1.4 binary \x00\x01").unwrap();
+        std::fs::write(root.join(".athenaeum/knowledge.db"), b"secret index").unwrap();
+        RepositoryManifest::new("sample").write(root).unwrap();
+    }
+
+    #[test]
+    fn a_round_trip_preserves_text_binaries_and_identity_but_not_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        sample(&source);
+        let zip = dir.path().join("out.zip");
+        let exported = export(&source, &zip).unwrap();
+        assert_eq!(exported.files, 3);
+
+        let target = dir.path().join("target");
+        let imported = import(&zip, &target).unwrap();
+        assert_eq!(imported.repository_id, exported.repository_id.unwrap());
+        assert_eq!(
+            std::fs::read(target.join("wiki/a.md")).unwrap(),
+            std::fs::read(source.join("wiki/a.md")).unwrap()
+        );
+        assert!(target.join("raw/sources/p.pdf").exists());
+        assert!(!target.join(".athenaeum/knowledge.db").exists());
+    }
+
+    #[test]
+    fn imported_pages_are_recorded_as_arrivals() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        sample(&source);
+        let zip = dir.path().join("out.zip");
+        export(&source, &zip).unwrap();
+        let target = dir.path().join("target");
+        let report = import(&zip, &target).unwrap();
+        assert_eq!(report.capped_files, 1);
+        let ledger = TrustLedger::load(&target).unwrap();
+        let hash = sha256_hex(&std::fs::read(target.join("wiki/a.md")).unwrap());
+        assert!(ledger.caps("wiki/a.md", &hash));
+    }
+
+    #[test]
+    fn import_never_overwrites_an_existing_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source");
+        sample(&source);
+        let zip = dir.path().join("out.zip");
+        export(&source, &zip).unwrap();
+        let error = import(&zip, &source).unwrap_err();
+        assert!(error.to_string().contains("never overwrites"), "{error}");
+    }
+
+    fn zip_with(path: &Path, members: &[(&str, &[u8])]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, bytes) in members {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn hostile_archives_are_refused_and_leave_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let hash = sha256_hex(b"x");
+        let listing = |path: &str| {
+            format!(
+                r#"{{"formatVersion":1,"files":[{{"path":{path:?},"sha256":"{hash}","size":1}}]}}"#
+            )
+        };
+        for (index, bad) in [
+            "../escape.md",
+            "/abs.md",
+            "a/../../b.md",
+            "wiki\\x.md",
+            ".athenaeum/x.md",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let zip = dir.path().join(format!("bad{index}.zip"));
+            zip_with(
+                &zip,
+                &[(ARCHIVE_MANIFEST, listing(bad).as_bytes()), (bad, b"x")],
+            );
+            let target = dir.path().join(format!("t{index}"));
+            assert!(import(&zip, &target).is_err(), "{bad} should be refused");
+            assert!(!target.exists());
+        }
+    }
+
+    #[test]
+    fn a_tampered_member_fails_its_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let hash = sha256_hex(b"original");
+        let listing = format!(
+            r#"{{"formatVersion":1,"files":[{{"path":"wiki/a.md","sha256":"{hash}","size":8}}]}}"#
+        );
+        let zip = dir.path().join("t.zip");
+        zip_with(
+            &zip,
+            &[
+                (ARCHIVE_MANIFEST, listing.as_bytes()),
+                ("wiki/a.md", b"tampered"),
+            ],
+        );
+        let error = import(&zip, &dir.path().join("t")).unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_member_the_manifest_does_not_list_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip = dir.path().join("t.zip");
+        zip_with(
+            &zip,
+            &[
+                (ARCHIVE_MANIFEST, br#"{"formatVersion":1,"files":[]}"#),
+                ("wiki/smuggled.md", b"authority: user_instruction"),
+            ],
+        );
+        let error = import(&zip, &dir.path().join("t")).unwrap_err();
+        assert!(error.to_string().contains("not listed"), "{error}");
+    }
 }

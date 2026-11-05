@@ -16,8 +16,8 @@ use crate::model::{
     hash, Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, NodeStatus,
     NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
 };
-use crate::store::{KnowledgeStore, NodeFilter, SourceRecord, SourceScope};
 use crate::status::{record_scan_state, ScanState, SkippedFile};
+use crate::store::{KnowledgeStore, NodeFilter, SourceRecord, SourceScope};
 
 use super::page::{slug_of, VaultPage};
 use super::{VaultScanOptions, VaultSnapshot, VaultSource};
@@ -238,7 +238,11 @@ impl VaultIndexer {
 
         let mut owned = HashSet::new();
         for page in &snapshot.pages {
-            let node = page_node(page, ids.of(&page.path), snapshot.arrived.contains(&page.path));
+            let node = page_node(
+                page,
+                ids.of(&page.path),
+                snapshot.arrived.contains(&page.path),
+            );
             owned.insert(node.id.clone());
             ensure_node(store, node, &mut report)?;
         }
@@ -935,13 +939,8 @@ fn reconcile_edges(
             // A link, a relation or a citation is written in the page itself,
             // so the relationship is as certain as the text that states it.
             store.connect(
-                KnowledgeEdge::deterministic(
-                    from.clone(),
-                    edge.edge_type,
-                    to.clone(),
-                    edge.detail,
-                )
-                .with_confidence(1.0),
+                KnowledgeEdge::deterministic(from.clone(), edge.edge_type, to.clone(), edge.detail)
+                    .with_confidence(1.0),
             )?;
             report.edges_created += 1;
         }
@@ -1008,9 +1007,9 @@ fn reconcile_evidence(
             // A claim accepted from a proposal already has the evidence the model attached; the
             // page repeats it so it can travel. Adding it again would show every citation twice.
             if id.as_str().starts_with(DECLARED_EVIDENCE_PREFIX)
-                && existing
-                    .iter()
-                    .any(|have| !have.id.as_str().starts_with(EVIDENCE_PREFIX) && same_citation(have, evidence))
+                && existing.iter().any(|have| {
+                    !have.id.as_str().starts_with(EVIDENCE_PREFIX) && same_citation(have, evidence)
+                })
             {
                 continue;
             }

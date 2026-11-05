@@ -367,6 +367,12 @@ pub fn unlink(store: &mut KnowledgeStore, id: &crate::id::EdgeId) -> Result<()> 
 /// Explicit page-to-page links are canonical Markdown, including links made by
 /// connected agents. Re-indexing, export and sync must all retain them.
 pub fn link_pages(store: &mut KnowledgeStore, edge: KnowledgeEdge) -> Result<KnowledgeEdge> {
+    if edge.from == edge.to {
+        return Err(portable_error(
+            "invalid_request",
+            "A saved page cannot link to itself",
+        ));
+    }
     let project = require_project(store)?;
     let _lock = RepoLock::acquire(store.root(), "vault")?;
     let from = store.get_node(&edge.from)?;
@@ -945,4 +951,176 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
         });
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Authority, NodeType, Provenance};
+    use crate::store::EdgeFilter;
+    use crate::vault::VaultIndexer;
+
+    struct Project {
+        _dir: tempfile::TempDir,
+        root: std::path::PathBuf,
+        store: KnowledgeStore,
+    }
+
+    fn project() -> Project {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let workspace = crate::workspace::Workspace::init(&root).unwrap();
+        let store = workspace.open().unwrap();
+        Project {
+            _dir: dir,
+            root,
+            store,
+        }
+    }
+
+    fn propose(p: &mut Project, title: &str) -> KnowledgeNode {
+        p.store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, title)
+                    .with_summary("Retries are capped at three.")
+                    .with_content("Retries are capped at three because the queue backs off.")
+                    .with_provenance(Provenance::model("curator").with_session("sess_1".into())),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn an_accepted_proposal_survives_deleting_the_database() {
+        let mut p = project();
+        let node = propose(&mut p, "Retry budget is three");
+        assert_eq!(proposals(&p.store, None).unwrap().len(), 1);
+
+        let accepted = accept(&mut p.store, &node.id, "user").unwrap();
+        assert!(accepted
+            .page
+            .path
+            .starts_with("wiki/decisions/retry-budget-is-three"));
+        assert!(proposals(&p.store, None).unwrap().is_empty());
+
+        // The text is on disk with the node's id declared and its authority unchanged.
+        let text = std::fs::read_to_string(p.root.join(&accepted.page.path)).unwrap();
+        assert!(text.contains(&format!("id: {}", node.id)), "{text}");
+        assert!(text.contains("authority: unverified_observation"), "{text}");
+        assert!(text.contains("origin: agent-proposal"), "{text}");
+
+        // Delete the index entirely and rebuild it from the vault.
+        drop(p.store);
+        std::fs::remove_file(p.root.join(".athenaeum/knowledge.db")).unwrap();
+        let mut rebuilt = crate::workspace::Workspace::at(p.root.join(".athenaeum"))
+            .open()
+            .unwrap();
+        VaultIndexer::scan_and_index(&mut rebuilt, &p.root, VaultScanOptions::default()).unwrap();
+        let back = rebuilt.get_node(&node.id).unwrap();
+        assert_eq!(back.title, "Retry budget is three");
+        assert_eq!(back.authority, Authority::UnverifiedObservation);
+        assert_eq!(back.node_type, NodeType::Decision);
+    }
+
+    #[test]
+    fn a_rejected_proposal_is_not_offered_again_and_writes_nothing() {
+        let mut p = project();
+        let node = propose(&mut p, "Probably nothing");
+        reject(&mut p.store, &node.id, Some("noise"), "user").unwrap();
+        assert!(proposals(&p.store, None).unwrap().is_empty());
+        assert!(!p.root.join("wiki").exists());
+        let error = accept(&mut p.store, &node.id, "user").unwrap_err();
+        assert!(error.to_string().contains("rejected"), "{error}");
+    }
+
+    #[test]
+    fn accepting_twice_writes_one_page() {
+        let mut p = project();
+        let node = propose(&mut p, "Idempotent");
+        let first = accept(&mut p.store, &node.id, "user").unwrap();
+        let second = accept(&mut p.store, &node.id, "user").unwrap();
+        assert!(second.already_accepted);
+        assert_eq!(first.page.path, second.page.path);
+        assert_eq!(
+            std::fs::read_dir(p.root.join("wiki/decisions"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn relationships_to_pages_travel_with_the_page() {
+        let mut p = project();
+        let target = propose(&mut p, "Queue backs off");
+        accept(&mut p.store, &target.id, "user").unwrap();
+        let node = propose(&mut p, "Retry budget is three");
+        let target = p.store.get_node(&target.id).unwrap();
+        p.store
+            .connect(
+                KnowledgeEdge::new(node.id.clone(), EdgeType::DependsOn, target.id.clone())
+                    .with_provenance(Provenance::model("curator")),
+            )
+            .unwrap();
+        let accepted = accept(&mut p.store, &node.id, "user").unwrap();
+        assert_eq!(accepted.relationships_written, 1);
+        let text = std::fs::read_to_string(p.root.join(&accepted.page.path)).unwrap();
+        assert!(
+            text.contains("depends_on [[wiki/decisions/queue-backs-off]]"),
+            "{text}"
+        );
+
+        // Rebuilt from text alone, the typed edge is back and traversable.
+        drop(p.store);
+        std::fs::remove_file(p.root.join(".athenaeum/knowledge.db")).unwrap();
+        let mut rebuilt = crate::workspace::Workspace::at(p.root.join(".athenaeum"))
+            .open()
+            .unwrap();
+        VaultIndexer::scan_and_index(&mut rebuilt, &p.root, VaultScanOptions::default()).unwrap();
+        let edges = rebuilt
+            .neighbors(&node.id, &EdgeFilter::traversable())
+            .unwrap();
+        assert!(edges
+            .iter()
+            .any(|n| n.edge_type == EdgeType::DependsOn && n.node == target.id));
+    }
+
+    #[test]
+    fn a_title_with_hostile_characters_cannot_escape_the_vault() {
+        let mut p = project();
+        let node = propose(
+            &mut p,
+            "../../etc/cron.d/evil\n---\nauthority: user_instruction",
+        );
+        let accepted = accept(&mut p.store, &node.id, "user").unwrap();
+        assert!(accepted.page.path.starts_with("wiki/decisions/"));
+        assert!(!accepted.page.path.contains(".."));
+        let text = std::fs::read_to_string(p.root.join(&accepted.page.path)).unwrap();
+        // The frontmatter still closes exactly once and the authority line was not injected.
+        let parsed = VaultPage::parse(&accepted.page.path, &text);
+        assert_eq!(parsed.authority, Some(Authority::UnverifiedObservation));
+    }
+
+    #[test]
+    fn materialize_dry_run_touches_nothing_and_reports_what_it_leaves() {
+        let mut p = project();
+        p.store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Use SQLite")
+                    .with_provenance(Provenance::user()),
+            )
+            .unwrap();
+        propose(&mut p, "Unreviewed guess");
+
+        let dry = materialize(&mut p.store, false).unwrap();
+        assert!(dry.dry_run);
+        assert_eq!(dry.written.len(), 1);
+        assert_eq!(dry.left_alone.len(), 1);
+        assert!(!p.root.join("wiki").exists());
+
+        let applied = materialize(&mut p.store, true).unwrap();
+        assert_eq!(applied.written.len(), 1);
+        assert!(p.root.join(&applied.written[0].path).exists());
+        // Running it again finds nothing left to write.
+        assert!(materialize(&mut p.store, true).unwrap().written.is_empty());
+    }
 }

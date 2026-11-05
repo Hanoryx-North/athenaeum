@@ -303,3 +303,81 @@ fn safe_inline_text(value: &str, max_chars: usize) -> String {
         .trim()
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn converts_html_without_executing_markup() {
+        let text = html_to_text(b"<h1>Chapter</h1><script>alert(1)</script><p>Hello</p>").unwrap();
+        assert!(text.contains("Chapter"));
+        assert!(text.contains("Hello"));
+        assert!(!text.contains("alert(1)"));
+    }
+
+    #[test]
+    fn rejects_epub_archive_traversal_paths() {
+        let path = std::env::temp_dir().join(format!("unsafe-{}.epub", uuid::Uuid::new_v4()));
+        let file = fs::File::create(&path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file("../outside.xhtml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(b"<p>unsafe</p>").unwrap();
+        archive.finish().unwrap();
+
+        let error = validate_epub_archive(path.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("unsafe archive path"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn extracts_epub_metadata_and_spine_content() {
+        let path = std::env::temp_dir().join(format!("book-{}.epub", uuid::Uuid::new_v4()));
+        let file = fs::File::create(&path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default();
+        archive.start_file("mimetype", options).unwrap();
+        archive.write_all(b"application/epub+zip").unwrap();
+        archive
+            .start_file("META-INF/container.xml", options)
+            .unwrap();
+        archive.write_all(br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#).unwrap();
+        archive.start_file("OEBPS/content.opf", options).unwrap();
+        archive.write_all(br#"<?xml version="1.0"?><package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">test</dc:identifier><dc:title>Test Book</dc:title><dc:creator>Test Author</dc:creator><dc:language>en</dc:language></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#).unwrap();
+        archive.start_file("OEBPS/chapter.xhtml", options).unwrap();
+        archive.write_all(br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Opening</h1><p>Hello ebook.</p></body></html>"#).unwrap();
+        archive.finish().unwrap();
+
+        let output = extract_ebook_text(path.to_str().unwrap(), "epub").unwrap();
+        assert!(output.contains("# Test Book"));
+        assert!(output.contains("Author: Test Author"));
+        assert!(output.contains("Opening"));
+        assert!(output.contains("Hello ebook."));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn output_limit_is_enforced_before_append() {
+        let mut output = "x".repeat(MAX_EXTRACTED_TEXT_BYTES);
+        assert!(push_bounded(&mut output, "y").is_err());
+        assert_eq!(output.len(), MAX_EXTRACTED_TEXT_BYTES);
+    }
+
+    #[test]
+    fn metadata_is_single_line_and_bounded() {
+        let value = format!("Book\r\nTitle {}", "x".repeat(600));
+        let sanitized = safe_inline_text(&value, 20);
+        assert_eq!(sanitized, "Book Title xxxxxxxx");
+        assert!(!sanitized.contains('\n'));
+    }
+
+    #[test]
+    fn identifies_epub_text_entries_case_insensitively() {
+        assert!(is_epub_text_entry("OEBPS/chapter.XHTML"));
+        assert!(is_epub_text_entry("META-INF/container.xml"));
+        assert!(!is_epub_text_entry("OEBPS/images/cover.png"));
+    }
+}

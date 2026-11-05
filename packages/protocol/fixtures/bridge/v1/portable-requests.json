@@ -1,0 +1,26 @@
+{
+  "proposals": {
+    "protocolVersion": 1,
+    "requestId": "proposals-1",
+    "request": { "method": "proposals", "limit": 20 }
+  },
+  "accept": {
+    "protocolVersion": 1,
+    "requestId": "accept-1",
+    "request": {
+      "method": "accept",
+      "node": "Decision_042",
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  },
+  "reject": {
+    "protocolVersion": 1,
+    "requestId": "reject-1",
+    "request": {
+      "method": "reject",
+      "node": "Decision_042",
+      "reason": "unsupported by evidence",
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  }
+}

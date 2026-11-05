@@ -68,8 +68,8 @@
 pub mod anchors;
 pub mod authority;
 pub mod blobs;
-pub mod brief;
 pub mod bridge;
+pub mod brief;
 pub mod error;
 pub mod findings;
 pub mod graph;
@@ -95,15 +95,15 @@ pub mod prelude {
     pub use crate::blobs::BlobStore;
     pub use crate::brief::KnowledgeBrief;
     pub use crate::error::{Error, Result};
+    pub use crate::findings::{
+        Finding, FindingKind, FindingOptions, FindingSeverity, ReviewFindingView,
+    };
     pub use crate::graph::{navigate, shortest_path, NavigationOptions, Reached};
     pub use crate::id::{EdgeId, EvidenceId, NodeId, SessionId};
     pub use crate::journal::{EventKind, NewEvent, NodeUtility};
     pub use crate::model::{
         Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, Neighbor,
         NodeStatus, NodeType, Provenance, ProvenanceSource, Scope, SourceAnchor,
-    };
-    pub use crate::findings::{
-        Finding, FindingKind, FindingOptions, FindingSeverity, ReviewFindingView,
     };
     pub use crate::repository::{
         Extraction, ExtractionMethod, RepositoryIndexReport, RepositoryIndexer, RepositoryScan,

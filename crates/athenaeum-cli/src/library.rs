@@ -556,3 +556,58 @@ pub mod credentials {
         Ok(target)
     }
 }
+
+#[cfg(test)]
+mod credential_tests {
+    use super::credentials::{forget, store, token_for};
+    use super::*;
+
+    #[test]
+    fn tokens_are_stored_per_server_in_an_owner_only_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var(CONFIG_DIR_ENV, dir.path());
+        std::env::remove_var(TOKEN_ENV);
+        let stored = store("https://library.example", "tok_secret", Some("ada")).unwrap();
+        assert_eq!(
+            token_for("https://library.example").unwrap().token,
+            "tok_secret"
+        );
+        assert!(token_for("https://elsewhere.example").is_none());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&stored).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o077,
+                0,
+                "the credentials file must not be readable by others"
+            );
+        }
+        assert!(forget("https://library.example").unwrap());
+        assert!(token_for("https://library.example").is_none());
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_http_is_refused_except_for_this_machine() {
+        assert!(normalize_server("http://library.example").is_err());
+        assert!(normalize_server("http://localhost:3000").is_ok());
+        assert!(normalize_server("http://127.0.0.1:3000").is_ok());
+        assert!(normalize_server("library.example").unwrap().scheme() == "https");
+        assert!(normalize_server("ftp://x").is_err());
+    }
+
+    #[test]
+    fn server_errors_keep_their_own_code() {
+        let error = http_error(
+            StatusCode::CONFLICT,
+            br#"{"error":{"code":"stale_base","message":"pull first"}}"#,
+        );
+        assert!(matches!(&error, Error::Portable { code, .. } if code == "stale_base"));
+        let error = http_error(StatusCode::NOT_FOUND, b"<html>");
+        assert!(matches!(&error, Error::Portable { code, .. } if code == "not_found"));
+    }
+}

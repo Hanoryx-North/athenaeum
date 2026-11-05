@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "sourceVersion": "0.1.0",
+  "nativeAgentVersion": "0.1.0",
+  "localValidation": {
+    "protocol": "passed",
+    "engine": "passed",
+    "native-agent-config": "passed",
+    "product-automation": "passed",
+    "product-desktop-control": "passed",
+    "agent": "passed",
+    "product-cli": "passed",
+    "product-engine": "passed",
+    "product-repository": "passed",
+    "product-knowledge": "passed",
+    "product-boundaries": "passed",
+    "product-protocol": "passed",
+    "product-codex-memory": "passed",
+    "product-mcp-desktop": "passed",
+    "product-agent-to-knowledge": "passed",
+    "native-agent-smoke": "passed"
+  },
+  "additionalChecks": {
+    "cleanNpmInstallAndPackageBuilds": "passed without sibling repositories",
+    "packageTypechecks": "passed",
+    "frontendProductionBuild": "passed",
+    "desktopAllTargetsCompile": "passed",
+    "agentPackageArtifact": "passed",
+    "gitDiffWhitespace": "passed"
+  },
+  "executedTestCounts": {
+    "frontend": 1824,
+    "releaseHelpers": 31,
+    "engineAndCliRust": 396,
+    "agentAdapter": 125,
+    "nativeConfiguration": 6,
+    "nativeServiceAndDesktopSmoke": 8
+  },
+  "notRun": [
+    "cross-platform release installers and signing",
+    "optional upstream Harness runtime suite requiring DSH_REPO"
+  ],
+  "notes": [
+    "Sources/revisions and exclusions are recorded in consolidation.json.",
+    "Native smoke tests use a scripted loopback provider, without hosted accounts or model credentials.",
+    "The existing frozen standalone desktop snapshot was not refreshed."
+  ]
+}

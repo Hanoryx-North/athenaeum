@@ -928,7 +928,11 @@ fn process_queue_inner(
     }
 }
 
-
+#[cfg(test)]
+fn apply_task_to_snapshot(root: &Path, task: &FileChangeTask) -> Result<(), String> {
+    let meta = read_meta(root, &task.path)?;
+    with_queue_lock(root, || write_task_meta_to_snapshot(root, task, meta))
+}
 
 fn write_task_meta_to_snapshot(
     root: &Path,
@@ -1395,4 +1399,482 @@ fn is_app_write_ignored(path: &Path) -> bool {
     ignores
         .keys()
         .any(|ignored| key == *ignored || key.starts_with(&format!("{ignored}/")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("athenaeum-file-sync-{name}-{stamp}"));
+        fs::create_dir_all(root.join("raw/sources")).unwrap();
+        root
+    }
+
+    fn default_watch_config() -> SourceWatchConfig {
+        SourceWatchConfig::default()
+    }
+
+    #[test]
+    fn md5_detects_same_size_content_changes() {
+        let root = temp_root("same-size");
+        let rel = "raw/sources/a.md";
+        fs::write(root.join(rel), "aaaa").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        enqueue_rescan_changes(&root, "p1", &default_watch_config()).unwrap();
+        let first = read_queue(&root).unwrap().tasks[0].clone();
+        apply_task_to_snapshot(&root, &first).unwrap();
+        write_queue(
+            &root,
+            &FileChangeQueue {
+                version: 1,
+                tasks: vec![],
+            },
+        )
+        .unwrap();
+
+        fs::write(root.join(rel), "bbbb").unwrap();
+        enqueue_paths(&root, "p1", BTreeSet::from([rel.to_string()])).unwrap();
+        let queue = read_queue(&root).unwrap();
+
+        assert_eq!(queue.tasks.len(), 1);
+        assert_eq!(queue.tasks[0].kind, FileChangeKind::Modified);
+        assert_ne!(queue.tasks[0].hash_before, queue.tasks[0].hash_after);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repeated_changes_upsert_one_pending_task() {
+        let root = temp_root("dedupe");
+        let rel = "raw/sources/a.md";
+        fs::write(root.join(rel), "one").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        enqueue_paths(&root, "p1", BTreeSet::from([rel.to_string()])).unwrap();
+        fs::write(root.join(rel), "two").unwrap();
+        enqueue_paths(&root, "p1", BTreeSet::from([rel.to_string()])).unwrap();
+
+        let queue = read_queue(&root).unwrap();
+        assert_eq!(queue.tasks.len(), 1);
+        assert_eq!(queue.tasks[0].status, FileChangeStatus::Pending);
+        assert_eq!(queue.tasks[0].path, rel);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_delete_expands_snapshot_children() {
+        let root = temp_root("dir-delete");
+        let a = "raw/sources/folder/a.md";
+        let b = "raw/sources/folder/b.md";
+        fs::create_dir_all(root.join("raw/sources/folder")).unwrap();
+        fs::write(root.join(a), "a").unwrap();
+        fs::write(root.join(b), "b").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        sync_snapshot_paths(&root, BTreeSet::from([a.to_string(), b.to_string()])).unwrap();
+        fs::remove_dir_all(root.join("raw/sources/folder")).unwrap();
+
+        let mut rels = BTreeSet::new();
+        let snapshot = read_snapshot(&root).unwrap();
+        let config = default_watch_config();
+        let rules = SourceWatchRules::new(&config);
+        collect_known_paths(
+            &root,
+            &root.join("raw/sources/folder"),
+            &snapshot,
+            &mut rels,
+            &rules,
+        );
+
+        assert_eq!(rels, BTreeSet::from([a.to_string(), b.to_string()]));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prefix_rescan_detects_raw_source_mount_style_changes() {
+        let root = temp_root("prefix-rescan");
+        let old = "raw/sources/old.md";
+        let new = "raw/sources/new.md";
+        fs::write(root.join(old), "old").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        sync_snapshot_paths(&root, BTreeSet::from([old.to_string()])).unwrap();
+        fs::remove_file(root.join(old)).unwrap();
+        fs::write(root.join(new), "new").unwrap();
+
+        enqueue_rescan_changes_for_prefixes(&root, "p1", &["raw/sources"], &default_watch_config())
+            .unwrap();
+        let queue = read_queue(&root).unwrap();
+        let by_path = queue
+            .tasks
+            .iter()
+            .map(|task| (task.path.as_str(), task.kind.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(by_path.get(old), Some(&FileChangeKind::Deleted));
+        assert_eq!(by_path.get(new), Some(&FileChangeKind::Created));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn startup_rescan_scans_watch_roots_without_full_project_walk() {
+        let root = temp_root("startup-prefixes");
+        fs::create_dir_all(root.join("wiki/entities")).unwrap();
+        fs::create_dir_all(root.join("unwatched/deep")).unwrap();
+        fs::write(root.join("raw/sources/source.md"), "source").unwrap();
+        fs::write(
+            root.join("wiki/entities/topic.md"),
+            "---\ntitle: Topic\n---\n",
+        )
+        .unwrap();
+        fs::write(root.join("purpose.md"), "purpose").unwrap();
+        fs::write(root.join("schema.md"), "schema").unwrap();
+        fs::write(root.join("unwatched/deep/note.md"), "ignore").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        enqueue_startup_rescan_changes(&root, "p1", &default_watch_config()).unwrap();
+        let queue = read_queue(&root).unwrap();
+        let paths = queue
+            .tasks
+            .iter()
+            .map(|task| task.path.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(paths.contains("raw/sources/source.md"));
+        assert!(paths.contains("wiki/entities/topic.md"));
+        assert!(paths.contains("purpose.md"));
+        assert!(paths.contains("schema.md"));
+        assert!(!paths.contains("unwatched/deep/note.md"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn app_written_paths_update_snapshot_without_queueing() {
+        let root = temp_root("app-write");
+        let rel = "raw/sources/a.md";
+        let path = root.join(rel);
+        fs::write(&path, "old").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        sync_snapshot_paths(&root, BTreeSet::from([rel.to_string()])).unwrap();
+        fs::write(&path, "new").unwrap();
+        mark_app_write_path(&path);
+
+        let mut app_written_rels = BTreeSet::new();
+        let snapshot = read_snapshot(&root).unwrap();
+        if is_app_write_ignored(&path) {
+            let config = default_watch_config();
+            let rules = SourceWatchRules::new(&config);
+            collect_known_paths(&root, &path, &snapshot, &mut app_written_rels, &rules);
+        }
+        sync_snapshot_paths(&root, app_written_rels).unwrap();
+
+        let queue = read_queue(&root).unwrap();
+        let snapshot = read_snapshot(&root).unwrap();
+        assert!(queue.tasks.is_empty());
+        assert_eq!(
+            snapshot.files.get(rel).and_then(|m| m.hash.clone()),
+            read_meta(&root, rel).unwrap().and_then(|m| m.hash)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn retry_limit_keeps_failed_task_failed_on_new_changes() {
+        let root = temp_root("retry-limit");
+        let rel = "raw/sources/a.md";
+        fs::write(root.join(rel), "one").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        let mut queue = FileChangeQueue {
+            version: 1,
+            tasks: vec![FileChangeTask {
+                id: "t1".into(),
+                project_id: "p1".into(),
+                path: rel.into(),
+                kind: FileChangeKind::Modified,
+                status: FileChangeStatus::Failed,
+                hash_before: None,
+                hash_after: None,
+                size: None,
+                mtime_ms: None,
+                created_at: 1,
+                updated_at: 1,
+                retry_count: MAX_RETRY_COUNT,
+                error: Some("failed".into()),
+                needs_rerun: false,
+            }],
+        };
+        upsert_task(
+            &mut queue,
+            "p1",
+            rel,
+            FileChangeKind::Modified,
+            None,
+            read_meta(&root, rel).unwrap(),
+            now_ms(),
+        );
+
+        assert_eq!(queue.tasks.len(), 1);
+        assert_eq!(queue.tasks[0].status, FileChangeStatus::Failed);
+        assert_eq!(queue.tasks[0].retry_count, MAX_RETRY_COUNT);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deleted_task_keeps_previous_file_size_for_move_detection() {
+        let mut queue = FileChangeQueue::default();
+        let old = FileMeta {
+            hash: Some("same".into()),
+            size: 128,
+            mtime_ms: 1,
+        };
+        upsert_task(
+            &mut queue,
+            "p1",
+            "raw/sources/old.md",
+            FileChangeKind::Deleted,
+            Some(old),
+            None,
+            2,
+        );
+
+        assert_eq!(queue.tasks[0].size, Some(128));
+        assert_eq!(queue.tasks[0].hash_before.as_deref(), Some("same"));
+    }
+
+    #[test]
+    fn watch_rules_exclude_temporary_and_app_dirs() {
+        let config = default_watch_config();
+        let rules = SourceWatchRules::new(&config);
+        assert!(should_watch_rel("raw/sources/document.docx", &rules));
+        assert!(should_watch_rel("wiki/concepts/topic.md", &rules));
+        assert!(!should_watch_rel(
+            ".athenaeum/file-change-queue.json",
+            &rules
+        ));
+        assert!(!should_watch_rel("raw/sources/~$Document.docx", &rules));
+        assert!(!should_watch_rel(
+            "raw/sources/.~lock.Document.odt#",
+            &rules
+        ));
+        assert!(!should_watch_rel("raw/sources/Thumbs.db", &rules));
+        assert!(!should_watch_rel("raw/sources/desktop.ini", &rules));
+        assert!(!should_watch_rel("raw/sources/download.crdownload", &rules));
+        assert!(!should_watch_rel(".vscode/settings.json", &rules));
+        assert!(!should_watch_rel("wiki/media/image.png", &rules));
+    }
+
+    #[test]
+    fn source_watch_config_filters_raw_source_extensions_and_dirs() {
+        let config = SourceWatchConfig {
+            include_extensions: vec!["md".into(), "pdf".into()],
+            exclude_dirs: vec!["drafts".into(), "subdir/drafts".into()],
+            exclude_globs: vec!["*.private.*".into()],
+            ..SourceWatchConfig::default()
+        };
+        let config = normalize_source_watch_config(Some(config));
+        let rules = SourceWatchRules::new(&config);
+
+        assert!(should_watch_rel("raw/sources/final.md", &rules));
+        assert!(!should_watch_rel("raw/sources/data.json", &rules));
+        assert!(!should_watch_rel("raw/sources/drafts/final.md", &rules));
+        assert!(!should_watch_rel(
+            "raw/sources/subdir/drafts/final.md",
+            &rules
+        ));
+        assert!(!should_watch_rel("raw/sources/report.private.md", &rules));
+        assert!(should_watch_rel("wiki/index.md", &rules));
+    }
+
+    #[test]
+    fn source_watch_config_skips_oversized_raw_sources() {
+        let root = temp_root("max-size");
+        let rel = "raw/sources/large.md";
+        fs::write(root.join(rel), vec![b'x'; 2 * 1024 * 1024]).unwrap();
+        let config = SourceWatchConfig {
+            max_file_size_mb: 1,
+            ..SourceWatchConfig::default()
+        };
+        let config = normalize_source_watch_config(Some(config));
+        let rules = SourceWatchRules::new(&config);
+
+        assert_eq!(
+            relative_watch_path(&root, &root.join(rel), &rules, None),
+            None
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn source_watch_defaults_are_loaded_from_shared_json_and_tolerate_missing_fields() {
+        let default = SourceWatchConfig::default();
+        assert!(default.include_extensions.contains(&"md".to_string()));
+        assert!(default.exclude_dirs.contains(&".git".to_string()));
+
+        let partial: SourceWatchConfig =
+            serde_json::from_str(r#"{"enabled":false,"includeExtensions":["md"]}"#).unwrap();
+        assert!(!partial.enabled);
+        assert!(partial.auto_ingest);
+        assert!(partial.exclude_dirs.contains(&".git".to_string()));
+    }
+
+    #[test]
+    fn wildcard_match_is_unicode_character_based() {
+        assert!(wildcard_match("?稿.md", "草稿.md"));
+        assert!(wildcard_match("草*.md", "草稿文件.md"));
+        assert!(!wildcard_match("??.md", "草稿文件.md"));
+    }
+
+    #[test]
+    fn normalize_rel_path_tolerates_current_dir_segments() {
+        let path = Path::new("raw").join(".").join("sources").join("doc.md");
+        assert_eq!(
+            normalize_rel_path(&path),
+            Some("raw/sources/doc.md".to_string())
+        );
+    }
+
+    #[test]
+    fn queue_lock_recovers_after_poison() {
+        let root = temp_root("poison");
+        let lock = queue_lock_for(&root);
+        let _ = std::thread::spawn(move || {
+            let _guard = lock.lock().unwrap();
+            panic!("poison file sync lock");
+        })
+        .join();
+
+        let result = with_queue_lock(&root, || Ok(42));
+        assert_eq!(result.unwrap(), 42);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_enqueue_paths_do_not_drop_tasks() {
+        let root = temp_root("concurrent");
+        ensure_sync_dir(&root).unwrap();
+        let mut handles = Vec::new();
+        for i in 0..16 {
+            let root = root.clone();
+            let rel = format!("raw/sources/{i}.md");
+            fs::write(root.join(&rel), format!("content {i}")).unwrap();
+            handles.push(std::thread::spawn(move || {
+                enqueue_paths(&root, "p1", BTreeSet::from([rel])).unwrap();
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let queue = with_queue_lock(&root, || read_queue(&root)).unwrap();
+        assert_eq!(queue.tasks.len(), 16);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_key_is_stable_after_leaf_deletion() {
+        let root = temp_root("path-key");
+        let path = root.join("raw/sources/a.md");
+        fs::write(&path, "content").unwrap();
+        let before = path_key(&path);
+        fs::remove_file(&path).unwrap();
+        let after = path_key(&path);
+
+        assert_eq!(before, after);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn windows_path_key_is_case_insensitive() {
+        assert_eq!(
+            normalize_path_key(Path::new(r"C:\Proj\raw\sources\File.md")),
+            normalize_path_key(Path::new(r"c:\proj\RAW\sources\file.md"))
+        );
+    }
+
+    #[test]
+    fn process_queue_updates_snapshot_and_removes_done_tasks() {
+        let root = temp_root("process-e2e");
+        let rel = "raw/sources/a.md";
+        fs::write(root.join(rel), "content").unwrap();
+
+        ensure_sync_dir(&root).unwrap();
+        enqueue_paths(&root, "p1", BTreeSet::from([rel.to_string()])).unwrap();
+
+        let mut queue_emits = 0;
+        let mut changed_emits = 0;
+        process_queue_inner(
+            &root,
+            "p1",
+            |_| queue_emits += 1,
+            |tasks| {
+                if !tasks.is_empty() {
+                    changed_emits += 1;
+                }
+            },
+        )
+        .unwrap();
+
+        let queue = with_queue_lock(&root, || read_queue(&root)).unwrap();
+        let snapshot = with_queue_lock(&root, || read_snapshot(&root)).unwrap();
+        assert!(queue.tasks.is_empty());
+        assert!(snapshot.files.contains_key(rel));
+        assert!(queue_emits >= 1);
+        assert_eq!(changed_emits, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn process_queue_flushes_changed_tasks_before_returning_error() {
+        let root = temp_root("flush-on-error");
+        ensure_sync_dir(&root).unwrap();
+        let rels = (0..26)
+            .map(|i| {
+                let rel = format!("raw/sources/{i}.md");
+                fs::write(root.join(&rel), format!("content {i}")).unwrap();
+                rel
+            })
+            .collect::<BTreeSet<_>>();
+        enqueue_paths(&root, "p1", rels).unwrap();
+
+        let snapshot_path = root.join(SNAPSHOT_FILE);
+        let mut queue_emits = 0;
+        let mut changed_count = 0;
+        let result = process_queue_inner(
+            &root,
+            "p1",
+            |_| {
+                queue_emits += 1;
+                if queue_emits == 2 {
+                    fs::remove_file(&snapshot_path).unwrap();
+                    fs::create_dir_all(&snapshot_path).unwrap();
+                }
+            },
+            |tasks| changed_count += tasks.len(),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(changed_count, QUEUE_EMIT_EVERY);
+
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -1,3 +1,8 @@
+> Current ownership: [AGENTS.md](../AGENTS.md) and the
+> [consolidation guide](../docs/consolidation.md). Native runtime and adapters now
+> live in `packages/agent`; MCP lives in `packages/integrations`. The UI remains
+> an app-server client, with one knowledge engine behind its bridge.
+
 # Frontend
 
 Ported from [llm_wiki](https://github.com/nashsu/llm_wiki), GPL-3.0, © Yong Su, and

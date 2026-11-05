@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The desktop's installer entry point. Release builds carry every base component;
 // no curl, PowerShell bootstrap, system Node, or release download is needed.
-// Agent runtime installation stays in athenaeum_agent's own installer.
+// The native agent ships in the CLI archive; Harness is an optional adapter.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, readFileSync, appendFileSync, realpathSync, writeFileSync } from 'node:fs'
@@ -74,8 +74,9 @@ try {
       '--tarball', join(tools, 'agent', 'athenaeum-agent.tgz'), '--no-link'], { stdio: 'inherit' })
     // Keep the one primary athenaeum command; expose only the agent launcher
     // from its private runtime. Its implementation remains upstream-owned.
-    const name = process.platform === 'win32' ? 'athenaeum-agent.cmd' : 'athenaeum-agent'
-    const source = join(prefix, 'agent', 'bin', name)
+    const sourceName = process.platform === 'win32' ? 'athenaeum-agent.cmd' : 'athenaeum-agent'
+    const name = process.platform === 'win32' ? 'athenaeum-harness.cmd' : 'athenaeum-harness'
+    const source = join(prefix, 'agent', 'bin', sourceName)
     copyFileSync(source, join(l.bin, name))
     if (process.platform !== 'win32') {
       chmodSync(join(l.bin, name), 0o755)

@@ -450,3 +450,194 @@ fn dedup(values: impl IntoIterator<Item = String>) -> Vec<String> {
         .filter(|value| seen.insert(value.clone()))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prose_that_looks_like_frontmatter_is_not_frontmatter() {
+        // A page with no `title:` in its frontmatter, whose body happens to
+        // contain a line beginning `title:`. Reading that as the page's
+        // title made the index believe a page existed under a name nobody
+        // gave it, and review items for genuinely missing pages resolved
+        // themselves against it.
+        let page = VaultPage::parse(
+            "wiki/entities/other.md",
+            "---
+type: entity
+---
+
+# Real Heading
+
+Some text.
+title: Attention Mechanism
+",
+        );
+
+        assert_eq!(page.title, "Real Heading");
+    }
+
+    #[test]
+    fn reads_a_conventional_page() {
+        let page = VaultPage::parse(
+            "wiki/concepts/chain-of-thought.md",
+            "---\ntype: concept\ntitle: Chain of Thought\ntags: [reasoning]\nrelated: [\"[[scaling]]\"]\nsources: [\"wei-2022.pdf\"]\n---\n\n# Chain of Thought\n\nPrompting a model to show its working improves multi-step reasoning.\n\nSee also [[in-context-learning]].\n",
+        );
+        assert_eq!(page.slug, "chain-of-thought");
+        assert_eq!(page.title, "Chain of Thought");
+        assert_eq!(page.page_type, "concept");
+        assert!(page.type_declared);
+        assert_eq!(page.tags, vec!["reasoning"]);
+        assert_eq!(page.related, vec!["scaling"]);
+        assert_eq!(page.sources, vec!["wei-2022.pdf"]);
+        assert_eq!(page.links, vec!["in-context-learning"]);
+        assert_eq!(
+            page.summary,
+            "Prompting a model to show its working improves multi-step reasoning."
+        );
+    }
+
+    #[test]
+    fn a_page_that_predates_the_convention_still_gets_a_type_and_a_title() {
+        // No frontmatter at all: the directory names the type and the
+        // heading names the page. Refusing this page would lose knowledge
+        // that is sitting right there on disk.
+        let page = VaultPage::parse(
+            "wiki/entities/openai.md",
+            "# OpenAI\n\nAn AI research company.\n",
+        );
+        assert_eq!(page.page_type, "entity");
+        assert!(!page.type_declared);
+        assert_eq!(page.title, "OpenAI");
+        assert_eq!(page.summary, "An AI research company.");
+        assert_eq!(page.authority, None);
+    }
+
+    #[test]
+    fn a_page_with_neither_frontmatter_nor_heading_falls_back_to_its_filename() {
+        let page = VaultPage::parse("wiki/notes/some-loose_note.md", "Just a sentence.\n");
+        assert_eq!(page.title, "some loose note");
+        assert_eq!(page.page_type, "note");
+    }
+
+    #[test]
+    fn directory_types_are_singularized_except_where_the_schema_is_not() {
+        assert_eq!(
+            VaultPage::parse("wiki/entities/a.md", "").page_type,
+            "entity"
+        );
+        assert_eq!(
+            VaultPage::parse("wiki/concepts/a.md", "").page_type,
+            "concept"
+        );
+        assert_eq!(VaultPage::parse("wiki/queries/a.md", "").page_type, "query");
+        assert_eq!(
+            VaultPage::parse("wiki/findings/a.md", "").page_type,
+            "finding"
+        );
+        // These directory names are already singular in the schema.
+        assert_eq!(
+            VaultPage::parse("wiki/synthesis/a.md", "").page_type,
+            "synthesis"
+        );
+        assert_eq!(
+            VaultPage::parse("wiki/methodology/a.md", "").page_type,
+            "methodology"
+        );
+        assert_eq!(VaultPage::parse("wiki/thesis/a.md", "").page_type, "thesis");
+    }
+
+    #[test]
+    fn overview_is_recognized_wherever_it_sits() {
+        assert_eq!(
+            VaultPage::parse("wiki/overview.md", "").page_type,
+            "overview"
+        );
+    }
+
+    #[test]
+    fn a_declared_type_beats_the_directory() {
+        let page = VaultPage::parse(
+            "wiki/concepts/gpt-4.md",
+            "---\ntype: entity\n---\n# GPT-4\n",
+        );
+        assert_eq!(page.page_type, "entity");
+        assert!(page.type_declared);
+    }
+
+    #[test]
+    fn a_declared_authority_is_carried_and_a_nonsense_one_is_ignored() {
+        let claimed = VaultPage::parse(
+            "wiki/concepts/a.md",
+            "---\nauthority: project_decision\n---\nBody.\n",
+        );
+        assert_eq!(claimed.authority, Some(Authority::ProjectDecision));
+
+        let nonsense = VaultPage::parse(
+            "wiki/concepts/a.md",
+            "---\nauthority: extremely\n---\nBody.\n",
+        );
+        assert_eq!(nonsense.authority, None);
+    }
+
+    #[test]
+    fn source_identities_are_normalized_to_the_raw_sources_root() {
+        let page = VaultPage::parse(
+            "wiki/sources/a.md",
+            "---\nsources: [\"raw/sources/papers/wei.pdf\", \"notes.md\", \"/home/u/p/raw/sources/x.pdf\"]\n---\nBody.\n",
+        );
+        assert_eq!(page.sources, vec!["papers/wei.pdf", "notes.md", "x.pdf"]);
+    }
+
+    #[test]
+    fn summary_skips_headings_comments_and_code() {
+        let page = VaultPage::parse(
+            "wiki/concepts/a.md",
+            "# Heading\n\n<!-- a note to self -->\n\n```rust\nfn main() {}\n```\n\nThe first real sentence.\n",
+        );
+        assert_eq!(page.summary, "The first real sentence.");
+    }
+
+    #[test]
+    fn summary_reads_wikilinks_as_their_display_text() {
+        let page = VaultPage::parse(
+            "wiki/concepts/a.md",
+            "Built on [[chain-of-thought|CoT]] and [[scaling]].\n",
+        );
+        assert_eq!(page.summary, "Built on CoT and scaling.");
+    }
+
+    #[test]
+    fn summary_is_truncated_on_a_word_boundary() {
+        let long = "word ".repeat(200);
+        let page = VaultPage::parse("wiki/concepts/a.md", &long);
+        assert!(page.summary.chars().count() <= SUMMARY_LIMIT + 1);
+        assert!(page.summary.ends_with('…'));
+        assert!(!page.summary.contains("wor…"));
+    }
+
+    #[test]
+    fn a_declared_summary_wins_over_the_body() {
+        let page = VaultPage::parse(
+            "wiki/concepts/a.md",
+            "---\nsummary: The declared one.\n---\n\nThe body one.\n",
+        );
+        assert_eq!(page.summary, "The declared one.");
+    }
+
+    #[test]
+    fn a_bullet_list_still_yields_a_summary() {
+        let page = VaultPage::parse("wiki/concepts/a.md", "- first point\n- second point\n");
+        assert_eq!(page.summary, "first point second point");
+    }
+
+    #[test]
+    fn parsing_is_stable_so_re_indexing_an_unchanged_page_is_a_no_op() {
+        let content = "---\ntype: concept\n---\n# A\n\nBody with [[b]] and [[c]] and [[b]].\n";
+        let first = VaultPage::parse("wiki/concepts/a.md", content);
+        let second = VaultPage::parse("wiki/concepts/a.md", content);
+        assert_eq!(first, second);
+        assert_eq!(first.links, vec!["b", "c"]);
+    }
+}

@@ -64,7 +64,7 @@ before retrying.
 
 ## Keep source development live
 
-In a source workspace, `wiki start` starts or reuses a managed live Vite/Tauri
+In a source checkout, `wiki start` starts or reuses a managed live Vite/Tauri
 session. `wiki start --dev` keeps it in the foreground. Logs are in the app
 repository's `.athenaeum-dev/live.log`. Frontend TypeScript/CSS edits hot-update
 the running webview. Confirm `wiki desktop status --json` reports `live: true`.

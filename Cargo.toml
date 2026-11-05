@@ -12,6 +12,7 @@ members = [
     "crates/athenaeum-core",
     "crates/athenaeum-cli",
     "src-tauri",
+    "packages/protocol/rust",
 ]
 
 [workspace.package]

@@ -105,3 +105,36 @@ pub fn sync_dir(root: &Path) -> PathBuf {
 pub fn ledger_path(root: &Path) -> PathBuf {
     sync_dir(root).join("ledger.json")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_is_capped_only_while_it_still_holds_what_arrived() {
+        let mut ledger = TrustLedger::default();
+        ledger.record("wiki/a.md", "abc", Origin::Pulled);
+        assert!(ledger.caps("wiki/a.md", "abc"));
+        assert!(!ledger.caps("wiki/a.md", "edited"));
+        assert!(!ledger.caps("wiki/b.md", "abc"));
+    }
+
+    #[test]
+    fn a_repository_nothing_arrived_in_has_an_empty_ledger() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(TrustLedger::load(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_ledger_round_trips_in_the_documented_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ledger = TrustLedger::default();
+        ledger.record("wiki/a.md", "abc", Origin::Pulled);
+        ledger.save(dir.path()).unwrap();
+        let loaded = TrustLedger::load(dir.path()).unwrap();
+        assert_eq!(loaded, ledger);
+        let text = std::fs::read_to_string(ledger_path(dir.path())).unwrap();
+        assert!(text.contains("\"wiki/a.md\""), "{text}");
+        assert!(text.contains("\"origin\": \"pulled\""), "{text}");
+    }
+}

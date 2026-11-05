@@ -1,0 +1,765 @@
+{
+  "info": {
+    "service": "athenaeum-api",
+    "apiVersion": 1,
+    "syncProtocol": 1,
+    "limits": {
+      "maxFileBytes": 1048576,
+      "maxRepositoryBytes": 52428800,
+      "maxPushBytes": 67108864,
+      "maxChangesPerPush": 10000
+    },
+    "registration": "open"
+  },
+  "stats": {
+    "users": 12,
+    "publicRepositories": 5,
+    "revisions": 87
+  },
+  "users": {
+    "publicUser": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z"
+    },
+    "selfUser": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z",
+      "id": "usr_ada",
+      "email": "ada@example.com"
+    },
+    "currentUser": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z",
+      "id": "usr_ada",
+      "email": null,
+      "via": "token"
+    },
+    "profile": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z",
+      "publicRepositories": 1
+    },
+    "authResponse": {
+      "user": {
+        "username": "ada",
+        "displayName": "Ada Lovelace",
+        "bio": "Writes things down.",
+        "createdAt": "2026-10-01T08:00:00.000Z",
+        "id": "usr_ada",
+        "email": "ada@example.com"
+      }
+    },
+    "registerRequest": {
+      "username": "ada",
+      "email": "ada@example.com",
+      "password": "correct horse battery staple",
+      "displayName": "Ada Lovelace"
+    },
+    "loginRequest": {
+      "username": "ada",
+      "password": "correct horse battery staple"
+    }
+  },
+  "repository": {
+    "id": "repo_example",
+    "owner": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z"
+    },
+    "name": "oauth-notes",
+    "fullName": "ada/oauth-notes",
+    "description": "What we learned fixing the OAuth callback.",
+    "visibility": "public",
+    "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "forkedFrom": null,
+    "forks": 1,
+    "fileCount": 2,
+    "sizeBytes": 107,
+    "createdAt": "2026-10-09T09:00:00.000Z",
+    "updatedAt": "2026-10-09T10:30:00.000Z",
+    "role": "owner"
+  },
+  "repositoryPage": {
+    "items": [
+      {
+        "id": "repo_example",
+        "owner": {
+          "username": "ada",
+          "displayName": "Ada Lovelace",
+          "bio": "Writes things down.",
+          "createdAt": "2026-10-01T08:00:00.000Z"
+        },
+        "name": "oauth-notes",
+        "fullName": "ada/oauth-notes",
+        "description": "What we learned fixing the OAuth callback.",
+        "visibility": "public",
+        "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+        "forkedFrom": null,
+        "forks": 1,
+        "fileCount": 2,
+        "sizeBytes": 107,
+        "createdAt": "2026-10-09T09:00:00.000Z",
+        "updatedAt": "2026-10-09T10:30:00.000Z",
+        "role": "owner"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "perPage": 20
+  },
+  "itemList": {
+    "items": [
+      {
+        "id": "repo_example",
+        "owner": {
+          "username": "ada",
+          "displayName": "Ada Lovelace",
+          "bio": "Writes things down.",
+          "createdAt": "2026-10-01T08:00:00.000Z"
+        },
+        "name": "oauth-notes",
+        "fullName": "ada/oauth-notes",
+        "description": "What we learned fixing the OAuth callback.",
+        "visibility": "public",
+        "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+        "forkedFrom": null,
+        "forks": 1,
+        "fileCount": 2,
+        "sizeBytes": 107,
+        "createdAt": "2026-10-09T09:00:00.000Z",
+        "updatedAt": "2026-10-09T10:30:00.000Z",
+        "role": "owner"
+      }
+    ]
+  },
+  "privateRepositoryForkOfPublic": {
+    "id": "repo_fork",
+    "owner": {
+      "username": "grace",
+      "displayName": "Grace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z"
+    },
+    "name": "oauth-notes",
+    "fullName": "grace/oauth-notes",
+    "description": "What we learned fixing the OAuth callback.",
+    "visibility": "private",
+    "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "forkedFrom": {
+      "id": "repo_example",
+      "fullName": "ada/oauth-notes"
+    },
+    "forks": 0,
+    "fileCount": 2,
+    "sizeBytes": 107,
+    "createdAt": "2026-10-09T09:00:00.000Z",
+    "updatedAt": "2026-10-09T10:30:00.000Z",
+    "role": "owner"
+  },
+  "anonymousView": {
+    "id": "repo_example",
+    "owner": {
+      "username": "ada",
+      "displayName": "Ada Lovelace",
+      "bio": "Writes things down.",
+      "createdAt": "2026-10-01T08:00:00.000Z"
+    },
+    "name": "oauth-notes",
+    "fullName": "ada/oauth-notes",
+    "description": "What we learned fixing the OAuth callback.",
+    "visibility": "public",
+    "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "forkedFrom": null,
+    "forks": 1,
+    "fileCount": 2,
+    "sizeBytes": 107,
+    "createdAt": "2026-10-09T09:00:00.000Z",
+    "updatedAt": "2026-10-09T10:30:00.000Z",
+    "role": "read"
+  },
+  "collaborators": {
+    "items": [
+      {
+        "user": {
+          "username": "grace",
+          "displayName": "Grace",
+          "bio": "Writes things down.",
+          "createdAt": "2026-10-01T08:00:00.000Z"
+        },
+        "role": "write"
+      }
+    ]
+  },
+  "collaboratorRequest": {
+    "role": "write"
+  },
+  "updateRepository": {
+    "description": "Updated description",
+    "visibility": "private"
+  },
+  "createRepository": {
+    "id": "repo_example",
+    "name": "oauth-notes",
+    "visibility": "public",
+    "description": "What we learned fixing the OAuth callback."
+  },
+  "revision": {
+    "id": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "parent": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+    "treeHash": "b544089e71284122217b6f37e8b9d0ae7119648e43f95a9db3590b35d3c90502",
+    "author": "ada",
+    "message": "Add index",
+    "createdAt": "2026-10-09T10:30:00.000Z",
+    "manifest": [
+      {
+        "path": "wiki/index.md",
+        "sha256": "fc6e2e2b7b2dbcaa40e7824384e6e1ef4e39610e3b097f16b1e5b06db6d8bb17",
+        "size": 36
+      },
+      {
+        "path": "wiki/validate-state-first.md",
+        "sha256": "18e4acc471f23fdd509a665533e18618eb53131356fb687558b76098791b5eb5",
+        "size": 71
+      }
+    ]
+  },
+  "revisionList": {
+    "revisions": [
+      {
+        "id": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+        "parent": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+        "treeHash": "b544089e71284122217b6f37e8b9d0ae7119648e43f95a9db3590b35d3c90502",
+        "author": "ada",
+        "message": "Add index",
+        "createdAt": "2026-10-09T10:30:00.000Z"
+      },
+      {
+        "id": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+        "parent": null,
+        "treeHash": "caeb8504e4c339666b589a7eb510c80e111cd6b712731e9b6b6189f085c1b50a",
+        "author": "ada",
+        "message": "Publish accepted knowledge",
+        "createdAt": "2026-10-09T09:00:00.000Z"
+      }
+    ],
+    "next": null
+  },
+  "tree": {
+    "root": {
+      "revision": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+      "path": "",
+      "entries": [
+        {
+          "name": "wiki",
+          "path": "wiki",
+          "type": "dir"
+        }
+      ]
+    },
+    "empty": {
+      "revision": null,
+      "path": "",
+      "entries": []
+    }
+  },
+  "file": {
+    "revision": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "path": "wiki/validate-state-first.md",
+    "sha256": "18e4acc471f23fdd509a665533e18618eb53131356fb687558b76098791b5eb5",
+    "size": 71,
+    "content": "# Validate state first\n\nCreating the session first opens a login CSRF.\n"
+  },
+  "comparison": {
+    "from": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+    "to": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+    "files": [
+      {
+        "path": "wiki/index.md",
+        "status": "added",
+        "additions": 3,
+        "deletions": 0,
+        "coarse": false,
+        "hunks": [
+          {
+            "oldStart": 0,
+            "oldLines": 0,
+            "newStart": 1,
+            "newLines": 3,
+            "lines": [
+              {
+                "kind": "add",
+                "text": "# Index",
+                "oldLine": null,
+                "newLine": 1
+              },
+              {
+                "kind": "add",
+                "text": "",
+                "oldLine": null,
+                "newLine": 2
+              },
+              {
+                "kind": "add",
+                "text": "- [[validate-state-first]]",
+                "oldLine": null,
+                "newLine": 3
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "wiki/notes.md",
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1,
+        "coarse": false,
+        "hunks": [
+          {
+            "oldStart": 1,
+            "oldLines": 2,
+            "newStart": 1,
+            "newLines": 2,
+            "lines": [
+              {
+                "kind": "context",
+                "text": "# Notes",
+                "oldLine": 1,
+                "newLine": 1
+              },
+              {
+                "kind": "remove",
+                "text": "old line",
+                "oldLine": 2,
+                "newLine": null
+              },
+              {
+                "kind": "add",
+                "text": "new line",
+                "oldLine": null,
+                "newLine": 2
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "wiki/old.md",
+        "status": "deleted",
+        "additions": 0,
+        "deletions": 1,
+        "coarse": true,
+        "hunks": [
+          {
+            "oldStart": 1,
+            "oldLines": 1,
+            "newStart": 0,
+            "newLines": 0,
+            "lines": [
+              {
+                "kind": "remove",
+                "text": "# Old",
+                "oldLine": 1,
+                "newLine": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "additions": 4,
+    "deletions": 2,
+    "truncated": false
+  },
+  "push": {
+    "request": {
+      "base": null,
+      "message": "Publish accepted knowledge",
+      "changes": [
+        {
+          "path": "wiki/validate-state-first.md",
+          "content": "# Validate state first\n\nCreating the session first opens a login CSRF.\n"
+        }
+      ]
+    },
+    "requestWithDelete": {
+      "base": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+      "message": "Add index, drop the old page",
+      "changes": [
+        {
+          "path": "wiki/index.md",
+          "content": "# Index\n\n- [[validate-state-first]]\n"
+        },
+        {
+          "path": "wiki/old.md",
+          "delete": true
+        }
+      ]
+    },
+    "response": {
+      "id": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+      "parent": null,
+      "treeHash": "caeb8504e4c339666b589a7eb510c80e111cd6b712731e9b6b6189f085c1b50a",
+      "author": "ada",
+      "message": "Publish accepted knowledge",
+      "createdAt": "2026-10-09T09:00:00.000Z",
+      "manifest": [
+        {
+          "path": "wiki/validate-state-first.md",
+          "sha256": "18e4acc471f23fdd509a665533e18618eb53131356fb687558b76098791b5eb5",
+          "size": 71
+        }
+      ]
+    },
+    "responseNoChange": {
+      "id": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+      "parent": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+      "treeHash": "b544089e71284122217b6f37e8b9d0ae7119648e43f95a9db3590b35d3c90502",
+      "author": "ada",
+      "message": "Add index",
+      "createdAt": "2026-10-09T10:30:00.000Z",
+      "manifest": [
+        {
+          "path": "wiki/index.md",
+          "sha256": "fc6e2e2b7b2dbcaa40e7824384e6e1ef4e39610e3b097f16b1e5b06db6d8bb17",
+          "size": 36
+        },
+        {
+          "path": "wiki/validate-state-first.md",
+          "sha256": "18e4acc471f23fdd509a665533e18618eb53131356fb687558b76098791b5eb5",
+          "size": 71
+        }
+      ]
+    },
+    "mergeRequest": {
+      "base": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+      "message": "Merge remote",
+      "mergedFrom": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0",
+      "changes": [
+        {
+          "path": "wiki/merged.md",
+          "content": "# Merged\n"
+        }
+      ]
+    }
+  },
+  "errors": {
+    "staleBase": {
+      "error": {
+        "code": "stale_base",
+        "message": "the base is not the current head; pull and try again",
+        "details": {
+          "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a"
+        }
+      },
+      "requestId": "req_stale"
+    },
+    "invalidPath": {
+      "error": {
+        "code": "invalid_path",
+        "message": "wiki/../x.md is not a valid path",
+        "details": {
+          "path": "wiki/../x.md"
+        }
+      },
+      "requestId": "req_path"
+    },
+    "invalidContent": {
+      "error": {
+        "code": "invalid_content",
+        "message": "wiki/a.md is not UTF-8 text",
+        "details": {
+          "path": "wiki/a.md"
+        }
+      },
+      "requestId": "req_content"
+    },
+    "notFound": {
+      "error": {
+        "code": "not_found",
+        "message": "that repository was not found"
+      },
+      "requestId": "req_missing"
+    },
+    "unauthorized": {
+      "error": {
+        "code": "unauthorized",
+        "message": "sign in first"
+      },
+      "requestId": "req_unauth"
+    },
+    "forbidden": {
+      "error": {
+        "code": "forbidden",
+        "message": "operators can only make a repository private"
+      },
+      "requestId": "req_forbidden"
+    },
+    "requestTooLarge": {
+      "error": {
+        "code": "request_too_large",
+        "message": "the push is larger than this server accepts"
+      },
+      "requestId": "req_big"
+    },
+    "limitExceeded": {
+      "error": {
+        "code": "limit_exceeded",
+        "message": "a push may change at most 10000 files"
+      },
+      "requestId": "req_limit"
+    },
+    "rateLimited": {
+      "error": {
+        "code": "rate_limited",
+        "message": "too many attempts; try again later",
+        "details": {
+          "retryAfter": 60
+        }
+      },
+      "requestId": "req_rate"
+    }
+  },
+  "tokens": {
+    "view": {
+      "id": "tok_example",
+      "name": "laptop",
+      "prefix": "atn_exam",
+      "scopes": [
+        "repo:read",
+        "repo:write"
+      ],
+      "repositories": [
+        "repo_example"
+      ],
+      "createdAt": "2026-10-09T09:00:00.000Z",
+      "lastUsedAt": null,
+      "expiresAt": "2027-01-09T09:00:00.000Z"
+    },
+    "unrestricted": {
+      "id": "tok_all",
+      "name": "ci",
+      "prefix": "atn_exam",
+      "scopes": [
+        "repo:read"
+      ],
+      "repositories": null,
+      "createdAt": "2026-10-09T09:00:00.000Z",
+      "lastUsedAt": "2026-10-09T09:30:00.000Z",
+      "expiresAt": null
+    },
+    "createRequest": {
+      "name": "laptop",
+      "scopes": [
+        "repo:read",
+        "repo:write"
+      ],
+      "repositories": [
+        "repo_example"
+      ],
+      "expiresInDays": 90
+    },
+    "created": {
+      "token": "atn_example_not_a_real_secret",
+      "id": "tok_example",
+      "name": "laptop",
+      "prefix": "atn_exam",
+      "scopes": [
+        "repo:read",
+        "repo:write"
+      ],
+      "repositories": [
+        "repo_example"
+      ],
+      "createdAt": "2026-10-09T09:00:00.000Z",
+      "lastUsedAt": null,
+      "expiresAt": "2027-01-09T09:00:00.000Z"
+    }
+  },
+  "device": {
+    "startRequest": {
+      "client": "athenaeum cli"
+    },
+    "start": {
+      "deviceCode": "dc_example_device_code_0123456789",
+      "userCode": "BCDF-2345",
+      "verificationUri": "https://library.example/device",
+      "verificationUriComplete": "https://library.example/device?code=BCDF-2345",
+      "interval": 5,
+      "expiresIn": 600
+    },
+    "lookup": {
+      "userCode": "BCDF-2345",
+      "client": "athenaeum cli",
+      "expiresAt": "2026-10-09T09:10:00.000Z"
+    },
+    "approveRequest": {
+      "userCode": "BCDF-2345",
+      "scopes": [
+        "repo:read",
+        "repo:write"
+      ],
+      "repositories": null
+    },
+    "denyRequest": {
+      "userCode": "BCDF-2345"
+    },
+    "tokenRequest": {
+      "deviceCode": "dc_example_device_code_0123456789"
+    },
+    "grant": {
+      "accessToken": "atn_example_not_a_real_secret",
+      "tokenType": "bearer",
+      "username": "ada",
+      "scopes": [
+        "repo:read",
+        "repo:write"
+      ]
+    },
+    "pollErrors": {
+      "authorization_pending": {
+        "error": {
+          "code": "authorization_pending",
+          "message": "the request has not been approved yet"
+        },
+        "requestId": "req_poll1"
+      },
+      "slow_down": {
+        "error": {
+          "code": "slow_down",
+          "message": "the request has not been approved yet"
+        },
+        "requestId": "req_poll2"
+      },
+      "expired_token": {
+        "error": {
+          "code": "expired_token",
+          "message": "the code expired before it was approved; start again"
+        },
+        "requestId": "req_poll3"
+      },
+      "access_denied": {
+        "error": {
+          "code": "access_denied",
+          "message": "the request was denied"
+        },
+        "requestId": "req_poll4"
+      }
+    }
+  },
+  "admin": {
+    "me": {
+      "operator": true,
+      "username": "ada"
+    },
+    "stats": {
+      "users": 12,
+      "repositories": 9,
+      "publicRepositories": 5,
+      "privateRepositories": 4,
+      "revisions": 87,
+      "blobs": 140,
+      "storedBytes": 52311
+    },
+    "users": {
+      "items": [
+        {
+          "id": "usr_ada",
+          "username": "ada",
+          "email": "ada@example.com",
+          "displayName": "Ada Lovelace",
+          "createdAt": "2026-10-01T08:00:00.000Z",
+          "repositoryCount": 2
+        },
+        {
+          "id": "usr_grace",
+          "username": "grace",
+          "email": null,
+          "displayName": "grace",
+          "createdAt": "2026-10-02T08:00:00.000Z",
+          "repositoryCount": 0
+        }
+      ],
+      "total": 2,
+      "page": 1,
+      "perPage": 25
+    },
+    "repositories": {
+      "items": [
+        {
+          "id": "repo_example",
+          "owner": "ada",
+          "name": "oauth-notes",
+          "fullName": "ada/oauth-notes",
+          "visibility": "public",
+          "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+          "fileCount": 2,
+          "sizeBytes": 107,
+          "createdAt": "2026-10-09T09:00:00.000Z",
+          "updatedAt": "2026-10-09T10:30:00.000Z"
+        },
+        {
+          "id": "repo_empty",
+          "owner": "ada",
+          "name": "scratch",
+          "fullName": "ada/scratch",
+          "visibility": "private",
+          "head": null,
+          "fileCount": 0,
+          "sizeBytes": 0,
+          "createdAt": "2026-10-09T09:00:00.000Z",
+          "updatedAt": "2026-10-09T09:00:00.000Z"
+        }
+      ],
+      "total": 2,
+      "page": 1,
+      "perPage": 25
+    },
+    "takedownRequest": {
+      "visibility": "private"
+    },
+    "takedownResponse": {
+      "id": "repo_example",
+      "owner": "ada",
+      "name": "oauth-notes",
+      "fullName": "ada/oauth-notes",
+      "visibility": "private",
+      "head": "rev_f1154ad1f14bfa2537417a1a45504f13bcc86958fe9c7e53c37887952aae342a",
+      "fileCount": 2,
+      "sizeBytes": 107,
+      "createdAt": "2026-10-09T09:00:00.000Z",
+      "updatedAt": "2026-10-09T11:00:00.000Z"
+    },
+    "publishRefused": {
+      "error": {
+        "code": "forbidden",
+        "message": "operators can only take a repository down; the owner publishes"
+      },
+      "requestId": "req_pub"
+    },
+    "anonymous": {
+      "error": {
+        "code": "unauthorized",
+        "message": "sign in first"
+      },
+      "requestId": "req_admin1"
+    },
+    "notOperator": {
+      "error": {
+        "code": "forbidden",
+        "message": "this account is not an operator"
+      },
+      "requestId": "req_admin2"
+    }
+  }
+}

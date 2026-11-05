@@ -1,3 +1,7 @@
+> Source layout updated 2026-11-06: see [the consolidation guide](consolidation.md)
+> and [AGENTS.md](../AGENTS.md). References below to separate local repositories
+> describe historical ownership; their active code now lives in this checkout.
+
 # Architecture
 
 ## The one decision everything else follows from

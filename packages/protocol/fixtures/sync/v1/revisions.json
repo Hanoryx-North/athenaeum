@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "name": "first revision",
+      "fields": {
+        "parent": null,
+        "treeHash": "caeb8504e4c339666b589a7eb510c80e111cd6b712731e9b6b6189f085c1b50a",
+        "author": "ada",
+        "message": "Publish accepted knowledge",
+        "createdAt": "2026-10-09T09:00:00.000Z"
+      },
+      "canonical": "{\"author\":\"ada\",\"createdAt\":\"2026-10-09T09:00:00.000Z\",\"message\":\"Publish accepted knowledge\",\"parent\":null,\"treeHash\":\"caeb8504e4c339666b589a7eb510c80e111cd6b712731e9b6b6189f085c1b50a\"}",
+      "revisionId": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0"
+    },
+    {
+      "name": "merge revision names its other parent",
+      "fields": {
+        "parent": "rev_9fe47972cb640c60340147edc13594482ff2bdc90875ec2e1aebc62452473a3d",
+        "treeHash": "331aa4c05ab7ee17f0b694572b7e4b4468976923cf4cfe8c1f487a8142dc2d9e",
+        "author": "grace",
+        "message": "Merge remote",
+        "createdAt": "2026-10-09T11:00:00.000Z",
+        "mergedFrom": "rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0"
+      },
+      "canonical": "{\"author\":\"grace\",\"createdAt\":\"2026-10-09T11:00:00.000Z\",\"mergedFrom\":\"rev_26fa67ff93e870ba74b2e2b4461be4366109798cba75665e7d897b12641b73c0\",\"message\":\"Merge remote\",\"parent\":\"rev_9fe47972cb640c60340147edc13594482ff2bdc90875ec2e1aebc62452473a3d\",\"treeHash\":\"331aa4c05ab7ee17f0b694572b7e4b4468976923cf4cfe8c1f487a8142dc2d9e\"}",
+      "revisionId": "rev_5aa8eb574d49190fe9b3c62113c28edf0b73d473a90a9fb992ac4941ab0acc22"
+    },
+    {
+      "name": "a null mergedFrom is omitted, not serialised",
+      "fields": {
+        "parent": null,
+        "treeHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "author": "ada",
+        "message": "Initial",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "mergedFrom": null
+      },
+      "canonical": "{\"author\":\"ada\",\"createdAt\":\"2026-01-01T00:00:00.000Z\",\"message\":\"Initial\",\"parent\":null,\"treeHash\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\"}",
+      "revisionId": "rev_95e8c1343455c73e834517aacd476899b3d8f766855059f49227f6e643f888ab"
+    },
+    {
+      "name": "unicode and escapes are kept as UTF-8 and JSON escapes",
+      "fields": {
+        "parent": null,
+        "treeHash": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881",
+        "author": "ünï",
+        "message": "日本語 \"quoted\"\n",
+        "createdAt": "2026-01-01T00:00:00.000Z"
+      },
+      "canonical": "{\"author\":\"ünï\",\"createdAt\":\"2026-01-01T00:00:00.000Z\",\"message\":\"日本語 \\\"quoted\\\"\\n\",\"parent\":null,\"treeHash\":\"2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881\"}",
+      "revisionId": "rev_1735cb7cd8ce4914355e363c3c12ed0e26fb4af97bad65e6818d93849251dc5e"
+    }
+  ]
+}

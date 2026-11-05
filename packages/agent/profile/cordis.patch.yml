@@ -1,0 +1,49 @@
+# The user patch layer for a dsh profile that Athenaeum's chat panel drives.
+#
+# Copy this to `$DSH_HOME/profiles/<name>/cordis.patch.yml`. It is the *profile's* layer,
+# applied after every bundle layer, so it is where a deployment says things this bundle
+# cannot say about itself. See docs/mounting.md.
+
+# The stdio JSON-RPC server is what makes the runtime drivable by
+# `@deepseek-ai/dsh-sdk-client`. It ships in the harness but belongs to no bundle, so a
+# profile has to install it as a plain dependency and insert the row itself:
+#
+#   dsh plugin --profile <name> add @deepseek-ai/dsh-sdk-jsonrpc-server
+#
+- insert:
+    - id: sdk-jsonrpc-server
+      name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+      config:
+        maxTokensAsSuccess: false
+
+# Which knowledge base to consult. Omit `workspace` and the provider uses the runtime's
+# working directory, which is the project the panel launched the runtime in — the right
+# answer whenever the panel opens one project at a time.
+#
+# - id: wiki-athenaeum
+#   config:
+#     command: athenaeum
+#     workspace: /path/to/the/project
+
+# The shipped Athenaeum profile can prepare knowledge proposals during ordinary work.
+# The proposal tools cannot accept or reject; a person decides in Athenaeum Review.
+# `curation` only controls the `wiki_*` tools — it does not stop an agent with filesystem
+# write access from editing vault pages directly. See docs/vault-seam.md.
+- id: tool-wiki
+  config:
+    read: true
+    curation: true
+    curatorModel: deepseek-v4-flash
+
+# The Wiki Agent role. Set the child's route to whatever is cheaper than the model running
+# the task: knowledge discovery is bounded work, and paying primary-model prices for it is
+# how a knowledge base stops being consulted. `tools` defaults to the wiki_* read tools, and
+# `maxDepth: 0` keeps the navigator from delegating further.
+#
+# - id: wiki-agent
+#   config:
+#     enabled: true
+#     modelProvider: deepseek
+#     model: deepseek-v4-flash
+#     # persona: ...
+#     # tools: [wiki_search, wiki_open, wiki_navigate, wiki_path, wiki_related, wiki_evidence, wiki_history, wiki_brief, wiki_status]

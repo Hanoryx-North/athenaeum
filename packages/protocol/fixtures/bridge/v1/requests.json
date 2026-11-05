@@ -1,0 +1,160 @@
+{
+  "capabilities": {
+    "protocolVersion": 1,
+    "requestId": "capabilities-1",
+    "request": { "method": "capabilities" }
+  },
+  "search": {
+    "protocolVersion": 1,
+    "requestId": "search-1",
+    "request": { "method": "search", "query": "OAuth callback", "limit": 20 }
+  },
+  "open": {
+    "protocolVersion": 1,
+    "requestId": "open-1",
+    "request": { "method": "open", "node": "AuthService" }
+  },
+  "navigate": {
+    "protocolVersion": 1,
+    "requestId": "navigate-1",
+    "request": { "method": "navigate", "node": "AuthService", "depth": 2, "maxNodes": 25 }
+  },
+  "related": {
+    "protocolVersion": 1,
+    "requestId": "related-1",
+    "request": { "method": "related", "node": "AuthService", "includeProposed": true }
+  },
+  "evidence": {
+    "protocolVersion": 1,
+    "requestId": "evidence-1",
+    "request": { "method": "evidence", "node": "AuthService" }
+  },
+  "history": {
+    "protocolVersion": 1,
+    "requestId": "history-1",
+    "request": { "method": "history", "node": "Decision_042" }
+  },
+  "context": {
+    "protocolVersion": 1,
+    "requestId": "context-1",
+    "request": {
+      "method": "context",
+      "task": "fix the OAuth callback",
+      "seeds": ["OAuth"],
+      "depth": 2,
+      "maxNodes": 25
+    }
+  },
+  "create": {
+    "protocolVersion": 1,
+    "requestId": "create-1",
+    "request": {
+      "method": "create",
+      "input": {
+        "type": "observation",
+        "title": "OAuthCallback validates state first",
+        "summary": "State is checked before session creation.",
+        "content": "",
+        "scope": "project"
+      },
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  },
+  "update": {
+    "protocolVersion": 1,
+    "requestId": "update-1",
+    "request": {
+      "method": "update",
+      "input": {
+        "node": "Decision_042",
+        "title": null,
+        "summary": "PKCE is required for public clients.",
+        "content": null,
+        "reason": "Confirmed against ADR-042."
+      },
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  },
+  "link": {
+    "protocolVersion": 1,
+    "requestId": "link-1",
+    "request": {
+      "method": "link",
+      "input": {
+        "from": "OAuth",
+        "type": "constrained_by",
+        "to": "Decision_042",
+        "note": "ADR requires PKCE.",
+        "confidence": 0.5
+      },
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  },
+  "attach_evidence": {
+    "protocolVersion": 1,
+    "requestId": "evidence-create-1",
+    "request": {
+      "method": "attach_evidence",
+      "input": {
+        "node": "OAuthCallback validates state first",
+        "kind": "symbol",
+        "anchor": {
+          "file": "src/auth/oauth.ts",
+          "symbol": "OAuthCallback.handle",
+          "lineStart": 42,
+          "lineEnd": 57,
+          "regionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "commit": "abc123"
+        },
+        "excerpt": "validateState(request.state)",
+        "note": "The state check precedes session creation."
+      },
+      "caller": { "model": "curator-model", "session": "sess_123" }
+    }
+  },
+  "record_use": {
+    "protocolVersion": 1,
+    "requestId": "use-1",
+    "request": {
+      "method": "record_use",
+      "nodes": ["Decision_042", "OAuthCallback"],
+      "session": "sess_123"
+    }
+  },
+  "status": {
+    "protocolVersion": 1,
+    "requestId": "status-1",
+    "request": { "method": "status" }
+  },
+  "review": {
+    "protocolVersion": 1,
+    "requestId": "review-1",
+    "request": { "method": "review", "limit": 50 }
+  },
+  "sources": {
+    "protocolVersion": 1,
+    "requestId": "sources-1",
+    "request": { "method": "sources", "limit": 100 }
+  },
+  "index": {
+    "protocolVersion": 1,
+    "requestId": "index-1",
+    "request": {
+      "method": "index",
+      "scope": "all",
+      "paths": ["src", "wiki"]
+    }
+  },
+  "path": {
+    "protocolVersion": 1,
+    "requestId": "path-1",
+    "request": {
+      "method": "path",
+      "from": "OAuth",
+      "to": "Decision_042",
+      "depth": 3,
+      "maxNodes": 25
+    }
+  }
+}

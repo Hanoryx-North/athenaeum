@@ -57,20 +57,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure access to the shared protocol
-        env:
-          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
-          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Work out the version and whether this run publishes
@@ -159,17 +148,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure access to the shared protocol
-        env:
-          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
-          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -197,7 +175,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -280,6 +258,7 @@ jobs:
       - name: Build the CLI and stage the native setup resources
         run: |
           cargo build --release -p athenaeum-cli --target "$TARGET"
+          cargo +stable build --locked --release --manifest-path packages/agent/runtime/native-cli/Cargo.toml --target-dir target/native-runtime --target "$TARGET" -p athenaeum-agent --bin athenaeum-agent
           node scripts/release/package-tools.mjs "$TARGET" packaged-integration/athenaeum-integrations.mjs packaged-agent
           cp packaged-integration/LICENSE-integrations src-tauri/tools/
 
@@ -325,25 +304,14 @@ jobs:
               ${PUBKEY_FILE:+--pubkey-file "$PUBKEY_FILE"}
           done
 
-      - name: Build and package the athenaeum CLI
+      - name: Package the shared CLI and native agent archive
         run: |
-          cargo build --release -p athenaeum-cli --target "$TARGET"
           BIN="target/$TARGET/release/athenaeum"
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="$BIN.exe"; fi
-          # An Intel Mac binary cannot be assumed runnable on the ARM runner.
           if [ "$TARGET" != "x86_64-apple-darwin" ]; then "$BIN" --version; fi
-          mkdir cli-stage
-          cp "$BIN" LICENSE cli-stage/
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cp "$BIN" cli-stage/wiki.exe
-          else
-            cp "$BIN" cli-stage/wiki
-          fi
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            (cd cli-stage && tar -a -cf "../dist-release/athenaeum-cli-$TARGET.zip" *)
-          else
-            tar -czf "dist-release/athenaeum-cli-$TARGET.tar.gz" -C cli-stage .
-          fi
+          EXT=tar.gz
+          if [ "$RUNNER_OS" = "Windows" ]; then EXT=zip; fi
+          cp "src-tauri/tools/athenaeum-cli.$EXT" "dist-release/athenaeum-cli-$TARGET.$EXT"
           ls -la dist-release
 
       - name: Attach to the draft release
@@ -359,7 +327,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The agent integration (MCP server, hooks, connect) is MIT and lives in its own repository.
+  # The MIT MCP integration is built from packages/integrations in this checkout.
   # It ships inside this release as one file, so installing Athenaeum is installing one thing.
   integrations:
     name: Build the agent integration
@@ -374,40 +342,17 @@ jobs:
         with:
           path: athenaeum
 
-      - name: Read the pinned revisions
-        id: pin
-        working-directory: athenaeum
-        run: |
-          echo "integrations_repo=$(node -p "require('./integrations.pin.json').integrations.repository")" >> "$GITHUB_OUTPUT"
-          echo "integrations_ref=$(node -p "require('./integrations.pin.json').integrations.ref")" >> "$GITHUB_OUTPUT"
-          echo "protocol_repo=$(node -p "require('./integrations.pin.json').protocol.repository")" >> "$GITHUB_OUTPUT"
-          echo "protocol_ref=$(node -p "require('./integrations.pin.json').protocol.ref")" >> "$GITHUB_OUTPUT"
-
-      # The integration depends on the protocol by relative path, so they sit side by side.
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.pin.outputs.integrations_repo }}
-          ref: ${{ steps.pin.outputs.integrations_ref }}
-          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-          path: athenaeum_integrations
-
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.pin.outputs.protocol_repo }}
-          ref: ${{ steps.pin.outputs.protocol_ref }}
-          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-          path: athenaeum_protocol
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Build the single-file bundle
-        working-directory: athenaeum_integrations
+        working-directory: athenaeum
         run: |
           npm ci
-          npm run verify
-          node dist/athenaeum-integrations.mjs --help
+          npm run build -w @athenaeum/protocol
+          npm run verify -w athenaeum-integrations
+          node packages/integrations/dist/athenaeum-integrations.mjs --help
 
       - name: Check the installer scripts parse
         working-directory: athenaeum
@@ -418,10 +363,10 @@ jobs:
       - name: Collect
         run: |
           mkdir release-extra
-          cp athenaeum_integrations/dist/athenaeum-integrations.mjs release-extra/
+          cp athenaeum/packages/integrations/dist/athenaeum-integrations.mjs release-extra/
           cp athenaeum/install/install.sh athenaeum/install/install.ps1 athenaeum/install/install.mjs release-extra/
           cp athenaeum/install/NOTICE-MIT.txt release-extra/LICENSE-integrations
-          if [ -f athenaeum_integrations/LICENSE ]; then cp athenaeum_integrations/LICENSE release-extra/LICENSE-integrations; fi
+          if [ -f athenaeum/packages/integrations/LICENSE ]; then cp athenaeum/packages/integrations/LICENSE release-extra/LICENSE-integrations; fi
 
       - name: Attach to the draft release
         if: env.PUBLISH == 'true'
@@ -444,65 +389,29 @@ jobs:
         with:
           path: athenaeum
 
-      - name: Read the agent revision
-        id: agent
-        working-directory: athenaeum
-        run: |
-          echo "repo=$(node -p "require('./integrations.pin.json').agent.repository")" >> "$GITHUB_OUTPUT"
-          echo "ref=$(node -p "require('./integrations.pin.json').agent.ref")" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.agent.outputs.repo }}
-          ref: ${{ steps.agent.outputs.ref }}
-          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-          path: athenaeum_agent
-
-      - name: Read the upstream runtime pin
-        id: harness
-        working-directory: athenaeum_agent
-        run: |
-          echo "tag=$(node -p "require('./harness.pin.json').gitTag")" >> "$GITHUB_OUTPUT"
-          echo "pnpm=$(node -p "require('./harness.pin.json').pnpm")" >> "$GITHUB_OUTPUT"
-          echo "protocol_repo=$(node -p "require('../athenaeum/integrations.pin.json').protocol.repository")" >> "$GITHUB_OUTPUT"
-          echo "protocol_ref=$(node -p "require('../athenaeum/integrations.pin.json').protocol.ref")" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
-        with:
-          repository: deepseek-ai/deepseek-harness
-          ref: ${{ steps.harness.outputs.tag }}
-          path: deepseek-harness
-
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ steps.harness.outputs.protocol_repo }}
-          ref: ${{ steps.harness.outputs.protocol_ref }}
-          token: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-          path: athenaeum_protocol
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ steps.harness.outputs.pnpm }}
-
-      - name: Build the unmodified upstream and the adapter
+      - name: Build the shared protocol and optional Harness adapter
+        working-directory: athenaeum
         run: |
-          cd deepseek-harness
-          pnpm install --frozen-lockfile
-          pnpm run build:native-system
-          pnpm run build:lib
-          cd ../athenaeum_agent
-          pnpm install --frozen-lockfile
-          pnpm typecheck
-          pnpm build
-          cd ../athenaeum_protocol
           npm ci
-          npm run build
-          cd ../athenaeum
-          node scripts/release/package-agent.mjs ../athenaeum_agent ../athenaeum_protocol ../agent-package
+          npm run build -w @athenaeum/protocol
+          npm run typecheck -w athenaeum-agent
+          npm run build -w athenaeum-agent
+          node scripts/release/package-agent.mjs packages/agent packages/protocol ../agent-package
+
+      - name: Attach the optional agent to the same draft release
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          cp agent-package/install.mjs agent-package/agent-install.mjs
+          cp athenaeum/packages/agent/install/install.sh agent-package/agent-install.sh
+          cp athenaeum/packages/agent/install/install.ps1 agent-package/agent-install.ps1
+          gh release upload "$TAG" agent-package/athenaeum-agent.tgz agent-package/pins.json agent-package/agent-install.* --clobber --repo "$GITHUB_REPOSITORY"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -527,7 +436,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Check every platform's CLI archive arrived
         run: |

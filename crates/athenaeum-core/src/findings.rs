@@ -31,8 +31,8 @@ use crate::error::Result;
 use crate::id::{EvidenceId, NodeId};
 use crate::model::{hash, EdgeType, NodeStatus, NodeType, ProvenanceSource};
 use crate::portable::memory;
-use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter, SourceScope};
 use crate::status::scan_state;
+use crate::store::{EdgeFilter, KnowledgeStore, NodeFilter, SourceScope};
 
 /// Which question a finding is asking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -255,7 +255,9 @@ pub fn detect(store: &KnowledgeStore, options: &FindingOptions) -> Result<Vec<Fi
         .collect::<Vec<_>>();
 
     let mut findings = Vec::new();
-    findings.extend(contradictions(store, &nodes, &live, &edges, &titles, options)?);
+    findings.extend(contradictions(
+        store, &nodes, &live, &edges, &titles, options,
+    )?);
     findings.extend(duplicates(store, &live, options)?);
     findings.extend(supersession(store, &nodes, &edges, &titles)?);
     findings.extend(anchors(store, &nodes, options)?);
@@ -281,7 +283,10 @@ pub fn count(store: &KnowledgeStore, options: &FindingOptions) -> Result<u64> {
 }
 
 /// The review queue, in the bridge's shape.
-pub fn review_findings(store: &KnowledgeStore, limit: Option<u32>) -> Result<Vec<ReviewFindingView>> {
+pub fn review_findings(
+    store: &KnowledgeStore,
+    limit: Option<u32>,
+) -> Result<Vec<ReviewFindingView>> {
     let mut options = FindingOptions::default();
     if let Some(limit) = limit {
         options.max_findings = limit as usize;
@@ -320,8 +325,22 @@ const OPPOSED_TERMS: &[(&str, &str)] = &[
 
 /// Negations: a claim that shares a proposition with another but denies it.
 const NEGATIONS: &[&str] = &[
-    "not", "never", "no", "cannot", "mustnt", "shouldnt", "dont", "doesnt", "without",
-    "avoid", "forbid", "forbidden", "disable", "disabled", "prohibit", "deprecated",
+    "not",
+    "never",
+    "no",
+    "cannot",
+    "mustnt",
+    "shouldnt",
+    "dont",
+    "doesnt",
+    "without",
+    "avoid",
+    "forbid",
+    "forbidden",
+    "disable",
+    "disabled",
+    "prohibit",
+    "deprecated",
 ];
 
 fn contradictions(
@@ -403,7 +422,11 @@ fn contradictions(
             node.title.clone(),
             "is marked contradicted and awaiting a decision".to_string(),
             std::iter::once(node.id.clone()).chain(rivals).collect(),
-            store.evidence_for(&node.id)?.iter().map(|e| e.id.clone()).collect(),
+            store
+                .evidence_for(&node.id)?
+                .iter()
+                .map(|e| e.id.clone())
+                .collect(),
             None,
             1.0,
             vec!["node status contradicted".to_string()],
@@ -412,10 +435,7 @@ fn contradictions(
 
     // Rival claims about one subject: several live claims, one governing.
     let mut clusters: BTreeMap<_, Vec<&crate::model::KnowledgeNode>> = BTreeMap::new();
-    for node in live
-        .iter()
-        .filter(|node| !node.node_type.is_structural())
-    {
+    for node in live.iter().filter(|node| !node.node_type.is_structural()) {
         clusters
             .entry(crate::authority::subject_key(node))
             .or_default()
@@ -425,7 +445,10 @@ fn contradictions(
         if cluster.len() < 2 {
             continue;
         }
-        let owned = cluster.iter().map(|node| (*node).clone()).collect::<Vec<_>>();
+        let owned = cluster
+            .iter()
+            .map(|node| (*node).clone())
+            .collect::<Vec<_>>();
         let ranked = crate::authority::rank(&owned);
         let Some(governing) = ranked.first() else {
             continue;
@@ -463,7 +486,10 @@ fn contradictions(
                 evidence_of(store, &shadowed.id, &governing.id)?,
                 None,
                 1.0,
-                vec![format!("same subject key: {}", governing.title.trim().to_lowercase())],
+                vec![format!(
+                    "same subject key: {}",
+                    governing.title.trim().to_lowercase()
+                )],
             ));
         }
     }
@@ -509,8 +535,14 @@ fn disagreement(
         return Some((0.7 + 0.2 * similarity, features));
     }
 
-    let negations_a = tokens_a.iter().filter(|token| NEGATIONS.contains(&token.as_str())).count();
-    let negations_b = tokens_b.iter().filter(|token| NEGATIONS.contains(&token.as_str())).count();
+    let negations_a = tokens_a
+        .iter()
+        .filter(|token| NEGATIONS.contains(&token.as_str()))
+        .count();
+    let negations_b = tokens_b
+        .iter()
+        .filter(|token| NEGATIONS.contains(&token.as_str()))
+        .count();
     if similarity >= 0.5 && (negations_a == 0) != (negations_b == 0) {
         features.push(format!(
             "same proposition ({:.2} of the same words), denied on one side only",
@@ -639,7 +671,11 @@ fn subject_tokens(title: &str) -> Vec<String> {
     let mut tokens = tokens(title)
         .into_iter()
         .filter(|token| !SUBJECT_STOP_WORDS.contains(&token.as_str()))
-        .map(|token| NUMBER_WORDS.binary_search_by(|(word, _)| word.cmp(&token.as_str())).map_or(token.clone(), |index| NUMBER_WORDS[index].1.to_string()))
+        .map(|token| {
+            NUMBER_WORDS
+                .binary_search_by(|(word, _)| word.cmp(&token.as_str()))
+                .map_or(token.clone(), |index| NUMBER_WORDS[index].1.to_string())
+        })
         .collect::<Vec<_>>();
     tokens.sort();
     tokens.dedup();
@@ -649,8 +685,8 @@ fn subject_tokens(title: &str) -> Vec<String> {
 /// Words that carry no subject of their own.
 const SUBJECT_STOP_WORDS: &[&str] = &[
     "the", "a", "an", "is", "are", "was", "were", "be", "of", "for", "to", "in", "on", "at", "and",
-    "or", "it", "its", "this", "that", "these", "those", "with", "by", "as", "from", "then", "than",
-    "into", "over", "under", "about", "note", "notes",
+    "or", "it", "its", "this", "that", "these", "those", "with", "by", "as", "from", "then",
+    "than", "into", "over", "under", "about", "note", "notes",
 ];
 
 /// Number words, so "three" and "3" are the same subject. Sorted by word, which
@@ -809,7 +845,10 @@ fn exact_duplicates(
                 &mut findings,
                 pair[0],
                 pair[1],
-                format!("same title key {:?}", crate::authority::subject_key(pair[0]).title),
+                format!(
+                    "same title key {:?}",
+                    crate::authority::subject_key(pair[0]).title
+                ),
             )?;
             if findings.len() >= options.max_findings {
                 return Ok(findings);
@@ -825,7 +864,10 @@ fn exact_duplicates(
                 &mut findings,
                 pair[0],
                 pair[1],
-                format!("identical body, {} characters", pair[0].content.trim().len()),
+                format!(
+                    "identical body, {} characters",
+                    pair[0].content.trim().len()
+                ),
             )?;
             if findings.len() >= options.max_findings {
                 return Ok(findings);
@@ -864,10 +906,12 @@ fn near_duplicates(
     }
     let mut buckets: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (index, (_, tokens)) in candidates.iter().enumerate() {
-        if let Some(rarest) = tokens
-            .iter()
-            .min_by_key(|token| (frequency.get(token.as_str()).copied().unwrap_or(0), token.as_str()))
-        {
+        if let Some(rarest) = tokens.iter().min_by_key(|token| {
+            (
+                frequency.get(token.as_str()).copied().unwrap_or(0),
+                token.as_str(),
+            )
+        }) {
             buckets.entry(rarest.as_str()).or_default().push(index);
         }
     }
@@ -986,10 +1030,13 @@ fn supersession(
             FindingKind::Superseded,
             FindingSeverity::Info,
             node.title.clone(),
-            "is retained but no longer offered; delete it or confirm the replacement"
-                .to_string(),
+            "is retained but no longer offered; delete it or confirm the replacement".to_string(),
             vec![node.id.clone()],
-            store.evidence_for(&node.id)?.iter().map(|e| e.id.clone()).collect(),
+            store
+                .evidence_for(&node.id)?
+                .iter()
+                .map(|e| e.id.clone())
+                .collect(),
             None,
             1.0,
             vec!["node status superseded".to_string()],
@@ -1014,7 +1061,11 @@ fn anchors(
                 node.title.clone(),
                 "no longer resolves to anything in the source it came from".to_string(),
                 vec![node.id.clone()],
-                store.evidence_for(&node.id)?.iter().map(|e| e.id.clone()).collect(),
+                store
+                    .evidence_for(&node.id)?
+                    .iter()
+                    .map(|e| e.id.clone())
+                    .collect(),
                 anchor_file(store, &node.id)?,
                 1.0,
                 vec!["node status stale_requires_review".to_string()],
@@ -1025,7 +1076,11 @@ fn anchors(
                 node.title.clone(),
                 "rests on source that has moved or changed since it was written".to_string(),
                 vec![node.id.clone()],
-                store.evidence_for(&node.id)?.iter().map(|e| e.id.clone()).collect(),
+                store
+                    .evidence_for(&node.id)?
+                    .iter()
+                    .map(|e| e.id.clone())
+                    .collect(),
                 anchor_file(store, &node.id)?,
                 1.0,
                 vec!["node status stale".to_string()],
@@ -1088,7 +1143,11 @@ fn anchors(
             .content_hash
             .as_deref()
             .is_none_or(|expected| expected == hash(content));
-        let region_matches = match (anchor.region_hash.as_deref(), anchor.line_start, anchor.line_end) {
+        let region_matches = match (
+            anchor.region_hash.as_deref(),
+            anchor.line_start,
+            anchor.line_end,
+        ) {
             (Some(expected), Some(start), Some(end)) => {
                 crate::repository::region_by_lines(content, start, end)
                     .is_some_and(|region| hash(region) == expected)
@@ -1188,7 +1247,10 @@ fn proposals(
         }
     }
 
-    for edge in edges.iter().filter(|edge| edge.status == NodeStatus::Proposed) {
+    for edge in edges
+        .iter()
+        .filter(|edge| edge.status == NodeStatus::Proposed)
+    {
         let by = match edge.provenance.source {
             ProvenanceSource::Model => "a model",
             ProvenanceSource::Import => "an import",
@@ -1299,7 +1361,11 @@ fn orphans(
             node.title.clone(),
             "has no traversable relationship, so navigation can never reach it".to_string(),
             vec![node.id.clone()],
-            store.evidence_for(&node.id)?.iter().map(|e| e.id.clone()).collect(),
+            store
+                .evidence_for(&node.id)?
+                .iter()
+                .map(|e| e.id.clone())
+                .collect(),
             None,
             1.0,
             vec!["no traversable edge".to_string()],
@@ -1350,10 +1416,7 @@ fn finding(
 }
 
 fn title_of(titles: &HashMap<NodeId, String>, id: &NodeId) -> String {
-    titles
-        .get(id)
-        .cloned()
-        .unwrap_or_else(|| id.to_string())
+    titles.get(id).cloned().unwrap_or_else(|| id.to_string())
 }
 
 fn title_of_node(nodes: &[crate::model::KnowledgeNode], id: &NodeId) -> String {

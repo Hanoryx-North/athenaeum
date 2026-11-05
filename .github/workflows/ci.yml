@@ -26,17 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure access to the shared protocol
-        env:
-          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
-          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -60,6 +49,14 @@ jobs:
       # Warnings fail the build here rather than accumulating until nobody
       # reads the output any more.
       - run: cargo clippy --workspace -- -D warnings
+      - run: cargo test -p athenaeum-core -p athenaeum-cli --all-targets
+      - run: cargo build -p athenaeum-cli
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run build:packages
+      - run: python3 validation/verify_all.py --only product-cli,product-engine,product-repository,product-knowledge,product-boundaries,product-protocol,product-mcp-desktop,product-agent-to-knowledge,product-codex-memory,agent --fail-on-skip
 
   frontend:
     name: Frontend
@@ -67,22 +64,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure access to the shared protocol
-        env:
-          TOKEN: ${{ secrets.ATHENAEUM_PROTOCOL_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Set ATHENAEUM_PROTOCOL_TOKEN to a fine-grained token with read access to Hanoryx-North/athenaeum_protocol."
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "https://github.com/Hanoryx-North/"
-          git config --global --add url."https://x-access-token:${TOKEN}@github.com/Hanoryx-North/".insteadOf "ssh://git@github.com/Hanoryx-North/"
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
-      - run: npm run typecheck
+      - run: npm run build:packages
+      - run: npm run check:packages
       - run: npm run build
+      - run: npm test
+      - run: python3 validation/verify_all.py --only protocol --fail-on-skip

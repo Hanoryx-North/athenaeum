@@ -1,0 +1,59 @@
+{
+  "name": "athenaeum-integrations",
+  "version": "0.1.0",
+  "description": "Connect Athenaeum's local knowledge to other agents: a standards-compliant MCP server, a typed client for the Athenaeum bridge, and ready-made configuration for Claude Code, Codex, Cursor and the DeepSeek Harness.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "bin": {
+    "athenaeum-mcp": "./dist/mcp/bin.js",
+    "athenaeum-integrations": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "default": "./dist/mcp/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "default": "./dist/adapters/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run typecheck && npm run build && npm run bundle",
+    "mcp": "node dist/mcp/bin.js",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@athenaeum/protocol": "file:../protocol",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "esbuild": "^0.25.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.2"
+  }
+}

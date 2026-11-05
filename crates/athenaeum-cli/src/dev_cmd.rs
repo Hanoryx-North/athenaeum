@@ -12,7 +12,7 @@ use crate::Outcome;
 
 #[derive(Args)]
 pub struct DevArgs {
-    /// Parent of the sibling repositories. Otherwise discover ancestors or WIKI_DEV_ROOT.
+    /// Athenaeum checkout root. Otherwise discover ancestors or WIKI_DEV_ROOT.
     #[arg(long, global = true)]
     root: Option<PathBuf>,
     /// Print the exact plan without running it.
@@ -26,7 +26,7 @@ pub struct DevArgs {
 enum DevCommand {
     /// List components, checkout paths, versions, and supported package scripts.
     Components,
-    /// Show changes in each source repository (read-only git status).
+    /// Show changes in the source checkout (read-only git status).
     Status,
     /// Check source checkout and tool prerequisites.
     Doctor,
@@ -90,13 +90,10 @@ enum Component {
     Agent,
     App,
     Desktop,
-    Library,
-    Admin,
-    Api,
     Validation,
 }
 
-const COMPONENTS: [Component; 11] = [
+const COMPONENTS: [Component; 8] = [
     Component::Protocol,
     Component::Engine,
     Component::Cli,
@@ -104,9 +101,6 @@ const COMPONENTS: [Component; 11] = [
     Component::Agent,
     Component::App,
     Component::Desktop,
-    Component::Library,
-    Component::Admin,
-    Component::Api,
     Component::Validation,
 ];
 
@@ -121,22 +115,16 @@ impl Component {
             Self::Agent => "agent",
             Self::App => "app",
             Self::Desktop => "desktop",
-            Self::Library => "library",
-            Self::Admin => "admin",
-            Self::Api => "api",
             Self::Validation => "validation",
         }
     }
     fn repository(self) -> &'static str {
         match self {
-            Self::Engine | Self::Cli | Self::App | Self::Desktop => "athenaeum",
-            Self::Protocol => "athenaeum_protocol",
-            Self::Integrations => "athenaeum_integrations",
-            Self::Agent => "athenaeum_agent",
-            Self::Library => "athenaeum_library",
-            Self::Admin => "athenaeum_admin",
-            Self::Api => "athenaeum_api",
-            Self::Validation => "athenaeum_validation",
+            Self::Engine | Self::Cli | Self::App | Self::Desktop => "",
+            Self::Protocol => "packages/protocol",
+            Self::Integrations => "packages/integrations",
+            Self::Agent => "packages/agent",
+            Self::Validation => "validation",
             Self::All => unreachable!(),
         }
     }
@@ -145,16 +133,11 @@ impl Component {
             Self::Engine => Some("athenaeum-core"),
             Self::Cli => Some("athenaeum-cli"),
             Self::Desktop => Some("athenaeum-app"),
-            Self::Api => Some("athenaeum-api"),
             _ => None,
         }
     }
     fn manager(self) -> &'static str {
-        if self == Self::Agent {
-            "pnpm"
-        } else {
-            "npm"
-        }
+        "npm"
     }
     fn suites(self) -> &'static [&'static str] {
         match self {
@@ -166,21 +149,13 @@ impl Component {
                 "product-boundaries",
                 "product-protocol",
             ],
-            Self::Cli => &[
-                "product-cli",
-                "product-engine",
-                "product-setup",
-                "product-local-to-cloud",
-            ],
+            Self::Cli => &["product-cli", "product-engine", "product-codex-memory"],
             Self::Integrations => &["integrations", "product-mcp-desktop"],
-            Self::Agent => &["agent", "product-agent-to-knowledge"],
+            Self::Agent => &["native-agent-config", "agent", "product-agent-to-knowledge"],
             Self::App => &["app-frontend"],
             Self::Desktop => &["app-desktop"],
-            Self::Library => &["library"],
-            Self::Admin => &["admin"],
             Self::Protocol => &["protocol"],
-            Self::Api => &["api", "product-api"],
-            Self::Validation => &["preserved"],
+            Self::Validation => &["product-cli"],
             Self::All => &[],
         }
     }
@@ -191,14 +166,24 @@ pub(crate) fn root(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os("WIKI_DEV_ROOT").map(PathBuf::from))
     {
-        return Ok(root.canonicalize()?);
+        let root = root.canonicalize()?;
+        return Ok(if root.join("athenaeum/Cargo.toml").is_file() {
+            root.join("athenaeum")
+        } else {
+            root
+        });
     }
     for ancestor in cwd.canonicalize()?.ancestors() {
-        if ancestor.join("athenaeum/Cargo.toml").is_file() {
+        if ancestor.join("Cargo.toml").is_file()
+            && ancestor.join("packages/protocol/package.json").is_file()
+        {
             return Ok(ancestor.into());
         }
+        if ancestor.join("athenaeum/Cargo.toml").is_file() {
+            return Ok(ancestor.join("athenaeum"));
+        }
     }
-    Err(portable_error("source_not_found", "No Athenaeum source workspace here. Use wiki dev --root <parent-of-repositories>, or set WIKI_DEV_ROOT."))
+    Err(portable_error("source_not_found", "No Athenaeum source workspace here. Use wiki dev --root <athenaeum-checkout>, or set WIKI_DEV_ROOT."))
 }
 
 /// Compile the frontend and native app together, without creating installers.
@@ -294,17 +279,8 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
             return Ok(Outcome::Ok);
         }
         DevCommand::Doctor => {
-            let tools = [
-                "cargo",
-                "rustc",
-                "node",
-                "npm",
-                "pnpm",
-                python(),
-                "git",
-                "protoc",
-            ]
-            .map(|name| json!({"tool": name, "path": process::executable(name)}));
+            let tools = ["cargo", "rustc", "node", "npm", python(), "git", "protoc"]
+                .map(|name| json!({"tool": name, "path": process::executable(name)}));
             let missing = COMPONENTS
                 .iter()
                 .filter(|c| !root.join(c.repository()).is_dir())
@@ -326,20 +302,29 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
         _ => {}
     }
     let mut steps = Vec::new();
+    if matches!(args.command, DevCommand::Install(_)) {
+        let install = if root.join("package-lock.json").is_file() {
+            "ci"
+        } else {
+            "install"
+        };
+        steps.push(Step::new("dependencies", &root, "npm", &[install]));
+        steps.push(Step::new(
+            "native-dependencies",
+            &root,
+            "cargo",
+            &["fetch", "--locked"],
+        ));
+        return process::run_steps(json_out, args.dry_run, &steps);
+    }
     match &args.command {
         DevCommand::Status => {
-            let mut seen = BTreeSet::new();
-            for c in COMPONENTS {
-                let path = root.join(c.repository());
-                if path.is_dir() && seen.insert(c.repository()) {
-                    steps.push(Step::new(
-                        c.name(),
-                        &path,
-                        "git",
-                        &["status", "--short", "--branch"],
-                    ));
-                }
-            }
+            steps.push(Step::new(
+                "workspace",
+                &root,
+                "git",
+                &["status", "--short", "--branch"],
+            ));
         }
         DevCommand::Run {
             component,
@@ -365,15 +350,12 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                 ));
             }
             let mut step = match c {
-                Component::Api => native(&root, *c, "run"),
                 Component::Desktop => desktop_serve(&root)?,
-                Component::App | Component::Library | Component::Admin => {
-                    script(&root, *c, "dev", &[])?
-                }
+                Component::App => script(&root, *c, "dev", &[])?,
                 _ => {
                     return Err(portable_error(
                         "unsupported_task",
-                        "serve supports app, desktop, api, library, admin",
+                        "serve supports app and desktop",
                     ))
                 }
             };
@@ -388,11 +370,11 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
             suite,
             args: extra,
         } => {
-            let validation = root.join("athenaeum_validation");
+            let validation = root.join("validation");
             if !validation.join("verify_all.py").is_file() {
                 return Err(portable_error(
                     "source_not_found",
-                    "athenaeum_validation/verify_all.py is missing",
+                    "validation/verify_all.py is missing",
                 ));
             }
             if suite.is_empty()
@@ -426,13 +408,6 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                 ));
             }
             steps.last_mut().unwrap().args.extend_from_slice(extra);
-            if suite.is_empty()
-                && (targets.components.is_empty()
-                    || targets.components.contains(&Component::All)
-                    || targets.components.contains(&Component::Api))
-            {
-                steps.push(native(&root, Component::Api, "test"));
-            }
         }
         DevCommand::Install(targets)
         | DevCommand::Check(targets)
@@ -453,9 +428,7 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                             continue;
                         }
                         if dir.join("package.json").is_file() {
-                            let install_args: &[&str] = if c == Component::Agent {
-                                &["install", "--frozen-lockfile"]
-                            } else if dir.join("package-lock.json").is_file() {
+                            let install_args: &[&str] = if dir.join("package-lock.json").is_file() {
                                 &["ci"]
                             } else {
                                 &["install"]
@@ -477,6 +450,14 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                             steps.push(step);
                         } else if c != Component::Validation {
                             steps.push(script(&root, c, "build", &[])?);
+                            if c == Component::Agent {
+                                let extra = if *release {
+                                    vec!["--release".to_string()]
+                                } else {
+                                    vec![]
+                                };
+                                steps.push(script(&root, c, "native:build", &extra)?);
+                            }
                         }
                     }
                     DevCommand::Check(_) => {
@@ -497,13 +478,17 @@ pub fn run(json_out: bool, cwd: &Path, args: &DevArgs) -> Result<Outcome> {
                                 c.name(),
                                 &dir,
                                 python(),
-                                &["inventory_suites.py", "--check"],
+                                &["-m", "compileall", "-q", "."],
                             ));
                         } else if c == Component::Protocol {
                             steps.push(script(&root, c, "build", &[])?);
                             steps.push(script(&root, c, "check", &[])?);
                         } else {
                             steps.push(script(&root, c, "typecheck", &[])?);
+                            if c == Component::Agent {
+                                steps.push(script(&root, c, "native:verify-source", &[])?);
+                                steps.push(script(&root, c, "native:check", &[])?);
+                            }
                         }
                     }
                     DevCommand::Fmt(_) => {

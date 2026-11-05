@@ -4,16 +4,12 @@ A local knowledge app: a Markdown wiki, its one rebuildable knowledge engine,
 and desktop and CLI clients.
 
 Use the standalone `wiki` command to set up and operate Athenaeum. `wiki commands`
-lists the full command surface; `wiki dev` builds, checks and tests the sibling
-projects. See [the Wiki CLI guide](docs/wiki-cli.md) for settings and API access.
+lists the full command surface; `wiki dev` builds, checks and tests the components in this checkout. See [the Wiki CLI guide](docs/wiki-cli.md) for settings and API access.
 The existing `athenaeum` executable remains compatible.
 
-> **Building on Athenaeum?** Read [`AGENTS.md`](AGENTS.md) first. It defines what this
-> repository owns and — just as importantly — what belongs to
-> [`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) and
-> [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) instead.
-> [`docs/vision/build-plan.md`](docs/vision/build-plan.md) is cross-repository product
-> vision, not this repository's backlog.
+> **Building on Athenaeum?** Read [AGENTS.md](AGENTS.md), then the
+[one-checkout guide](docs/consolidation.md). The agent adapter, MCP integrations,
+shared protocol and validation are maintained here.
 
 The idea, in one sentence: **a coding agent gets much better when it stops
 rediscovering the same things about your project every session.** Athenaeum
@@ -105,28 +101,28 @@ What works:
 
 ### Where the agent lives
 
-The coding-agent runtime is intentionally **not built in this repository**. It is
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), which owns
-providers, streaming, tools, permissions and sessions, with
-[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) as the bundle
-that plugs this library into it. Athenaeum exposes a versioned, storage-independent
-Wiki contract for that, and the agent reaches the library through nothing else.
-Install the runtime and its Athenaeum profile through guided setup in **Knowledge → Library**.
-The app delegates installation to the installer packaged by `athenaeum_agent`.
-The desktop chat launches that profile through
-the public Harness SDK, uses the currently open project as its workspace, and shows session and
-tool events while a turn runs. Wiki curation tools leave proposals in the local review queue;
-accepting one in Review is what writes its Markdown page. See [the agent integration notes](docs/agent-integration.md)
-for the bridge boundary and [the desktop chat notes](docs/porting-llm-wiki.md#desktop-chat) for the
-runtime details and remaining permission limitation.
+The primary native agent lives in [`packages/agent/runtime`](packages/agent/runtime/README.md).
+It owns turns, coding tools, sessions, providers and permissions; the desktop is its
+app-server client. The optional [Harness adapter](packages/agent/README.md) adds wiki
+capabilities to the separately installed upstream Harness. Both use the same local
+bridge and knowledge engine. The MCP server and existing-agent setup live in
+[`packages/integrations`](packages/integrations/README.md).
+
+Build the native runtime with `npm run native:build -w athenaeum-agent`.
+`wiki agent -- ...` and the development desktop discover the source build. Native
+state is isolated in `~/.athenaeum-agent`; no Codex credentials or sessions are copied.
+The owner's per-wiki settings govern saving and sync, and manual Review remains
+available. See [the consolidation guide](docs/consolidation.md) for source ownership,
+builds and validation.
 
 ---
 
 ## Quick start
 
 ```bash
-npm install
-cargo build --release -p athenaeum-cli
+npm ci
+npm run build:packages
+cargo build -p athenaeum-cli
 
 # The CLI needs no window and no API key.
 ./target/release/athenaeum --help
@@ -340,6 +336,6 @@ that the committed files still match the generator.
 [llm_wiki](https://github.com/nashsu/llm_wiki) (GPL-3.0, © Yong Su).
 [`docs/provenance.md`](docs/provenance.md) records what came from where.
 
-[`athenaeum_agent`](https://github.com/Hanoryx-North/athenaeum_agent) and
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) remain MIT — separate
-repositories in separate processes, connected only by the `athenaeum bridge` protocol.
+The protocol, integrations and Harness adapter retain their MIT notices under
+`packages/`. The native runtime retains its Apache-2.0 licence and source provenance
+under `packages/agent/runtime/`. Upstream dependencies retain their own licences.

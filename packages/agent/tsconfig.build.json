@@ -1,0 +1,10 @@
+{
+  // Emit configuration: the same source plane as tsconfig.json, restricted to shipped code.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "declarationDir": "lib/types"
+  },
+  "include": ["src/**/*.ts"]
+}

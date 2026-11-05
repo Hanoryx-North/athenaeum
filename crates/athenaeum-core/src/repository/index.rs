@@ -311,11 +311,12 @@ impl RepositoryIndexer {
                             symbol.qualified_name
                         ),
                     };
-                    if expected
-                        .entry(symbol_id.clone())
-                        .or_default()
-                        .push(edge_type, target_node, caller_method, Some(note))
-                    {
+                    if expected.entry(symbol_id.clone()).or_default().push(
+                        edge_type,
+                        target_node,
+                        caller_method,
+                        Some(note),
+                    ) {
                         *counter += 1;
                     }
                     if edge_type == EdgeType::Tests {
@@ -325,10 +326,7 @@ impl RepositoryIndexer {
                                     EdgeType::Tests,
                                     tested_file.clone(),
                                     caller_method,
-                                    Some(format!(
-                                        "{} is a test file for this one",
-                                        file.path
-                                    )),
+                                    Some(format!("{} is a test file for this one", file.path)),
                                 );
                             }
                         }
@@ -377,9 +375,9 @@ impl RepositoryIndexer {
                 // fabricated number.
                 let detail = edge_detail(edge_type, method);
                 let note = note.map(|note| match method {
-                    ExtractionMethod::Fallback => format!(
-                        "{note} (read by a line-oriented fallback, not a syntax tree)"
-                    ),
+                    ExtractionMethod::Fallback => {
+                        format!("{note} (read by a line-oriented fallback, not a syntax tree)")
+                    }
                     _ => note,
                 });
                 let confidence = edge_confidence(edge_type, method);
@@ -401,12 +399,8 @@ impl RepositoryIndexer {
                     // Never touched.
                     Some(_) => {}
                     None => {
-                        let mut edge = KnowledgeEdge::deterministic(
-                            source.clone(),
-                            edge_type,
-                            target,
-                            detail,
-                        );
+                        let mut edge =
+                            KnowledgeEdge::deterministic(source.clone(), edge_type, target, detail);
                         if let Some(confidence) = confidence {
                             edge = edge.with_confidence(confidence);
                         }
@@ -1011,7 +1005,9 @@ fn edge_confidence(edge_type: EdgeType, method: ExtractionMethod) -> Option<f32>
     };
     match method {
         ExtractionMethod::Ast => Some(base),
-        ExtractionMethod::Fallback => Some((base * ExtractionMethod::Fallback.confidence() * 100.0).round() / 100.0),
+        ExtractionMethod::Fallback => {
+            Some((base * ExtractionMethod::Fallback.confidence() * 100.0).round() / 100.0)
+        }
         ExtractionMethod::Unknown => None,
     }
 }
@@ -1043,11 +1039,7 @@ fn edge_detail(edge_type: EdgeType, method: ExtractionMethod) -> String {
 ///
 /// A filtered pass records nothing: it saw a subset of the repository, and a
 /// source inventory built from a subset would claim the rest had gone away.
-fn record_inventory(
-    store: &mut KnowledgeStore,
-    root: &Path,
-    scan: &RepositoryScan,
-) -> Result<()> {
+fn record_inventory(store: &mut KnowledgeStore, root: &Path, scan: &RepositoryScan) -> Result<()> {
     let at = chrono::Utc::now().to_rfc3339();
     let mut records = Vec::with_capacity(scan.snapshot.files.len());
     for file in &scan.snapshot.files {
@@ -1082,12 +1074,7 @@ fn record_inventory(
         &ScanState {
             complete: scan.snapshot.complete,
             scanned: scan.snapshot.files.len(),
-            skipped: scan
-                .skipped
-                .iter()
-                .take(MAX_SCAN_SAMPLE)
-                .cloned()
-                .collect(),
+            skipped: scan.skipped.iter().take(MAX_SCAN_SAMPLE).cloned().collect(),
             skipped_total: scan.skipped.len(),
             at,
         },
@@ -1114,4 +1101,584 @@ pub(crate) fn stable_node_id(kind: &str, identity: &str) -> NodeId {
 
 fn stable_evidence_id(node: &NodeId) -> EvidenceId {
     EvidenceId::from_existing(format!("ev_repo_{}", hash(node.as_str())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::EdgeFilter;
+
+    /// Writes `files` into a fresh repository and indexes it without Git.
+    fn indexed(files: &[(&str, &str)]) -> (tempfile::TempDir, KnowledgeStore) {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, content) in files {
+            let full = dir.path().join(path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(full, content).unwrap();
+        }
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+        (dir, store)
+    }
+
+    fn no_git() -> RepositoryScanOptions {
+        RepositoryScanOptions {
+            max_commits: 0,
+            ..RepositoryScanOptions::default()
+        }
+    }
+
+    /// Every edge of `edge_type` leaving the node titled `title`.
+    fn out(store: &KnowledgeStore, title: &str, edge_type: EdgeType) -> Vec<String> {
+        let node = store
+            .find_node_by_title(title)
+            .unwrap()
+            .unwrap_or_else(|| panic!("no node titled {title}"));
+        let mut titles = store
+            .neighbors(&node.id, &EdgeFilter::traversable())
+            .unwrap()
+            .into_iter()
+            .filter(|neighbor| neighbor.edge_type == edge_type)
+            .map(|neighbor| store.get_node(&neighbor.node).unwrap().title)
+            .collect::<Vec<_>>();
+        titles.sort();
+        titles
+    }
+
+    #[test]
+    fn two_declarations_sharing_a_name_in_one_file_stay_two_nodes() {
+        // Regression: both were derived from the same `path + qualified name`,
+        // so they claimed one node and rewrote each other on every index.
+        let (_dir, mut store) = indexed(&[(
+            "src/id.rs",
+            "impl From<String> for NodeId {\n    fn from(value: String) {}\n}\nimpl From<u32> for NodeId {\n    fn from(value: u32) {}\n}\n",
+        )]);
+
+        let symbols = store
+            .list_nodes(&NodeFilter::all())
+            .unwrap()
+            .into_iter()
+            .filter(|node| node.node_type == NodeType::Symbol)
+            .filter(|node| node.title.starts_with("NodeId::from"))
+            .collect::<Vec<_>>();
+        assert_eq!(symbols.len(), 2, "{symbols:#?}");
+        // Both are readable, and the title says which is which.
+        assert!(symbols
+            .iter()
+            .any(|node| node.title.ends_with("src/id.rs:2")));
+        assert!(symbols
+            .iter()
+            .any(|node| node.title.ends_with("src/id.rs:5")));
+        let _ = &mut store;
+    }
+
+    #[test]
+    fn re_indexing_an_unchanged_repository_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        // Includes the duplicate-name shape that used to oscillate.
+        std::fs::write(
+            dir.path().join("src/id.rs"),
+            "impl From<String> for NodeId {\n    fn from(v: String) {}\n}\nimpl From<u32> for NodeId {\n    fn from(v: u32) {}\n}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("src/auth.rs"),
+            "pub fn authenticate() {\n    validate();\n}\npub fn validate() {}\n",
+        )
+        .unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+
+        RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+        for _ in 0..3 {
+            let again =
+                RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+            assert_eq!(again.nodes_created, 0);
+            assert_eq!(again.nodes_updated, 0);
+            assert_eq!(again.edges_created, 0);
+            assert_eq!(again.edges_removed, 0);
+            assert_eq!(again.evidence_attached, 0);
+        }
+    }
+
+    #[test]
+    fn a_resolved_call_becomes_an_edge_that_reads_both_ways() {
+        let (_dir, store) = indexed(&[(
+            "src/auth.rs",
+            "pub fn authenticate() {\n    validate_token();\n}\npub fn validate_token() {}\n",
+        )]);
+
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::Calls),
+            ["validate_token"]
+        );
+        // Arriving at the callee, the relationship reads the other way (§35).
+        assert_eq!(
+            out(&store, "validate_token", EdgeType::CalledBy),
+            ["authenticate"]
+        );
+    }
+
+    #[test]
+    fn calls_across_files_resolve_and_calls_to_nothing_indexed_do_not() {
+        let (_dir, store) = indexed(&[
+            (
+                "src/auth.rs",
+                "pub fn authenticate() {\n    create_session();\n    log_to_stderr();\n}\n",
+            ),
+            ("src/session.rs", "pub fn create_session() {}\n"),
+        ]);
+
+        // `log_to_stderr` is declared nowhere in this repository, so it is
+        // not a relationship — only a word.
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::Calls),
+            ["create_session"]
+        );
+    }
+
+    #[test]
+    fn a_method_call_does_not_reach_a_file_this_one_never_named() {
+        // Regression: `values.push(x)` resolved to a project's own unique
+        // `push`, because the name matched and nothing checked that the
+        // caller could possibly have meant it.
+        let (_dir, store) = indexed(&[
+            (
+                "src/collect.rs",
+                "pub struct Bag;\nimpl Bag {\n    pub fn push(&self, v: u32) {}\n}\n",
+            ),
+            (
+                "src/parse.rs",
+                "pub fn parse() {\n    let mut values = Vec::new();\n    values.push(1);\n}\n",
+            ),
+        ]);
+
+        assert!(
+            out(&store, "parse", EdgeType::Calls).is_empty(),
+            "a standard-library method call became a project relationship"
+        );
+    }
+
+    #[test]
+    fn a_method_call_resolves_once_this_file_can_name_its_type() {
+        let (_dir, store) = indexed(&[
+            (
+                "src/collect.rs",
+                "pub struct Bag;\nimpl Bag {\n    pub fn stash(&self, v: u32) {}\n}\n",
+            ),
+            (
+                "src/parse.rs",
+                "use crate::collect::Bag;\npub fn parse() {\n    let bag = Bag;\n    bag.stash(1);\n}\n",
+            ),
+        ]);
+
+        assert_eq!(out(&store, "parse", EdgeType::Calls), ["Bag::stash"]);
+    }
+
+    #[test]
+    fn a_bare_call_still_reaches_a_uniquely_named_declaration_anywhere() {
+        // A bare name had to be in scope to be written at all, so a single
+        // repository-wide match is the one that was meant.
+        let (_dir, store) = indexed(&[
+            ("src/session.rs", "pub fn create_session() {}\n"),
+            (
+                "src/auth.rs",
+                "pub fn authenticate() {\n    create_session();\n}\n",
+            ),
+        ]);
+
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::Calls),
+            ["create_session"]
+        );
+    }
+
+    #[test]
+    fn a_call_never_crosses_from_one_language_into_another() {
+        // Regression: a TypeScript test calling `bare()` was linked to a Rust
+        // `fn bare`, on the strength of the name alone.
+        let (_dir, store) = indexed(&[
+            ("src/helpers.rs", "pub fn shared() {}\n"),
+            ("src/app.ts", "export function run() {\n  shared();\n}\n"),
+        ]);
+
+        assert!(
+            out(&store, "run", EdgeType::Calls).is_empty(),
+            "a TypeScript call reached a Rust declaration"
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_name_resolves_locally_or_not_at_all() {
+        let (_dir, store) = indexed(&[
+            (
+                "src/a.rs",
+                "pub fn run() {\n    helper();\n}\npub fn helper() {}\n",
+            ),
+            ("src/b.rs", "pub fn helper() {}\n"),
+            ("src/c.rs", "pub fn caller() {\n    helper();\n}\n"),
+        ]);
+
+        // Two declarations answer to `helper`. From `a.rs` the local one wins.
+        let local = store
+            .find_node_by_title("helper — src/a.rs")
+            .unwrap()
+            .unwrap();
+        let from_run = store
+            .neighbors(
+                &store.find_node_by_title("run").unwrap().unwrap().id,
+                &EdgeFilter::traversable(),
+            )
+            .unwrap();
+        assert_eq!(
+            from_run
+                .iter()
+                .filter(|neighbor| neighbor.edge_type == EdgeType::Calls)
+                .map(|neighbor| neighbor.node.clone())
+                .collect::<Vec<_>>(),
+            vec![local.id]
+        );
+
+        // From a file that declares neither, guessing would be worse than
+        // silence (§21).
+        assert!(out(&store, "caller", EdgeType::Calls).is_empty());
+    }
+
+    #[test]
+    fn implemented_traits_and_interfaces_become_implements_edges() {
+        let (_dir, store) = indexed(&[
+            (
+                "src/store.rs",
+                "pub trait Store {}\npub struct Sqlite;\nimpl Store for Sqlite {}\n",
+            ),
+            (
+                "src/auth.ts",
+                "export interface AuthProvider {}\nexport class AuthService implements AuthProvider {}\n",
+            ),
+        ]);
+
+        assert_eq!(out(&store, "Sqlite", EdgeType::Implements), ["Store"]);
+        assert_eq!(out(&store, "Store", EdgeType::ImplementedBy), ["Sqlite"]);
+        assert_eq!(
+            out(&store, "AuthService", EdgeType::Implements),
+            ["AuthProvider"]
+        );
+    }
+
+    #[test]
+    fn a_rust_test_module_covers_the_file_it_lives_in() {
+        let (_dir, store) = indexed(&[(
+            "src/auth.rs",
+            "pub fn authenticate() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn it_authenticates() {\n        authenticate();\n    }\n}\n",
+        )]);
+
+        assert_eq!(
+            out(&store, "it_authenticates", EdgeType::Tests),
+            ["authenticate"]
+        );
+        assert_eq!(
+            out(&store, "authenticate", EdgeType::TestedBy),
+            ["it_authenticates"]
+        );
+        assert!(out(&store, "it_authenticates", EdgeType::Calls).is_empty());
+    }
+
+    #[test]
+    fn a_test_naming_the_code_it_exercises_is_a_test_edge_not_a_call() {
+        let (_dir, store) = indexed(&[
+            ("src/auth.rs", "pub fn authenticate() {}\n"),
+            (
+                "tests/auth_test.rs",
+                "fn covers_authentication() {\n    authenticate();\n}\n",
+            ),
+        ]);
+
+        assert_eq!(
+            out(&store, "covers_authentication", EdgeType::Tests),
+            ["authenticate"]
+        );
+        assert!(out(&store, "covers_authentication", EdgeType::Calls).is_empty());
+        // And the same fact at file granularity, which is the one a person
+        // reads as "what covers this file" (§30).
+        assert_eq!(
+            out(&store, "tests/auth_test.rs", EdgeType::Tests),
+            ["src/auth.rs"]
+        );
+        assert_eq!(
+            out(&store, "src/auth.rs", EdgeType::TestedBy),
+            ["tests/auth_test.rs"]
+        );
+    }
+
+    #[test]
+    fn the_code_graph_is_reconciled_rather_than_accumulated() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        let path = dir.path().join("src/auth.rs");
+        std::fs::write(
+            &path,
+            "pub fn authenticate() {\n    validate_token();\n}\npub fn validate_token() {}\n",
+        )
+        .unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+
+        let first = RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+        assert_eq!(first.resolved_calls, 1);
+
+        // Re-indexing an unchanged repository writes nothing at all.
+        let again = RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+        assert_eq!(again.edges_created, 0);
+        assert_eq!(again.edges_removed, 0);
+        assert_eq!(again.nodes_updated, 0);
+
+        // Dropping the call drops the edge rather than leaving a relationship
+        // the code no longer claims.
+        std::fs::write(
+            &path,
+            "pub fn authenticate() {}\npub fn validate_token() {}\n",
+        )
+        .unwrap();
+        let third = RepositoryIndexer::scan_and_index(&mut store, dir.path(), no_git()).unwrap();
+        assert_eq!(third.resolved_calls, 0);
+        assert_eq!(third.edges_removed, 1);
+        assert!(out(&store, "authenticate", EdgeType::Calls).is_empty());
+    }
+
+    #[test]
+    fn symbol_evidence_anchors_the_whole_body_so_it_can_be_relocated() {
+        let (dir, store) = indexed(&[(
+            "src/auth.rs",
+            "pub fn authenticate() {\n    let token = 1;\n    token\n}\n",
+        )]);
+        let _ = &dir;
+
+        let node = store.find_node_by_title("authenticate").unwrap().unwrap();
+        let evidence = store.evidence_for(&node.id).unwrap();
+        let anchor = evidence[0].anchor.as_ref().unwrap();
+        assert_eq!((anchor.line_start, anchor.line_end), (Some(1), Some(4)));
+        assert!(anchor.region_hash.is_some());
+    }
+
+    #[test]
+    fn exported_declarations_say_so() {
+        let (_dir, store) = indexed(&[("src/auth.rs", "pub fn open() {}\nfn hidden() {}\n")]);
+
+        assert!(store
+            .find_node_by_title("open")
+            .unwrap()
+            .unwrap()
+            .summary
+            .starts_with("Exported function"));
+        assert!(store
+            .find_node_by_title("hidden")
+            .unwrap()
+            .unwrap()
+            .summary
+            .starts_with("function"));
+    }
+
+    #[test]
+    fn indexing_builds_valid_idempotent_structural_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(
+            dir.path().join("src/lib.rs"),
+            "mod store;\npub fn open() {}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("src/store.rs"), "pub struct Store;\n").unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+
+        let first = RepositoryIndexer::scan_and_index(
+            &mut store,
+            dir.path(),
+            RepositoryScanOptions {
+                max_commits: 0,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(first.files, 2);
+        assert_eq!(first.resolved_imports, 1);
+        assert!(first.nodes_created >= 4);
+        assert!(first.edges_created >= 2);
+
+        let lib = store.find_node_by_title("src/lib.rs").unwrap().unwrap();
+        let neighbors = store
+            .neighbors(&lib.id, &EdgeFilter::traversable())
+            .unwrap();
+        assert!(neighbors
+            .iter()
+            .any(|neighbor| neighbor.edge_type == EdgeType::DependsOn));
+        assert!(neighbors
+            .iter()
+            .all(|neighbor| neighbor.edge.is_traversable()));
+
+        let second = RepositoryIndexer::scan_and_index(
+            &mut store,
+            dir.path(),
+            RepositoryScanOptions {
+                max_commits: 0,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(second.nodes_created, 0);
+        assert_eq!(second.nodes_updated, 0);
+        assert_eq!(second.edges_created, 0);
+        assert_eq!(second.evidence_attached, 0);
+    }
+
+    #[test]
+    fn reindex_removes_obsolete_import_edges_and_marks_removed_symbols_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.ts"),
+            "import { b } from './b';\nexport function a() {}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("b.ts"), "export function b() {}\n").unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let options = RepositoryScanOptions {
+            max_commits: 0,
+            ..RepositoryScanOptions::default()
+        };
+        RepositoryIndexer::scan_and_index(&mut store, dir.path(), options).unwrap();
+
+        std::fs::write(
+            dir.path().join("a.ts"),
+            "export function replacement() {}\n",
+        )
+        .unwrap();
+        let report = RepositoryIndexer::scan_and_index(&mut store, dir.path(), options).unwrap();
+        assert_eq!(report.edges_removed, 2);
+        assert_eq!(report.nodes_marked_stale, 1);
+        let old = store.find_node_by_title("a").unwrap().unwrap();
+        assert_eq!(old.status, NodeStatus::StaleRequiresReview);
+    }
+
+    #[test]
+    fn a_budget_truncated_scan_does_not_mark_unvisited_nodes_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(dir.path().join("b.rs"), "pub fn b() {}\n").unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        RepositoryIndexer::scan_and_index(
+            &mut store,
+            dir.path(),
+            RepositoryScanOptions {
+                max_commits: 0,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+
+        let report = RepositoryIndexer::scan_and_index(
+            &mut store,
+            dir.path(),
+            RepositoryScanOptions {
+                max_files: 1,
+                max_commits: 0,
+                ..RepositoryScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(!report.scan_complete);
+        assert_eq!(report.nodes_marked_stale, 0);
+        assert_eq!(
+            store.find_node_by_title("b").unwrap().unwrap().status,
+            NodeStatus::Valid
+        );
+    }
+
+    #[test]
+    fn externally_supplied_snapshots_cannot_escape_the_repository_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let snapshot = RepositorySnapshot {
+            files: vec![RepositoryFile {
+                path: "../outside.rs".to_string(),
+                language: None,
+                bytes: 0,
+                content_hash: hash(""),
+                is_test: false,
+                is_documentation: false,
+                is_configuration: false,
+                symbols: Vec::new(),
+                imports: Vec::new(),
+                implements: Vec::new(),
+            }],
+            commits: Vec::new(),
+            warnings: Vec::new(),
+            complete: true,
+        };
+        assert!(matches!(
+            RepositoryIndexer::index(&mut store, dir.path(), snapshot),
+            Err(crate::Error::InvalidValue {
+                field: "repository file",
+                ..
+            })
+        ));
+        assert_eq!(store.stats().unwrap().nodes, 0);
+    }
+
+    #[test]
+    fn git_history_creates_only_relevant_valid_modification_edges() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = "fn main() {}\n";
+        std::fs::write(dir.path().join("main.rs"), content).unwrap();
+        let snapshot = RepositorySnapshot {
+            files: vec![RepositoryFile {
+                path: "main.rs".to_string(),
+                language: Some(super::super::SourceLanguage::Rust),
+                bytes: content.len() as u64,
+                content_hash: hash(content),
+                is_test: false,
+                is_documentation: false,
+                is_configuration: false,
+                symbols: Vec::new(),
+                imports: Vec::new(),
+                implements: Vec::new(),
+            }],
+            commits: vec![
+                GitCommit {
+                    id: "a".repeat(40),
+                    author: "Developer".to_string(),
+                    authored_at: "2026-08-21T00:00:00Z".to_string(),
+                    subject: "change main".to_string(),
+                    files: vec!["main.rs".to_string()],
+                },
+                GitCommit {
+                    id: "b".repeat(40),
+                    author: "Developer".to_string(),
+                    authored_at: "2026-08-20T00:00:00Z".to_string(),
+                    subject: "change image".to_string(),
+                    files: vec!["logo.png".to_string()],
+                },
+            ],
+            warnings: Vec::new(),
+            complete: true,
+        };
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        let report = RepositoryIndexer::index(&mut store, dir.path(), snapshot).unwrap();
+        assert_eq!(report.commits, 1);
+
+        let file = store.find_node_by_title("main.rs").unwrap().unwrap();
+        let modified = store
+            .neighbors(&file.id, &EdgeFilter::traversable())
+            .unwrap()
+            .into_iter()
+            .find(|neighbor| neighbor.edge_type == EdgeType::ModifiedBy)
+            .unwrap();
+        assert_eq!(
+            store.get_node(&modified.node).unwrap().node_type,
+            NodeType::Source
+        );
+        assert_eq!(
+            modified.edge.provenance.source,
+            ProvenanceSource::Deterministic
+        );
+    }
 }

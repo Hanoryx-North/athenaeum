@@ -30,6 +30,9 @@ try {
     const host = /^host: (.+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))?.[1]?.trim()
     if (host === target) cli = join(root, 'target', 'release', windows ? 'athenaeum.exe' : 'athenaeum')
   }
+  const nativeName = windows ? "athenaeum-agent.exe" : "athenaeum-agent"
+  const native = join(root, "target/native-runtime", target, "release", nativeName)
+  if (!existsSync(native)) throw new Error(`Missing native agent: ${native}`)
   const integrationLicense = [join(dirname(integration), 'LICENSE-integrations'), resolve(dirname(integration), '../LICENSE'), join(root, 'install', 'NOTICE-MIT.txt')].find(existsSync)
   if (!integrationLicense) throw new Error('The MCP integration artifact must include its MIT LICENSE-integrations notice')
   for (const file of [cli, integration, ...['install.mjs', 'pins.json', 'athenaeum-agent.tgz', 'LICENSE'].map(f => join(agentDir, f))]) {
@@ -59,10 +62,14 @@ try {
     mkdirSync(join(work, 'cli'))
     cpSync(cli, join(work, 'cli', windows ? 'athenaeum.exe' : 'athenaeum'))
     cpSync(cli, join(work, 'cli', windows ? 'wiki.exe' : 'wiki'))
+    cpSync(native, join(work, "cli", nativeName))
+    cpSync(join(root, "packages/agent/runtime/codex/LICENSE"), join(work, "cli/LICENSE-native-agent"))
+    cpSync(join(root, "packages/agent/runtime/codex/NOTICE"), join(work, "cli/NOTICE-native-agent"))
     cpSync(join(root, 'LICENSE'), join(work, 'cli', 'LICENSE'))
     if (!windows) {
       chmodSync(join(work, 'cli', 'athenaeum'), 0o755)
       chmodSync(join(work, 'cli', 'wiki'), 0o755)
+      chmodSync(join(work, 'cli', nativeName), 0o755)
     }
     const cliArchive = join(out, windows ? 'athenaeum-cli.zip' : 'athenaeum-cli.tar.gz')
     execFileSync(tar, windows ? ['-a', '-cf', cliArchive, '-C', join(work, 'cli'), '.'] : ['-czf', cliArchive, '-C', join(work, 'cli'), '.'], { stdio: 'inherit' })

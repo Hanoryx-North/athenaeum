@@ -4,11 +4,24 @@
     "subtitle": "Costruisci e mantieni la tua knowledge base personale con gli LLM"
   },
   "common": {
-    "retry": "Riprova", "cancel": "Annulla", "ignore": "Ignora", "close": "Chiudi", "ok": "OK", "confirm": "Conferma", "notice": "Avviso",
-    "dismiss": "Nascondi", "loading": "Caricamento...", "optional": "opzionale"
+    "retry": "Riprova",
+    "cancel": "Annulla",
+    "ignore": "Ignora",
+    "close": "Chiudi",
+    "ok": "OK",
+    "confirm": "Conferma",
+    "notice": "Avviso",
+    "dismiss": "Nascondi",
+    "loading": "Caricamento...",
+    "optional": "opzionale"
   },
-  "layout": { "showSidebar": "Mostra la barra laterale", "hideSidebar": "Nascondi la barra laterale" },
-  "errors": { "generic": "Qualcosa è andato storto" },
+  "layout": {
+    "showSidebar": "Mostra la barra laterale",
+    "hideSidebar": "Nascondi la barra laterale"
+  },
+  "errors": {
+    "generic": "Qualcosa è andato storto"
+  },
   "mermaid": {
     "renderFailed": "Impossibile visualizzare il diagramma Mermaid",
     "showDetails": "Mostra i dettagli del parser",
@@ -54,10 +67,16 @@
     "rawSources": "Fonti grezze",
     "noWikiPages": "Ancora nessuna pagina wiki. Importa delle fonti per iniziare.",
     "typeLabels": {
-      "overview": "Panoramica", "entity": "Entità", "concept": "Concetti",
-      "source": "Fonti", "synthesis": "Sintesi", "finding": "Risultati",
-      "thesis": "Tesi", "methodology": "Metodologie",
-      "comparison": "Confronti", "query": "Query"
+      "overview": "Panoramica",
+      "entity": "Entità",
+      "concept": "Concetti",
+      "source": "Fonti",
+      "synthesis": "Sintesi",
+      "finding": "Risultati",
+      "thesis": "Tesi",
+      "methodology": "Metodologie",
+      "comparison": "Confronti",
+      "query": "Query"
     }
   },
   "editor": {
@@ -99,7 +118,10 @@
       "createFailed": "Non è stato possibile creare la pagina mancante.",
       "emptyDraftError": "Il modello ha restituito una bozza vuota."
     },
-    "frontmatter": { "origin": "Origine", "more": "Altro" },
+    "frontmatter": {
+      "origin": "Origine",
+      "more": "Altro"
+    },
     "rawMarkdownEditor": "Editor Markdown grezzo"
   },
   "research": {
@@ -221,6 +243,28 @@
     "sourceCount_plural": "{{count}} fonti"
   },
   "chat": {
+    "agent": {
+      "checking": "Verifica del runtime Harness…",
+      "connecting": "Connessione al runtime Harness",
+      "noWorkspace": "Apri un progetto per avviare una chat con l’agente.",
+      "offline": "Harness non disponibile",
+      "proposalReminder": "Gli agenti possono proporre modifiche alla wiki. Esaminale e accettale prima che diventino pagine.",
+      "ready": "Harness pronto · {{provider}} / {{model}}",
+      "reviewProposals": "Esamina le proposte",
+      "running": "Harness è al lavoro",
+      "turnFailed": "Il turno di Harness non è riuscito.",
+      "understanding": "Analisi della richiesta",
+      "routing": "Pianificazione del passo successivo",
+      "tool_call": "Chiamata dello strumento",
+      "tool_result": "Risultato dello strumento",
+      "searching_wiki": "Ricerca nel wiki",
+      "searching_graph": "Esplorazione del grafo della conoscenza",
+      "searching_web": "Ricerca sul web",
+      "searching_anytxt": "Ricerca in AnyTXT",
+      "reading_context": "Lettura del contesto",
+      "writing": "Scrittura della risposta",
+      "resultCount": "risultati: {{count}}"
+    },
     "selectionEdit": {
       "title": "Modifica proposta per la selezione",
       "reviewHint": "Controlla prima di scrivere",
@@ -345,20 +389,7 @@
     "userInputSubmit": "Invia e continua",
     "userInputSubmitted": "Inviato",
     "userInputRecommended": "Consigliato",
-    "userInputEnabled": "Attivo",
-    "agent": {
-      "understanding": "Analisi della richiesta",
-      "routing": "Pianificazione del passo successivo",
-      "tool_call": "Chiamata dello strumento",
-      "tool_result": "Risultato dello strumento",
-      "searching_wiki": "Ricerca nel wiki",
-      "searching_graph": "Esplorazione del grafo della conoscenza",
-      "searching_web": "Ricerca sul web",
-      "searching_anytxt": "Ricerca in AnyTXT",
-      "reading_context": "Lettura del contesto",
-      "writing": "Scrittura della risposta",
-      "resultCount": "risultati: {{count}}"
-    }
+    "userInputEnabled": "Attivo"
   },
   "search": {
     "title": "Ricerca",
@@ -521,7 +552,7 @@
           "activeDefault": "Usa il modello attivo",
           "hint": "Scegli modelli distinti per la chat interattiva e per l'elaborazione dei documenti. Il modello attivo resta il fallback."
         },
-      "projectOverride": {
+        "projectOverride": {
           "enabled": "Usa un modello specifico per il progetto",
           "provider": "Provider del progetto",
           "selectProvider": "Seleziona un provider",
@@ -1062,12 +1093,25 @@
     "fileSync": "Sincronizzazione file",
     "rescan": "Riesamina",
     "rescanTitle": "Cerca modifiche esterne nei file del progetto",
-    "changeKinds": { "created": "Creato", "modified": "Modificato", "deleted": "Eliminato" },
+    "changeKinds": {
+      "created": "Creato",
+      "modified": "Modificato",
+      "deleted": "Eliminato"
+    },
     "fileTypes": {
-      "entity": "Entità", "concept": "Concetto", "source": "Fonte", "query": "Query",
-      "synthesis": "Sintesi", "comparison": "Confronto", "finding": "Risultato",
-      "thesis": "Tesi", "methodology": "Metodologia", "overview": "Panoramica",
-      "index": "Indice", "log": "Log", "file": "File"
+      "entity": "Entità",
+      "concept": "Concetto",
+      "source": "Fonte",
+      "query": "Query",
+      "synthesis": "Sintesi",
+      "comparison": "Confronto",
+      "finding": "Risultato",
+      "thesis": "Tesi",
+      "methodology": "Metodologia",
+      "overview": "Panoramica",
+      "index": "Indice",
+      "log": "Log",
+      "file": "File"
     }
   },
   "fileTree": {

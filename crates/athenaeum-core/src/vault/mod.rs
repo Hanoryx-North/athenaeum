@@ -61,17 +61,17 @@ pub mod lint;
 mod page;
 mod pointer;
 mod scan;
-mod wikilink;
 mod unlink;
+mod wikilink;
 pub(crate) use unlink::unlink_page_edge;
 
 pub use frontmatter::{set_fields, FieldValue, Frontmatter, FrontmatterValue};
 pub use graph::{GraphEdge, GraphNode, GraphOrigin, KnowledgeGraph};
+pub(crate) use index::is_vault_owned;
 pub use index::{
     UnresolvedKind, UnresolvedLink, VaultIndexReport, VaultIndexer, VaultSync, PAGE_PROVENANCE,
     SOURCE_PROVENANCE,
 };
-pub(crate) use index::is_vault_owned;
 pub use lint::{LintFinding, LintFindingKind, LintOptions, LintSeverity, VaultLintReport};
 pub use page::{is_valid_declared_id, DeclaredEvidence, VaultPage};
 pub use pointer::PageRef;
@@ -178,3 +178,6 @@ impl VaultSnapshot {
         scan::scan(root.as_ref(), options)
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -161,12 +161,33 @@ pub fn launch(json_out: bool, cwd: &Path, kind: &str, args: &[String]) -> Result
         .or_else(|| {
             beside.as_ref().and_then(|dir| {
                 let candidate = dir.join(if cfg!(windows) {
-                    format!("{name}.cmd")
+                    if kind == "agent" {
+                        format!("{name}.exe")
+                    } else {
+                        format!("{name}.cmd")
+                    }
                 } else {
                     name.into()
                 });
                 candidate.is_file().then_some(candidate)
             })
+        })
+        .or_else(|| {
+            if !cfg!(debug_assertions) {
+                return None;
+            }
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let candidate = if kind == "agent" {
+                root.join("target/native-runtime/debug")
+                    .join(if cfg!(windows) {
+                        "athenaeum-agent.exe"
+                    } else {
+                        "athenaeum-agent"
+                    })
+            } else {
+                root.join("packages/integrations/dist/athenaeum-integrations.mjs")
+            };
+            candidate.is_file().then_some(candidate)
         })
         .or_else(|| executable(name))
         .ok_or_else(|| {

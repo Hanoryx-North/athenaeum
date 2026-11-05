@@ -133,3 +133,29 @@ impl Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_found_names_the_id() {
+        let err = Error::NodeNotFound(NodeId::from_existing("Decision_042"));
+        assert!(err.to_string().contains("Decision_042"));
+    }
+
+    #[test]
+    fn schema_downgrade_is_refused_with_an_actionable_message() {
+        let err = Error::SchemaTooNew {
+            found: 9,
+            supported: 1,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("upgrade Athenaeum"), "got {msg}");
+    }
+
+    #[test]
+    fn plain_errors_are_not_transient() {
+        assert!(!Error::SelfEdge(NodeId::new()).is_transient());
+    }
+}

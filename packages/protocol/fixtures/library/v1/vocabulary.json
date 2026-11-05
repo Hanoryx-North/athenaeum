@@ -1,0 +1,32 @@
+{
+  "tokenScopes": ["repo:read", "repo:write", "repo:admin"],
+  "tokenSecretPrefix": "atn_",
+  "repositoryVisibilities": ["private", "public"],
+  "repositoryRoles": ["none", "read", "write", "admin", "owner"],
+  "collaboratorRoles": ["read", "write", "admin"],
+  "repositorySorts": ["updated", "created", "name", "forks"],
+  "devicePollErrorCodes": ["authorization_pending", "slow_down", "expired_token", "access_denied"],
+  "syncErrorCodes": [
+    "invalid_request", "not_found", "request_too_large", "unsupported_protocol", "unauthorized", "forbidden",
+    "stale_base", "conflict", "invalid_path", "invalid_content", "limit_exceeded", "rate_limited"
+  ],
+  "errorStatus": {
+    "invalid_request": 400,
+    "not_found": 404,
+    "request_too_large": 413,
+    "unsupported_protocol": 400,
+    "unauthorized": 401,
+    "forbidden": 403,
+    "stale_base": 409,
+    "conflict": 409,
+    "invalid_path": 422,
+    "invalid_content": 422,
+    "limit_exceeded": 422,
+    "rate_limited": 429,
+    "authorization_pending": 400,
+    "slow_down": 400,
+    "expired_token": 400,
+    "access_denied": 400,
+    "internal_error": 500
+  }
+}
