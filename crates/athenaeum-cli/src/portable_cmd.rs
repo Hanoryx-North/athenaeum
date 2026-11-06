@@ -96,6 +96,14 @@ pub enum LibraryCommand {
 
 #[derive(Subcommand)]
 pub enum SyncCommand {
+    /// Back up this wiki now, creating a private cloud repository if needed. Enable automatic sync.
+    Backup {
+        #[arg(long)]
+        server: Option<String>,
+        /// Respect an explicitly disabled automatic-sync setting. For the desktop scheduler.
+        #[arg(long)]
+        automatic: bool,
+    },
     /// Link this repository to a Library repository, creating one if asked.
     Link {
         #[arg(long)]
@@ -815,7 +823,18 @@ pub fn sync(
         path: cwd.display().to_string(),
     })?;
     let project = project_of(&workspace)?.to_path_buf();
-    let state = SyncState::load(&project).ok().flatten();
+    let state = SyncState::load(&project)?;
+
+    if let Some(SyncCommand::Backup { server, automatic }) = command {
+        return backup(
+            json,
+            &workspace,
+            &project,
+            state,
+            server.as_deref(),
+            *automatic,
+        );
+    }
 
     match command {
         Some(SyncCommand::Link {
@@ -844,6 +863,9 @@ pub fn sync(
             Ok(Outcome::Ok)
         }
         Some(SyncCommand::Unlink) => {
+            let mut settings = athenaeum_core::portable::automation::Automation::load(&project)?;
+            settings.auto_sync = false;
+            settings.save(&project)?;
             let removed = sync::unlink(&project)?;
             emit(json, &serde_json::json!({ "unlinked": removed }), || {
                 println!(
@@ -909,7 +931,108 @@ pub fn sync(
             }
         }
         Some(SyncCommand::Clone { .. }) => unreachable!("handled above"),
+        Some(SyncCommand::Backup { .. }) => unreachable!("handled above"),
     }
+}
+
+fn backup(
+    json: bool,
+    workspace: &Workspace,
+    project: &Path,
+    state: Option<SyncState>,
+    server: Option<&str>,
+    automatic: bool,
+) -> Result<Outcome> {
+    use athenaeum_core::portable::automation::Automation;
+
+    let mut settings = Automation::load(project)?;
+    if automatic && project.join(".athenaeum/automation.json").exists() && !settings.auto_sync {
+        emit(json, &serde_json::json!({ "status": "paused" }), || {
+            println!("Automatic cloud backup is paused for this wiki.");
+            Ok(())
+        })?;
+        return Ok(Outcome::Ok);
+    }
+    let server = server_arg(server, state.as_ref())?;
+    let client = client_for(&server)?;
+    if let Some(state) = &state {
+        if state.server != client.server() {
+            return Err(portable_error("conflict", "This wiki is linked to another server. Unlink it explicitly before changing servers."));
+        }
+    } else {
+        // Authenticate before creating local identity or any hosted repository.
+        let owner = client.whoami()?;
+        let (manifest, _) = RepositoryManifest::read_or_init(project, &default_name(project))?;
+        let repository = match client.repository(&manifest.repository_id) {
+            Ok(repository) => repository,
+            Err(Error::Portable { code, .. }) if code == "not_found" => {
+                // A stable ID suffix avoids collisions between wikis with the same folder name.
+                let slug: String = manifest
+                    .name
+                    .to_ascii_lowercase()
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '-' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .take(50)
+                    .collect();
+                let slug = slug.trim_matches('-');
+                let name = format!(
+                    "{}-{}",
+                    if slug.is_empty() { "wiki" } else { slug },
+                    manifest.repository_id.trim_start_matches("repo_")
+                );
+                client.create_repository(&CreateRepository {
+                    id: Some(manifest.repository_id.clone()),
+                    name,
+                    visibility: "private".into(),
+                    description: None,
+                })?
+            }
+            Err(error) => return Err(error),
+        };
+        if repository
+            .owner
+            .as_ref()
+            .map(|value| value.username.as_str())
+            != Some(owner.username.as_str())
+        {
+            return Err(portable_error("forbidden", "The cloud repository belongs to another account. Link it explicitly after reviewing access."));
+        }
+        sync::link(project, &client.server(), &repository)?;
+    }
+    settings.auto_sync = true;
+    settings.save(project)?;
+    let limits = limits_of(&client);
+    let scan = athenaeum_core::portable::syncset::scan(project, &limits)?;
+    let incomplete: Vec<_> = scan
+        .skipped
+        .iter()
+        .filter(|file| athenaeum_core::portable::syncset::has_sync_extension(&file.path))
+        .map(|file| format!("{}: {}", file.path, file.reason))
+        .collect();
+    if !incomplete.is_empty() {
+        return Err(portable_error(
+            "backup_incomplete",
+            format!(
+                "Some wiki documents could not be backed up: {}",
+                incomplete.join("; ")
+            ),
+        ));
+    }
+    let engine = SyncEngine::new(project, &client).with_limits(limits);
+    run_sync(
+        json,
+        &engine,
+        &mut workspace.open()?,
+        project,
+        None,
+        Some("Automatic wiki backup"),
+    )
 }
 
 fn run_sync(

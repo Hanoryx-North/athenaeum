@@ -2,7 +2,7 @@
 //!
 //! Connecting coding agents, signing in to the Library and syncing all belong to the CLI: it holds
 //! the Library client and the credentials, and this window makes no network request to a hosted
-//! service. What the window can do — on an explicit click, never in the background — is run that CLI
+//! service. The window runs explicit operations and account-backed automatic sync through that CLI
 //! as a subprocess and show what it says. This module is that and nothing more.
 //!
 //! The set of things the window may ask for is closed ([`CliJob`]), the same way
@@ -107,6 +107,12 @@ pub enum CliJob {
     SyncStatus,
     /// Pull, then push what is left. Runs only when the person clicks.
     Sync,
+    SyncBackup {
+        #[serde(default)]
+        server: Option<String>,
+        #[serde(default)]
+        automatic: bool,
+    },
     DisconnectAgents {
         agents: Vec<String>,
     },
@@ -159,6 +165,7 @@ impl CliJob {
             CliJob::Setup { .. } => "setup",
             CliJob::SyncStatus => "sync_status",
             CliJob::Sync => "sync",
+            CliJob::SyncBackup { .. } => "sync_backup",
             CliJob::DisconnectAgents { .. } => "disconnect_agents",
             CliJob::LibraryLogin { .. } => "library_login",
             CliJob::LibrarySignIn { .. } => "library_sign_in",
@@ -197,6 +204,14 @@ impl CliJob {
             CliJob::Doctor => args.push("doctor".into()),
             CliJob::SyncStatus => args.extend(["sync".into(), "status".into()]),
             CliJob::Sync => args.push("sync".into()),
+            CliJob::SyncBackup { server, automatic } => {
+                args.extend(["sync".into(), "backup".into()]);
+                if let Some(server) = server {
+                    check_server(server)?;
+                    args.extend(["--server".into(), server.clone()]);
+                }
+                if *automatic { args.push("--automatic".into()); }
+            }
             CliJob::DisconnectAgents { agents } => {
                 if agents.iter().any(|agent| !AGENTS.contains(&agent.as_str())) {
                     return Err("invalid_request: choose athenaeum, claude or cursor".into());

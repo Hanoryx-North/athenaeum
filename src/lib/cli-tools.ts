@@ -3,7 +3,7 @@
  *
  * Connecting coding agents, signing in to the Library and syncing are the CLI's work: it holds the
  * Library client and the credentials, and this window makes no network request to a hosted service.
- * What the window does is run that CLI on an explicit click and show what it says. The set of jobs
+ * The window runs explicit operations and automatic backup through that CLI and shows its results. The set of jobs
  * is closed here exactly as it is in `src-tauri/src/cli_tools.rs`; there is no "run this command".
  */
 import { invoke } from "@tauri-apps/api/core"
@@ -29,6 +29,7 @@ export type CliJob =
     }
   | { job: "sync_status" }
   | { job: "sync" }
+  | { job: "sync_backup"; server?: string; automatic: boolean }
   | { job: "disconnect_agents"; agents: string[] }
   | { job: "library_login" | "library_logout"; server: string }
   | { job: "library_status"; server: string }

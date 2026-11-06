@@ -95,6 +95,7 @@ wiki accept NODE_ID --as your-name
 wiki search callback state --json
 wiki index --scope all
 wiki sync status --json
+wiki sync backup --server https://wiki.hanoryx.com
 wiki sync push --message "Document callback validation"
 ```
 
@@ -122,10 +123,22 @@ when the policy is enabled. Batch acceptance reconciles once and leaves failed
 proposals available for retry. Saving does not raise a claim's verification status.
 Page-to-page `wiki link` and bridge links update the Markdown itself.
 
-Desktop automatic sync runs every minute while the wiki is visible, after its
-Library repository has been linked. It uses the existing CLI credentials and
-conflict handling. Signing in alone does not identify which wiki to synchronize.
-Neither local automation settings nor proposals are uploaded.
+After account sign-in, the desktop backs up the open wiki to a private repository
+and keeps it synchronized every minute while Athenaeum is running, including when
+minimized. Opening another wiki starts its backup too. An explicitly saved pause
+is preserved. Disconnecting a wiki pauses automatic backup to prevent relinking.
+
+`wiki sync backup --server URL` performs the same operation without the desktop:
+reuse the saved link or create a private repository, enable automatic sync, pull,
+then push. `--automatic` respects a saved pause. Repository identity makes retrying
+safe and keeps separate wikis with the same name distinct. Existing links keep their
+server and visibility. The command refuses to replace a link to another server.
+
+Sync includes `wiki/**/*.md`, root Markdown documents such as `README.md`,
+`purpose.md` and `schema.md`, and `athenaeum.json`. Raw sources, proposals, credentials,
+local automation settings, indexes, agent sessions and logs stay local. Conflicting
+edits wait for review. A completed sync is a server copy, and server snapshot
+retention is managed separately by the server operator.
 
 The built-in chat connects to the native Athenaeum Agent app-server. Its provider
 configuration lives in `~/.athenaeum-agent/config.json`; supported model routes

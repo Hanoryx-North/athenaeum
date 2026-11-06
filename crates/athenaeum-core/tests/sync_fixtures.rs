@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use athenaeum_core::portable::syncset::{
-    canonical_manifest, tree_hash, validate_path, ManifestEntry,
+    canonical_manifest, has_sync_extension, tree_hash, validate_path, ManifestEntry,
 };
 use serde::Deserialize;
 
@@ -25,6 +25,32 @@ struct Paths {
 struct Invalid {
     path: String,
     why: String,
+}
+
+#[test]
+fn the_client_sync_set_matches_the_hosted_allowlist() {
+    #[derive(Deserialize)]
+    struct Extensions {
+        allowed: Vec<String>,
+        refused: Vec<Invalid>,
+    }
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/protocol/fixtures/sync/v1/extensions.json");
+    let cases: Extensions = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for path in cases.allowed {
+        assert!(
+            validate_path(&path).is_ok() && has_sync_extension(&path),
+            "{path}"
+        );
+    }
+    for case in cases.refused {
+        assert!(
+            !(validate_path(&case.path).is_ok() && has_sync_extension(&case.path)),
+            "{}: {}",
+            case.path,
+            case.why
+        );
+    }
 }
 
 #[test]

@@ -110,9 +110,10 @@ pub fn validate_path(path: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-/// Whether a path is an accepted wiki page or the repository identity.
+/// Whether a path is a wiki page, root Markdown document or repository identity.
 pub fn has_sync_extension(path: &str) -> bool {
     path == "athenaeum.json"
+        || (!path.contains('/') && path.ends_with(".md"))
         || path
             .strip_prefix("wiki/")
             .is_some_and(|page| !page.is_empty() && page.ends_with(".md"))
@@ -197,7 +198,7 @@ pub fn scan(root: &Path, limits: &SyncLimits) -> Result<SyncSet> {
         if !has_sync_extension(&relative) {
             set.skipped.push(Skipped {
                 path: relative,
-                reason: "only accepted wiki Markdown and athenaeum.json sync".into(),
+                reason: "only wiki Markdown, root Markdown and athenaeum.json sync".into(),
             });
             continue;
         }
@@ -304,6 +305,9 @@ mod tests {
         std::fs::create_dir_all(root.join(".athenaeum")).unwrap();
         std::fs::create_dir_all(root.join("raw/sources")).unwrap();
         std::fs::write(root.join("wiki/a.md"), "# A\n").unwrap();
+        std::fs::write(root.join("README.md"), "# My wiki\n").unwrap();
+        std::fs::write(root.join("purpose.md"), "# Purpose\n").unwrap();
+        std::fs::write(root.join("schema.md"), "# Schema\n").unwrap();
         std::fs::write(root.join(".athenaeum/knowledge.db.json"), "{}").unwrap();
         std::fs::write(root.join("raw/sources/paper.pdf"), b"%PDF").unwrap();
         std::fs::write(root.join("raw/sources/blob.md"), b"a\0b").unwrap();
@@ -311,7 +315,7 @@ mod tests {
 
         let set = scan(root, &SyncLimits::default()).unwrap();
         let paths: Vec<_> = set.entries.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(paths, vec!["wiki/a.md"]);
+        assert_eq!(paths, vec!["README.md", "purpose.md", "schema.md", "wiki/a.md"]);
         let skipped: Vec<_> = set.skipped.iter().map(|s| s.path.as_str()).collect();
         assert!(skipped.contains(&"raw/sources/paper.pdf"));
         assert!(skipped.contains(&"raw/sources/blob.md"));

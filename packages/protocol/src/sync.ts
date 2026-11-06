@@ -96,7 +96,7 @@ export function validateSyncPath(path: string): string | null {
 
 export function isSyncPath(path: string): boolean {
   if (validateSyncPath(path)) return false
-  return path === MANIFEST_FILE || (path.startsWith('wiki/') && path.endsWith('.md'))
+  return path === MANIFEST_FILE || ((path.startsWith('wiki/') || !path.includes('/')) && path.endsWith('.md'))
 }
 
 export function validateSyncContent(bytes: Uint8Array, limits: SyncLimits = DEFAULT_SYNC_LIMITS): string | null {

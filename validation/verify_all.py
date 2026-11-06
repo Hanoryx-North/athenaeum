@@ -112,6 +112,13 @@ def desktop() -> None:
     run(["cargo", "check", "-p", "athenaeum-app", "--all-targets"])
 
 
+def cloud_backup() -> None:
+    binary = ENV.get("ATHENAEUM_API_BIN")
+    if not binary or not Path(binary).is_file():
+        raise MissingPrerequisite("set ATHENAEUM_API_BIN to the separately built hosted API for disposable backup tests")
+    python_tests("product_tests.test_cloud_backup")
+
+
 def harness_runtime() -> None:
     harness = ENV.get("DSH_REPO")
     if not harness or not (Path(harness) / "apps/cli/lib/bin.js").is_file():
@@ -131,6 +138,7 @@ def native_smoke() -> None:
 
 # Optional runtime/platform checks are explicit. They are never reported as verified by default.
 STEPS = {
+    "product-cloud-backup": ("Private cloud backup, restore, pause and conflict handling (optional hosted API)", cloud_backup),
     "native-agent-config": ("Owned runtime configuration, permissions and session behavior", lambda: (run([sys.executable, "packages/agent/runtime/verify_source.py"]), run(["node", "--test", "packages/agent/runtime/src/runtime.test.mjs", "packages/agent/runtime/src/provider.test.mjs"]))),
     "native-agent-runtime": ("Source-built native agent compilation (optional)", lambda: run(["node", "packages/agent/runtime/manage.mjs", "build"])),
     "native-agent-smoke": ("Native service and desktop tool/approval smoke tests (optional)", lambda: native_smoke()),
@@ -156,7 +164,7 @@ STEPS = {
     "native-packaging": ("Staged native installer resources (optional)", lambda: python_tests("product_tests.test_native_installers")),
     "bench": ("Keyless memory benchmark (optional)", lambda: (require_engine(), run([sys.executable, "product_tests/bench_memory.py"], HERE))),
 }
-OPTIONAL = {"native-agent-runtime", "native-agent-smoke", "app-desktop", "harness-runtime", "native-packaging", "bench"}
+OPTIONAL = {"product-cloud-backup", "native-agent-runtime", "native-agent-smoke", "app-desktop", "harness-runtime", "native-packaging", "bench"}
 
 
 def main() -> int:

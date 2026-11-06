@@ -1,9 +1,8 @@
 {
-  "allowed": ["wiki/a.md", "wiki/concepts/a.md", "athenaeum.json"],
+  "allowed": ["wiki/a.md", "wiki/concepts/a.md", "athenaeum.json", "README.md", "index.md", "purpose.md", "schema.md"],
   "refused": [
     { "path": "wiki/UPPER.MD", "why": "wiki Markdown extension is lowercase" },
-    { "path": "README.md", "why": "root Markdown is local" },
-    { "path": "index.md", "why": "root Markdown is local" },
+    { "path": "raw/sources/notes.md", "why": "raw sources stay local" },
     { "path": "raw/sources/notes.txt", "why": "raw sources stay local" },
     { "path": "notes.txt", "why": "only wiki pages sync" },
     { "path": "wiki/data.json", "why": "wiki pages are Markdown" },

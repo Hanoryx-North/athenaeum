@@ -233,10 +233,11 @@ pub fn has_sync_extension(path: &str) -> bool {
         .is_some_and(|(_, ext)| SYNC_EXTENSIONS.contains(&ext))
 }
 
-/// The hosted set contains accepted wiki Markdown and the root identity manifest only.
+/// The hosted set contains wiki Markdown, root Markdown documents and repository identity.
 pub fn is_sync_path(path: &str) -> bool {
     validate_path(path).is_ok()
-        && (path == MANIFEST_FILE || (path.starts_with("wiki/") && has_sync_extension(path)))
+        && (path == MANIFEST_FILE
+            || ((path.starts_with("wiki/") || !path.contains('/')) && has_sync_extension(path)))
 }
 
 pub fn validate_content(bytes: &[u8], limits: SyncLimits) -> Result<(), &'static str> {

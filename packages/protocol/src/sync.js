@@ -60,7 +60,7 @@ export function validateSyncPath(path) {
 export function isSyncPath(path) {
     if (validateSyncPath(path))
         return false;
-    return path === MANIFEST_FILE || (path.startsWith('wiki/') && path.endsWith('.md'));
+    return path === MANIFEST_FILE || ((path.startsWith('wiki/') || !path.includes('/')) && path.endsWith('.md'));
 }
 export function validateSyncContent(bytes, limits = DEFAULT_SYNC_LIMITS) {
     if (bytes.byteLength > limits.maxFileBytes || bytes.includes(0))

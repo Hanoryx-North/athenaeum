@@ -6,10 +6,12 @@ import { Input } from "@/components/ui/input"
 import { cliStatus, runCli } from "@/lib/cli-tools"
 import { useSetupStore } from "@/stores/setup-store"
 import { LIBRARY, useLibraryAccountStore } from "@/stores/library-account-store"
+import { useEngineStore } from "@/stores/engine-store"
+import { useWikiStore } from "@/stores/wiki-store"
 
 export { LIBRARY } from "@/stores/library-account-store"
 
-/** Account identity only. Signing in never links or publishes a project. */
+/** Account identity. The workspace scheduler starts private backup after sign-in. */
 export function LibraryAccount({
   onContinue,
   continuing = false,
@@ -22,6 +24,8 @@ export function LibraryAccount({
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const account = useLibraryAccountStore()
+  const projectPath = useWikiStore((state) => state.project?.path)
+  const library = useEngineStore((state) => state.workspace === projectPath ? state.library : null)
   const [localSignedIn, setLocalSignedIn] = useState<string | null>(null)
   const signedIn = server === LIBRARY ? account.username : localSignedIn
   function setSignedIn(username: string | null) {
@@ -102,7 +106,7 @@ export function LibraryAccount({
       <div>
         <h2 className="text-xl font-semibold">Your Library account</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Sign in to use your wikis across computers. You choose which wiki to share later.
+          Sign in to back up your wiki to your server and use it across computers. New backups are private.
         </p>
       </div>
       {checking || (server === LIBRARY && account.checking) ? (
@@ -117,6 +121,11 @@ export function LibraryAccount({
             <div>
               <p className="font-medium">Signed in as {signedIn}</p>
               <p className="mt-1 text-sm text-muted-foreground">Your account is connected.</p>
+              {library?.server === server && library.lastSyncAt && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This wiki last synced {new Date(library.lastSyncAt).toLocaleString()}.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center justify-between gap-3">

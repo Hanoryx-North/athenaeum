@@ -2,8 +2,8 @@
  * Setup state: is the command-line tool installed, are the coding agents connected, is the project
  * linked to the Library. One store so the banner, the Library tab and the setup card agree.
  *
- * Nothing here runs by itself. A check runs when a project opens (it only reads), and everything
- * that changes something — connecting agents, signing in, syncing — runs on a click.
+ * Callers run checks when projects open, explicit account and setup actions, and
+ * scheduled backup after sign-in. The CLI owns credentials and synchronization.
  */
 import { create } from "zustand"
 import {

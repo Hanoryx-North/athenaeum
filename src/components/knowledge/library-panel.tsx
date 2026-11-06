@@ -11,6 +11,7 @@ import { useAppDialog } from "@/stores/app-dialog-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import type { CliJob } from "@/lib/cli-tools"
 import { useAutomationStore } from "@/stores/automation-store"
+import { LIBRARY, useLibraryAccountStore } from "@/stores/library-account-store"
 
 interface ConflictPreview {
   path: string
@@ -47,6 +48,9 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
   const linkedServer = link?.server
   const working = busy !== null
   const automation = useAutomationStore()
+  const username = useLibraryAccountStore((state) => state.username)
+  const remotePath = link?.remoteName?.includes("/") ? link.remoteName
+    : username && linkedServer === LIBRARY && link?.remoteName ? `${username}/${link.remoteName}` : null
 
   useEffect(() => {
     void loadLibrary()
@@ -256,9 +260,9 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
                 onChange={(event) => void automation.run(workspace, {
                   settings: { ...automation.settings, autoSync: event.target.checked },
                 })} />
-              Sync automatically while this wiki is open
+              Back up automatically while Athenaeum is running
             </label>
-            <p className="text-xs text-muted-foreground">Checks every minute and retries after reconnecting. Conflicting edits wait for your review.</p>
+            <p className="text-xs text-muted-foreground">Includes wiki pages and root Markdown files such as README, purpose and schema. Checks every minute, including when minimized, and retries after reconnecting. Conflicting edits wait for your review.</p>
             {automation.error && <p role="alert" className="text-xs text-destructive">{automation.error}</p>}
             <p className="break-all text-xs text-muted-foreground">{link?.server}</p>
             <p className="text-xs">
@@ -295,7 +299,7 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
             </div>
             <p className="text-xs text-muted-foreground">
               Pull merges non-overlapping edits and holds conflicts for review. Push sends
-              explicitly shared accepted changes. Sync pulls, then pushes.
+              wiki pages and root Markdown files. Sync pulls, then pushes.
             </p>
             {linkedServer && (
               <div className="flex flex-wrap gap-2">
@@ -325,10 +329,10 @@ function LibraryWorkspace({ workspace, name }: { workspace: string; name: string
                 >
                   Disconnect wiki
                 </Button>
-                {link?.remoteName?.includes("/") && (
+                {remotePath && (
                   <Button
                     variant="ghost"
-                    onClick={() => void openUrl(`${linkedServer}/${link.remoteName}/history`)}
+                    onClick={() => void openUrl(`${linkedServer}/${remotePath}/commits`)}
                   >
                     View hosted history
                   </Button>

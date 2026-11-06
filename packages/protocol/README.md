@@ -18,15 +18,16 @@ Licence: MIT.
 | Contract | Version | What it is | Modules |
 | --- | --- | --- | --- |
 | **Bridge** | `BRIDGE_PROTOCOL_VERSION = 1` | The one-shot JSON protocol of `athenaeum bridge`: one request envelope on stdin, one response envelope on stdout. 21 methods (`capabilities` ... `path`): the node / edge / evidence / brief shapes, the workspace `status`, the `review` queue, indexed `sources`, `index` reports and a bounded `path` between two nodes, plus error codes. The `context.prompt` it returns carries the reference-material trust wrapper. | `src/bridge.ts`, `rust/src/bridge.rs` |
-| **Sync** | `SYNC_PROTOCOL_VERSION = 1`, `PORTABLE_FORMAT_VERSION = 1` | How accepted `wiki/**/*.md` pages and the root `athenaeum.json` identity manifest are hosted and exchanged: path / content rules (`validateSyncPath`, `isSyncPath`, `validateSyncContent`), the canonical manifest and tree hash (`canonicalManifest`), the repository id (`repo_[A-Za-z0-9_-]{1,60}`), push request and the `stale_base` error, sync routes (`syncRoutes`). | `src/sync.ts`, `rust/src/sync.rs` |
+| **Sync** | `SYNC_PROTOCOL_VERSION = 1`, `PORTABLE_FORMAT_VERSION = 1` | How `wiki/**/*.md` pages, root Markdown documents and the root `athenaeum.json` identity manifest are hosted and exchanged: path / content rules (`validateSyncPath`, `isSyncPath`, `validateSyncContent`), the canonical manifest and tree hash (`canonicalManifest`), the repository id (`repo_[A-Za-z0-9_-]{1,60}`), push request and the `stale_base` error, sync routes (`syncRoutes`). | `src/sync.ts`, `rust/src/sync.rs` |
 | **Library API** | `API_VERSION = 1` | Everything else the hosted text backend (`athenaeum_api`) says to its web frontends: repository view (with `role` and owner profile), `Page<T>`, tree / file / revision / comparison, tokens, the device flow, the operator (`admin`) shapes, `libraryRoutes` and `adminRoutes`, the full error-code list with HTTP statuses. | `src/library.ts`, `rust/src/library.rs` |
 
 Text only: nothing here describes parsing pages into nodes, edges or embeddings, or calling a model.
 
-**Pre-release v1 correction:** earlier v1 drafts permitted other text paths, including root
-Markdown and raw sources. That policy is incompatible with the owner's accepted-wiki-only rule.
-Current v1 rejects those paths; a client built against the broader draft must update before it
-can push to this API. `validateSyncPath` checks safe syntax; `isSyncPath` checks the hosted set.
+The hosted set includes wiki Markdown, root Markdown documents such as `README.md`,
+`purpose.md` and `schema.md`, and the root identity manifest. Raw sources and local
+application state stay local. Update desktop and server together when extending
+this allowlist. Older clients may refuse to pull revisions containing root documents.
+`validateSyncPath` checks safe syntax; `isSyncPath` checks the hosted set.
 
 ## Using it
 
