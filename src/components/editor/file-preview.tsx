@@ -111,7 +111,6 @@ function PdfPreview({ filePath, content }: { filePath: string; content: string }
   useEffect(() => {
     let disposed = false
     let loadingTask: PDFDocumentLoadingTask | null = null
-    let loadedDocument: PDFDocumentProxy | null = null
 
     setLoading(true)
     setLoadError(null)
@@ -135,13 +134,11 @@ function PdfPreview({ filePath, content }: { filePath: string; content: string }
           import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"),
           readFileAsBase64(filePath),
         ])
+        if (disposed) return
         GlobalWorkerOptions.workerSrc = workerModule.default
         loadingTask = getDocument({ data: decodeBase64(file.base64) })
-        loadedDocument = await loadingTask.promise
-        if (disposed) {
-          await loadedDocument.destroy()
-          return
-        }
+        const loadedDocument = await loadingTask.promise
+        if (disposed) return
         setDocument(loadedDocument)
         setPageCount(loadedDocument.numPages)
       } catch (error) {
@@ -153,8 +150,7 @@ function PdfPreview({ filePath, content }: { filePath: string; content: string }
 
     return () => {
       disposed = true
-      if (loadingTask) void loadingTask.destroy()
-      else if (loadedDocument) void loadedDocument.destroy()
+      if (loadingTask) void loadingTask.destroy().catch((error) => console.warn("PDF preview cleanup failed", error))
     }
   }, [filePath, reloadKey, t])
 

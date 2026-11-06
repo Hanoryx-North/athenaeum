@@ -5,7 +5,7 @@
 #
 # It puts a private, checksum-verified Node next to Athenaeum (so it never depends on, or disturbs,
 # whatever Node you have), then runs install.mjs, which installs the rest and connects Claude Code,
-# Codex and Cursor. Extra arguments go to install.mjs:
+# Claude Code and Cursor. Extra arguments go to install.mjs:
 #
 #   ... | sh -s -- --prefix "$HOME/athenaeum" --auto-sync --agents claude
 set -eu

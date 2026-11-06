@@ -64,7 +64,7 @@ class NativeAgent(unittest.TestCase):
             self.assertNotIn("error", response)
             self.assertIn("result", response)
             # Protocol field names stay compatible; the resolved directory is native.
-            self.assertEqual(Path(response["result"]["codexHome"]).resolve(), self.home.resolve())
+            self.assertEqual(Path(response["result"]["agentHome"]).resolve(), self.home.resolve())
         finally:
             process.stdin.close()
             try:
@@ -76,19 +76,7 @@ class NativeAgent(unittest.TestCase):
             process.stderr.close()
             reader.join(timeout=5)
 
-    def test_real_loop_patches_and_reads_a_file_through_coding_tools(self):
-        requests = []
-        patch = "*** Begin Patch\n*** Add File: native-smoke.txt\n+native-runtime-ok\n*** End Patch"
-        outputs = [
-            {"type": "custom_tool_call", "call_id": "patch-1", "name": "apply_patch", "input": patch},
-            {"type": "function_call", "call_id": "shell-1", "name": "exec_command",
-             "arguments": json.dumps({"cmd": "type native-smoke.txt" if os.name == "nt" else "cat native-smoke.txt",
-                                      "login": False,
-                                      "yield_time_ms": 1000, "max_output_tokens": 200})},
-            {"type": "message", "id": "final-1", "role": "assistant",
-             "content": [{"type": "output_text", "text": "Native coding tools completed."}]},
-        ]
-
+    def scripted_provider(self, outputs, requests):
         class Provider(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
@@ -117,29 +105,32 @@ class NativeAgent(unittest.TestCase):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        self.addCleanup(lambda: thread.join(timeout=5))
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server
+
+    def test_real_loop_patches_and_reads_a_file_through_coding_tools(self):
+        requests = []
+        patch = "*** Begin Patch\n*** Add File: native-smoke.txt\n+native-runtime-ok\n*** End Patch"
+        outputs = [
+            {"type": "function_call", "call_id": "patch-1", "name": "apply_patch", "arguments": json.dumps({"patch": patch})},
+            {"type": "function_call", "call_id": "shell-1", "name": "exec_command",
+             "arguments": json.dumps({"cmd": "type native-smoke.txt" if os.name == "nt" else "cat native-smoke.txt",
+                                      "login": False,
+                                      "yield_time_ms": 1000, "max_output_tokens": 200})},
+            {"type": "message", "id": "final-1", "role": "assistant",
+             "content": [{"type": "output_text", "text": "Native coding tools completed."}]},
+        ]
+
+        server = self.scripted_provider(outputs, requests)
         try:
             # Exercise the native default MCP entry and its optional/missing-wiki path.
             self.env["ATHENAEUM_BIN"] = str(self.root / "not-installed-wiki")
-            (self.home / "config.toml").write_text(f'''
-model_provider = "local-validation"
-model = "gpt-6.1-sol"
-check_for_update_on_startup = false
-[model_providers.local-validation]
-name = "Local validation"
-base_url = "http://127.0.0.1:{server.server_port}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-supports_websockets = false
-request_max_retries = 0
-stream_max_retries = 0
-[analytics]
-enabled = false
-[feedback]
-enabled = false
-''', encoding="utf-8")
+            (self.home / "config.json").write_text(json.dumps({"model": "test-model", "api": "responses",
+                "baseURL": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
             # The scripted tool calls operate on the disposable test workspace.
-            result = self.invoke("exec", "--json", "--ephemeral", "--skip-git-repo-check",
-                                 "--dangerously-bypass-approvals-and-sandbox",
+            result = self.invoke("exec", "--json", "--ephemeral", "--yes",
                                  "Create native-smoke.txt, read it with the shell, then report completion.")
             self.assertTrue((self.workspace / "native-smoke.txt").is_file(), result.stdout + result.stderr)
             self.assertEqual((self.workspace / "native-smoke.txt").read_text(encoding="utf-8").strip(), "native-runtime-ok")
@@ -150,8 +141,39 @@ enabled = false
             self.assertNotIn("wiki_context", json.dumps(requests[0].get("tools", [])))
         finally:
             server.shutdown()
-            server.server_close()
-            thread.join(timeout=5)
+
+    def test_owned_loop_uses_real_wiki_tools_and_only_queues_a_proposal(self):
+        wiki = Path(os.environ.get("ATHENAEUM_BIN") or
+            Path(__file__).resolve().parents[2] / "target/debug" /
+            ("wiki.exe" if os.name == "nt" else "wiki"))
+        self.assertTrue(wiki.is_file(), "Build the wiki CLI before native smoke tests")
+        initialized = subprocess.run([str(wiki), "-C", str(self.workspace), "init"],
+            env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        self.env["ATHENAEUM_BIN"] = str(wiki)
+        requests = []
+        outputs = [
+            {"type": "function_call", "call_id": "context-1", "name": "wiki_context",
+             "arguments": json.dumps({"task": "bounded retry convention"})},
+            {"type": "function_call", "call_id": "proposal-1", "name": "wiki_create",
+             "arguments": json.dumps({"type": "decision", "title": "Bound retry work",
+                 "summary": "Use a bounded retry budget to protect the shared quota.", "scope": "project"})},
+            {"type": "message", "id": "final-1", "role": "assistant",
+             "content": [{"type": "output_text", "text": "Finding proposed for review."}]},
+        ]
+        server = self.scripted_provider(outputs, requests)
+        (self.home / "config.json").write_text(json.dumps({"model": "test-model", "api": "responses",
+            "baseURL": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
+        result = self.invoke("exec", "--json", "--ephemeral", "Propose the bounded retry convention.")
+        self.assertIn("Finding proposed for review.", result.stdout)
+        tools = {tool["name"] for tool in requests[0]["tools"]}
+        self.assertTrue({"wiki_context", "wiki_create"} <= tools)
+        self.assertNotIn("wiki_accept", tools)
+        proposals = subprocess.run([str(wiki), "-C", str(self.workspace), "proposals", "--json"],
+            env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proposals.returncode, 0, proposals.stdout + proposals.stderr)
+        self.assertEqual(len(json.loads(proposals.stdout)), 1)
+        self.assertEqual(list((self.workspace / "wiki").rglob("*.md")), [])
 
 
 if __name__ == "__main__":

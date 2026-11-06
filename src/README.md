@@ -14,11 +14,10 @@ Files with individual headers were substantially rewritten rather than copied.
 
 ## What is deliberately absent
 
-The agent runtime. llm_wiki drove chat through an in-process Rust agent and through
-external `claude` / `codex` CLI subprocesses. Athenaeum does neither: the agent loop,
-its tools, permissions and sessions belong to DeepSeek Harness, reached through
-`athenaeum_agent`. `lib/llm-client.ts` therefore refuses the `claude-code` and `codex-cli`
-providers and serves only the direct model calls ingest needs.
+The agent runtime lives under `packages/agent/runtime`, outside the frontend.
+The desktop owns chat presentation; the runtime owns model turns, tools, permissions
+and sessions. `lib/llm-client.ts` serves direct HTTP calls for ingest, not agent turns.
+The optional Harness driver remains an external runtime adapter.
 
 ## Layout
 
@@ -27,7 +26,7 @@ components/
   layout/     the shell — icon sidebar, resizable panels, knowledge and file trees
   editor/     wiki editor and reader, frontmatter, page links, history
   graph/      graph view over the knowledge index
-  chat/       chat UI — its transport is being rewired onto athenaeum_agent
+  chat/       chat UI — native agent events, tools and approvals
   sources/ search/ lint/ review/ project/ settings/
   ui/         primitives
 lib/          vault I/O, ingest pipeline, wikilinks, dedup, embeddings, research

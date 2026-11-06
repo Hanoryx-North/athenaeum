@@ -56,7 +56,7 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run build:packages
-      - run: python3 validation/verify_all.py --only product-cli,product-engine,product-repository,product-knowledge,product-boundaries,product-protocol,product-mcp-desktop,product-agent-to-knowledge,product-codex-memory,agent --fail-on-skip
+      - run: python3 validation/verify_all.py --only product-cli,product-engine,product-repository,product-knowledge,product-boundaries,product-protocol,product-mcp-desktop,product-agent-to-knowledge,product-agent-memory,agent --fail-on-skip
 
   frontend:
     name: Frontend

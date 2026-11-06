@@ -82,12 +82,12 @@ enum Command {
     /// Set up Athenaeum for this project and connect your coding agents. Safe to repeat.
     ///
     /// Creates the knowledge base and the repository's identity, indexes the project, optionally
-    /// connects the hosted Library (`--library`), and wires Claude Code, Codex and Cursor to the
+    /// connects the hosted Library (`--library`), and wires Athenaeum Agent, Claude Code and Cursor to the
     /// knowledge base so they recall it and propose what they learn.
     Setup(setup_cmd::SetupArgs),
     /// Remove Athenaeum's configuration from selected external agents, preserving other settings.
     DisconnectAgents {
-        #[arg(long, value_delimiter = ',', value_parser = ["claude", "codex", "cursor"])]
+        #[arg(long, value_delimiter = ',', value_parser = ["claude", "athenaeum", "cursor"])]
         agents: Vec<String>,
     },
     /// Check every link: the engine, this project, the Library and your coding agents.

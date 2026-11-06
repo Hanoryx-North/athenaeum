@@ -9,13 +9,6 @@ export interface ProviderTestResult {
 
 export const LLM_PROVIDER_TEST_MAX_TOKENS = 512
 
-function configForProviderTest(cfg: LlmConfig): LlmConfig {
-  if (cfg.provider === "claude-code" || cfg.provider === "codex-cli") {
-    return { ...cfg, localCliIsolation: true }
-  }
-  return cfg
-}
-
 export async function testEmbeddingConnection(cfg: EmbeddingConfig): Promise<ProviderTestResult> {
   if (!cfg.endpoint.trim()) {
     return { ok: false, message: "Embedding endpoint is empty." }
@@ -71,7 +64,7 @@ export async function testEmbeddingFunction(cfg: EmbeddingConfig): Promise<Provi
 
 export async function testLlmConnection(cfg: LlmConfig): Promise<ProviderTestResult> {
   const started = performance.now()
-  const testCfg = configForProviderTest(cfg)
+  const testCfg = cfg
   let content = ""
   let errorMessage: string | null = null
 
@@ -99,7 +92,7 @@ export async function testLlmConnection(cfg: LlmConfig): Promise<ProviderTestRes
 }
 
 export async function testLlmFunction(cfg: LlmConfig): Promise<ProviderTestResult> {
-  const testCfg = configForProviderTest(cfg)
+  const testCfg = cfg
   let content = ""
   let errorMessage: string | null = null
 

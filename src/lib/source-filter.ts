@@ -3,13 +3,6 @@ import { normalizePath } from "@/lib/path-utils"
 
 const HIDDEN_SOURCE_ENTRY_NAMES = new Set([".cache", ".DS_Store"])
 const SENSITIVE_CONFIG_EXTENSIONS = new Set(["env", "json", "toml", "yaml", "yml", "xml"])
-const SENSITIVE_CONFIG_DIR_NAMES = new Set([
-  ".claude",
-  ".codex",
-  ".cursor",
-  ".gemini",
-  ".mcp",
-])
 
 export function isHiddenRawSourceEntryName(name: string): boolean {
   return HIDDEN_SOURCE_ENTRY_NAMES.has(name)
@@ -35,6 +28,6 @@ export function isSensitiveConfigSourceFile(path: string): boolean {
   return Boolean(
     ext &&
       SENSITIVE_CONFIG_EXTENSIONS.has(ext) &&
-      parts.some((part) => SENSITIVE_CONFIG_DIR_NAMES.has(part.toLowerCase())),
+      parts.slice(0, -1).some((part) => part.startsWith(".") && part !== "." && part !== ".."),
   )
 }

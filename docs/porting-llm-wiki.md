@@ -94,8 +94,8 @@ Sizes are llm_wiki's, to show where the work actually is.
 | Subsystem | Size | Why not | Owned by |
 | --- | --- | --- | --- |
 | **`src-tauri/src/agent/`** | **13,512 lines** | A complete second coding-agent runtime: loop, provider, tools, sessions, permissions, cancellation, skills, router. Porting it means maintaining two agent runtimes. | `deepseek-harness` |
-| `src-tauri/src/commands/claude_cli.rs`, `codex_cli.rs`, `cli_resolver.rs` | ~1k | Shelling out to external agent CLIs. The harness *is* the agent. | `deepseek-harness` |
-| `src/lib/claude-cli-transport.ts`, `codex-cli-transport.ts` | | Same, frontend side. | `deepseek-harness` |
+| `src-tauri/src/commands/claude_cli.rs`, `cli_resolver.rs` | ~1k | Shelling out to external agent CLIs. The harness *is* the agent. | `deepseek-harness` |
+| `src/lib/claude-cli-transport.ts` | | Same, frontend side. | `deepseek-harness` |
 | Agent skills (`src-tauri/src/agent/skills.rs`) | 699 | The harness has a skill capability. | `deepseek-harness` |
 | Agent permissions, workspace, cancel | | Harness capabilities. | `deepseek-harness` |
 | Model provider config, routing, streaming | 1,460 (`agent/provider.rs`) | Providers are the harness's. Ingest calls a model through a thin client, not a provider framework. | `deepseek-harness` |

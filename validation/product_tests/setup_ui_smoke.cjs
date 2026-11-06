@@ -1,5 +1,5 @@
 /* Browser interaction checks for the real setup components with a simulated Tauri boundary.
- * Run a Vite app server, then: node product_tests/setup_ui_smoke.cjs
+ * Start a fresh Vite server (manual fixture imports must share its module graph), then: node product_tests/setup_ui_smoke.cjs
  * PLAYWRIGHT_MODULE can point to a temporary Playwright installation.
  * This does not claim to test the native webview or a real account.
  */
@@ -12,8 +12,9 @@ const path = require('node:path');
     headless: true,
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}),
   });
+  let page;
   try {
-    const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+    page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/__setup_test__', route => route.fulfill({ contentType: 'text/html', body: `
@@ -45,7 +46,7 @@ const path = require('node:path');
           if (command === 'cli_status') return { found: true, path: '/test/wiki', version: 'test', agentInstalled: false };
           if (command === 'cli_run') {
             const job = args.job.job;
-            if (job === 'doctor') return { exitCode: window.connected ? 0 : 1, output: { ok: window.connected, checks: ['codex', 'claude', 'cursor'].map(id => ({ id: `agent-${id}`, ok: window.connectedAgents.includes(id), detail: window.connectedAgents.includes(id) ? 'connected' : 'not connected' })) }, stderr: [] };
+            if (job === 'doctor') return { exitCode: window.connected ? 0 : 1, output: { ok: window.connected, checks: ['athenaeum', 'claude', 'cursor'].map(id => ({ id: `agent-${id}`, ok: window.connectedAgents.includes(id), detail: window.connectedAgents.includes(id) ? 'connected' : 'not connected' })) }, stderr: [] };
             if (job === 'setup') {
               window.connected = !window.failSetup;
               if (window.connected) window.connectedAgents = [...new Set([...window.connectedAgents, ...args.job.agents])];
@@ -70,7 +71,7 @@ const path = require('node:path');
       };
       await window.mount('/src/components/project/first-launch.tsx', 'FirstLaunch', { onComplete: async () => { window.completed = true; } });
     });
-    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByRole('heading', { name: 'Welcome to Athenaeum', exact: true }).waitFor();
     await page.getByLabel('Username or email').waitFor();
     assert.equal(await page.getByText(/device code|approve this device/i).count(), 0);
     await page.getByLabel('Username or email').fill('tester');
@@ -80,7 +81,7 @@ const path = require('node:path');
     const signIn = await page.evaluate(() => window.calls.find(call => call.args?.job?.job === 'library_sign_in'));
     assert.deepEqual(signIn.args.job, { job: 'library_sign_in', server: 'https://wiki.hanoryx.com' });
     assert.equal(signIn.args.credentials.password, 'test-only-password');
-    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByRole('button', { name: 'Open Athenaeum', exact: true }).click();
     assert.equal(await page.evaluate(() => window.completed), true);
 
     await page.evaluate(async () => {
@@ -88,19 +89,19 @@ const path = require('node:path');
       await window.mount('/src/components/setup/connectors-view.tsx', 'ConnectorsView');
     });
     await page.getByRole('button', { name: 'Add agent', exact: true }).click();
-    await page.getByRole('radio', { name: /Codex/ }).click();
+    await page.getByRole('radio', { name: /Athenaeum Agent/ }).click();
     await page.getByRole('button', { name: 'Next', exact: true }).click();
-    await page.getByRole('heading', { name: 'Connect Codex', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Connect Athenaeum Agent', exact: true }).waitFor();
     await page.evaluate(() => { window.failSetup = true; });
-    await page.getByRole('button', { name: 'Connect Codex', exact: true }).click();
+    await page.getByRole('button', { name: 'Connect Athenaeum Agent', exact: true }).click();
     await page.getByRole('alert').waitFor();
     assert.equal(await page.getByRole('button', { name: 'Finish', exact: true }).count(), 0);
     await page.evaluate(() => { window.failSetup = false; });
-    await page.getByRole('button', { name: 'Connect Codex', exact: true }).click();
-    await page.getByRole('heading', { name: 'Codex is connected.' }).waitFor();
+    await page.getByRole('button', { name: 'Connect Athenaeum Agent', exact: true }).click();
+    await page.getByRole('heading', { name: 'Athenaeum Agent is connected.' }).waitFor();
     await page.getByRole('button', { name: 'Finish', exact: true }).click();
     await page.getByRole('list', { name: 'Connected coding agents' }).waitFor();
-    assert.equal(await page.getByRole('radio', { name: /Codex/ }).count(), 0);
+    assert.equal(await page.getByRole('radio', { name: /Athenaeum Agent/ }).count(), 0);
     assert.equal(await page.getByText('Connected to this wiki', { exact: true }).count(), 1);
     await page.getByRole('button', { name: 'Add agent', exact: true }).click();
     await page.getByRole('radio', { name: /Claude Code/ }).click();
@@ -108,13 +109,13 @@ const path = require('node:path');
     await page.getByRole('button', { name: 'Connect Claude Code', exact: true }).click();
     await page.getByRole('button', { name: 'Finish', exact: true }).click();
     assert.equal(await page.getByText('Connected to this wiki', { exact: true }).count(), 2);
-    await page.getByRole('button', { name: 'Reconnect Codex', exact: true }).click();
-    await page.getByRole('heading', { name: 'Connect Codex', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Reconnect Athenaeum Agent', exact: true }).click();
+    await page.getByRole('heading', { name: 'Connect Athenaeum Agent', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Coding agents', exact: true }).last().click();
     assert.equal(await page.evaluate(() => window.calls.some(call => call.args?.job?.job === 'sync_link')), false);
     await page.getByRole('button', { name: 'Library account', exact: true }).click();
     await page.getByRole('heading', { name: 'Your Library account' }).waitFor();
-    assert.equal(await page.getByRole('radio', { name: /Codex/ }).count(), 0);
+    assert.equal(await page.getByRole('radio', { name: /Athenaeum Agent/ }).count(), 0);
     await page.getByRole('button', { name: 'AI model', exact: true }).click();
     await page.getByRole('heading', { name: 'AI model', exact: true }).waitFor();
     assert.equal(await page.getByRole('heading', { name: 'Your Library account' }).count(), 0);
@@ -140,29 +141,21 @@ const path = require('node:path');
       if (window.wiki.getState().activeView !== 'graph' || window.wiki.getState().selectedFile !== 'C:/test-project/wiki/index.md') throw new Error('Navigation was not restored');
     });
 
-    // The account trigger navigates to a dedicated screen and preserves the
-    // saved CLI identity when returning to the workspace.
+    // The account trigger opens its current popover and preserves the saved identity.
     await page.evaluate(async () => {
-      const { LibraryAccountMenu } = await import('/src/components/setup/library-account-menu.tsx');
-      const { AccountPage } = await import('/src/components/setup/account-page.tsx');
-      const { useAccountViewStore } = await import('/src/stores/account-view-store.ts');
-      useAccountViewStore.getState().setOpen(false);
-      function AccountNavigation() {
-        return window.React.createElement(useAccountViewStore(state => state.open) ? AccountPage : LibraryAccountMenu);
-      }
-      window.root.render(window.React.createElement(AccountNavigation));
+      await window.mount('/src/components/setup/library-account-menu.tsx', 'LibraryAccountMenu');
     });
     await page.getByRole('button', { name: 'Library account: tester', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     await page.getByRole('button', { name: 'Library account: tester', exact: true }).click();
-    await page.getByRole('heading', { name: 'Your account', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Your Library account', exact: true }).waitFor();
     await page.getByText('Signed in as tester', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await page.getByLabel('Username or email').fill('tester');
     await page.getByLabel('Password', { exact: true }).fill('test-only-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByText('Signed in as tester', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Back to workspace', exact: true }).click();
+    await page.getByRole('button', { name: 'Close account menu', exact: true }).click();
     await page.getByRole('button', { name: 'Library account: tester', exact: true }).waitFor();
 
     await page.evaluate(async () => {
@@ -172,7 +165,7 @@ const path = require('node:path');
     });
     await page.getByRole('button', { name: 'Next', exact: true }).click();
     await page.getByRole('heading', { name: 'Ready to publish?' }).waitFor();
-    assert.equal(await page.getByRole('radio', { name: /Codex/ }).count(), 0);
+    assert.equal(await page.getByRole('radio', { name: /Athenaeum Agent/ }).count(), 0);
     assert.equal(await page.evaluate(() => window.calls.some(call => call.args?.job?.job === 'sync_link')), false);
     await page.getByRole('button', { name: 'Back', exact: true }).click();
     await page.getByRole('heading', { name: 'Publish this wiki', exact: true }).waitFor();
@@ -207,5 +200,8 @@ const path = require('node:path');
     assert.equal(await page.evaluate(() => window.calls.some(call => call.args?.job?.job === 'setup')), false, 'Restoring a draft must not reconnect automatically');
     assert.deepEqual(errors, []);
     console.log('Setup UI checks passed: bottom account menu sign-in/out, Next/Back, failure/retry, Finish returns to connected agents, multiple agents/reconnect, saved wizard draft, model success/failure/config changes, per-project navigation and reload restoration, publishing separation, and small-window navigation.');
+  } catch (error) {
+    if (page) console.error("Setup fixture at failure:", (await page.locator("body").innerText()).slice(0, 4000));
+    throw error;
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

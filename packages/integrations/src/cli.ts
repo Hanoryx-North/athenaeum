@@ -6,7 +6,7 @@ import { HOOK_EVENTS, runHook, type HookEvent } from './hooks/index.ts';
 
 const USAGE = `Usage: athenaeum-integrations <command>
 
-  connect      Wire Claude Code, Codex and Cursor to Athenaeum (MCP server, and hooks where the agent has them)
+  connect      Wire Athenaeum Agent, Claude Code and Cursor to Athenaeum (MCP server, and hooks where the agent has them)
   disconnect   Remove exactly what connect added
   doctor       Check every link between the agents and the knowledge base
   mcp          Run the MCP server on stdio (what the agents launch)
@@ -14,7 +14,7 @@ const USAGE = `Usage: athenaeum-integrations <command>
   (none)       Print an MCP configuration stanza for --repo NAME=PATH
 
 connect / disconnect / doctor options:
-  --agent claude,codex,cursor   Which agents (default: the ones installed)
+  --agent athenaeum,claude,cursor   Which agents (default: the ones installed)
   --athenaeum PATH              The athenaeum command (default: ATHENAEUM_BIN, beside this script, PATH)
   --workspace PATH              Connect to this wiki even when the agent works in another folder (kept on reconnect)
   --cwd PATH                    Directory to diagnose (doctor only)
@@ -66,7 +66,7 @@ function flags(argv: string[]) {
   return out;
 }
 
-const LABEL: Record<AgentId, string> = { claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor' };
+const LABEL: Record<AgentId, string> = { claude: 'Claude Code', athenaeum: 'Athenaeum Agent', cursor: 'Cursor' };
 const MARK: Record<AgentReport['status'], string> = { connected: 'ok  ', unchanged: 'ok  ', removed: 'ok  ', not_connected: '-   ', skipped: '-   ', conflict: 'FAIL', error: 'FAIL' };
 
 async function readStdin(): Promise<string> {

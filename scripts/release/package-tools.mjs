@@ -63,9 +63,8 @@ try {
     cpSync(cli, join(work, 'cli', windows ? 'athenaeum.exe' : 'athenaeum'))
     cpSync(cli, join(work, 'cli', windows ? 'wiki.exe' : 'wiki'))
     cpSync(native, join(work, "cli", nativeName))
-    cpSync(join(root, "packages/agent/runtime/codex/LICENSE"), join(work, "cli/LICENSE-native-agent"))
-    cpSync(join(root, "packages/agent/runtime/codex/NOTICE"), join(work, "cli/NOTICE-native-agent"))
     cpSync(join(root, 'LICENSE'), join(work, 'cli', 'LICENSE'))
+    cpSync(join(root, 'LICENSE'), join(work, 'cli', 'LICENSE-native-agent'))
     if (!windows) {
       chmodSync(join(work, 'cli', 'athenaeum'), 0o755)
       chmodSync(join(work, 'cli', 'wiki'), 0o755)

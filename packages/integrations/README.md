@@ -27,48 +27,36 @@ the file, and is a no-op the second time:
 | Agent | MCP server | Hooks | Instructions |
 | --- | --- | --- | --- |
 | Claude Code | `~/.claude.json` | `~/.claude/settings.json`: `SessionStart`, `UserPromptSubmit`, `Stop` | from the session-start hook |
-| Codex | `~/.codex/config.toml` (delimited block) | not wired | active `~/.codex/AGENTS.md` or non-empty `AGENTS.override.md` (delimited block) |
+| Athenaeum Agent | `~/.athenaeum-agent/config.json` | built-in runtime | `~/.athenaeum-agent/AGENT.md` (managed block) |
 | Cursor | `~/.cursor/mcp.json` | none | none |
 
-`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured. `wiki setup -C PATH` connects agents to that selected
-wiki explicitly, so launching ChatGPT or Codex from another folder does not redirect memory to an empty
-directory. Direct `connect --workspace PATH` does the same; reconnecting without the flag preserves the
-selected wiki. Direct `connect` without an existing selection retains working-directory discovery
-(the nearest ancestor with `.athenaeum/`). A model never has to name a repository for a single-wiki connection.
+`CLAUDE_CONFIG_DIR` and `ATHENAEUM_AGENT_HOME` are honoured. `wiki setup -C PATH`
+connects the selected wiki even when an agent starts in another directory. Direct
+`connect --workspace PATH` does the same; reconnect preserves that selection.
 
-### Codex memory in the existing session
+### Built-in agent memory
 
-Connect Codex with `connect --agent codex --capture instruct`, then reopen it.
-Its managed instructions require recall with `wiki_context` at the start of each task,
-focused searches when new questions arise, and `wiki_create` proposals for durable
-findings before finishing. Small tasks do this directly. No separate agent runtime,
-model API key or extra subscription is needed for this memory integration.
+Connect with `connect --agent athenaeum --capture instruct`. The runtime's model
+configuration remains separate from local wiki tools. Managed instructions request
+recall before tasks and durable proposals before finishing. MCP also supplies
+reference-wrapped guidance. Retrieved knowledge never grants authority or permission.
+A model does not receive review grants. The owner's explicit wiki automation policy
+controls saving and sync.
 
-Memory guidance is also delivered in the MCP initialization response, for hosts that do not load
-local `AGENTS.md`. It applies to the configured wiki even outside its folder. Recall happens once
-per task; empty or unavailable memory ends lookup for that question. Routine edits and tasks with
-no durable learning need no note. Routine memory activity, proposals, and empty results are not
-announced in chat. The host may still show tool activity; this integration cannot hide its UI.
-Proposals still require a person's acceptance before becoming Markdown pages.
-This is instruction-driven behavior; Codex lifecycle hooks are not installed and
-compliance on every turn is not guaranteed. Cursor receives tools only.
-
-Setup respects a non-empty global `AGENTS.override.md`, preserves existing instructions,
-and keeps a first backup. `doctor --agent codex` checks the tools registration and
-current memory instructions, selected wiki, and index readiness. Registered tools without a usable
-wiki are not reported as memory ready. Checking from another initialized wiki detects a mismatched
-selection. Rerun setup in the wiki you want to connect to repair the selection.
-`--capture off` removes the memory instructions and is preserved on reconnect;
-explicit `--capture instruct` enables them again. Disconnect removes only managed blocks.
+`doctor --agent athenaeum` checks the registered server, current instructions and
+selected wiki. Reconnect repairs missing instructions. `--capture off` removes
+managed capture guidance while preserving tools and survives reconnect. Existing
+models, user instructions and unrelated servers are preserved. Manual server entries
+are conflicts, never silently overwritten.
 
 Options (`connect` keeps the previous value of `--capture` and `--sync` when they are omitted):
 
 | Option | Meaning |
 | --- | --- |
-| `--agent claude,codex,cursor` | Which agents; default the ones installed |
+| `--agent athenaeum,claude,cursor` | Which agents; default the ones installed |
 | `--workspace PATH` | Select the wiki independently of the host's working folder; preserved on reconnect |
 | `--allow propose,sync,review` | MCP grants; default `propose` only. A model never gets `review` |
-| `--capture off\|instruct\|nudge` | `instruct`: Codex recall/record instructions and Claude session instructions. `nudge`: additionally ask Claude once after an edit session with no proposal. `off`: remove memory instructions; tools remain |
+| `--capture off\|instruct\|nudge` | `instruct`: built-in agent recall/record instructions and Claude session instructions. `nudge`: additionally ask Claude once after an edit session with no proposal. `off`: remove memory instructions; tools remain |
 | `--sync` / `--no-sync` | Let the end of a Claude turn sync accepted pages with the Library: foreground, at most once a minute, only when linked and out of step, stopping at conflicts |
 | `--dry-run`, `--json` | Say what would change; machine-readable output |
 
@@ -192,11 +180,10 @@ const route = await client.path({ from: 'Decision_042', to: 'oauth callback' });
 Windows hook arguments are quoted individually. Connect, retry, doctor and disconnect recognize
 both those commands and the supported POSIX form; reconnecting preserves capture and foreground-sync
 choices when they are omitted. The desktop and CLI can disconnect one agent with
-`athenaeum disconnect-agents --agents codex` (also `claude` and `cursor`). This removes only
+`athenaeum disconnect-agents --agents athenaeum` (also `claude` and `cursor`). This removes only
 Athenaeum's entries and preserves other configuration.
 
-`npm run verify` checks the TypeScript source, builds the MCP launcher and writes the single-file bundle. The cross-repository
-suites live in `athenaeum_validation`.
+`npm run verify` checks the TypeScript source, builds the MCP launcher and writes the single-file bundle. Product suites live in `validation/` in this checkout.
 
 ## Licence
 

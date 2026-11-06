@@ -149,7 +149,7 @@ impl Component {
                 "product-boundaries",
                 "product-protocol",
             ],
-            Self::Cli => &["product-cli", "product-engine", "product-codex-memory"],
+            Self::Cli => &["product-cli", "product-engine", "product-agent-memory"],
             Self::Integrations => &["integrations", "product-mcp-desktop"],
             Self::Agent => &["native-agent-config", "agent", "product-agent-to-knowledge"],
             Self::App => &["app-frontend"],

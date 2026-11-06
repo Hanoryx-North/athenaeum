@@ -57,11 +57,12 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "verify": "npm run typecheck && npm run build && npm test && npm run native:verify-source",
+    "verify": "npm run typecheck && npm run build && npm test && npm run native:verify-source && npm run native:test",
     "native:build": "node runtime/manage.mjs build",
     "native:check": "node runtime/manage.mjs check",
     "native:start": "node runtime/manage.mjs run",
-    "native:verify-source": "python runtime/verify_source.py"
+    "native:verify-source": "python runtime/verify_source.py",
+    "native:test": "node --test runtime/src/*.test.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.0.5-alpha.1",

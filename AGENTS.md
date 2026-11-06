@@ -13,15 +13,15 @@ The separate `../athenaeum_core` repository is outside this task; leave it alone
 - `crates/athenaeum-cli`: standalone `wiki` and compatible `athenaeum` commands.
 - `packages/protocol`: shared TypeScript/Rust wire contracts and canonical fixtures.
 - `packages/integrations`: MCP server, bridge client, connection/configuration tools.
-- `packages/agent`: optional Harness knowledge adapter, tools, context and profile.
+- `packages/agent`: owned coding runtime and optional Harness knowledge adapter.
 - `validation/`: black-box product tests and the runner. Unit/integration tests live
   beside the code they exercise; no scratch source reconstruction is needed.
 
-The retired Rust agent implementation is not part of this application. Native
-agent turns run in `packages/agent/runtime`, the one adapted source runtime;
-the desktop owns their UI. Preserve its Apache-2.0 licences, hash provenance
-and separate `ATHENAEUM_AGENT_HOME` state. It has an intentionally isolated
-Cargo manifest/lock to avoid resolving unrelated upstream programs.
+Native agent turns run in `packages/agent/runtime/src`, Athenaeum's owned Node
+runtime; the desktop owns their UI. Its dependency-free Rust platform launcher
+embeds the modules and uses the packaged private Node executable. Keep separate
+`ATHENAEUM_AGENT_HOME` state and GPL-3.0-only runtime licensing. The launcher has
+an isolated Cargo manifest/lock with no third-party runtime dependencies.
 Harness remains an optional external dependency, pinned in
 `packages/agent/harness.pin.json`, rather than a second copied runtime.
 Hosted Library/API/admin applications are not local build dependencies. Keep the
@@ -40,13 +40,15 @@ indexes, session state or logs. Preserve conflict checks and path safety.
 
 Keep coding-agent tools, sessions, permissions and provider loops in their runtime.
 Do not add a competing loop to the knowledge engine, bridge, desktop or MCP server.
+Keep the product identity Athenaeum and maintain the focused agent as owned source;
+do not vendor another coding application or its branding.
 Use the native agent as the primary desktop experience. Terminal/Harness access is
 optional. Preserve the desktop's compact neutral gray appearance.
 
 ## Development and verification
 
 Use Node 22.19+ (CI uses 24), Rust 1.88+ and Python 3.11+. The source
-native runtime requires the stable Rust toolchain (upstream pin: 1.95.0). From this checkout:
+native launcher uses the same minimum Rust version. From this checkout:
 
 ```sh
 npm ci

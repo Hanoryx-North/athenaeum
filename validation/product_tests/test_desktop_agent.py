@@ -113,8 +113,8 @@ class DesktopAgent(unittest.TestCase):
         home.mkdir()
         requests = []
         outputs = [
-            {"type":"custom_tool_call", "call_id":"patch-1", "name":"apply_patch",
-             "input":"*** Begin Patch\n*** Add File: desktop-tool.txt\n+desktop-native-ok\n*** End Patch"},
+            {"type":"function_call", "call_id":"patch-1", "name":"apply_patch",
+             "arguments":json.dumps({"patch":"*** Begin Patch\n*** Add File: desktop-tool.txt\n+desktop-native-ok\n*** End Patch"})},
             {"type":"message", "id":"final-1", "role":"assistant",
              "content":[{"type":"output_text","text":"Desktop native tools completed."}]},
         ]
@@ -136,17 +136,8 @@ class DesktopAgent(unittest.TestCase):
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
-        (home / "config.toml").write_text(f'''model_provider = "local-validation"
-model = "gpt-6.1-sol"
-[model_providers.local-validation]
-name = "Local validation"
-base_url = "http://127.0.0.1:{server.server_port}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-supports_websockets = false
-request_max_retries = 0
-stream_max_retries = 0
-''', encoding="utf-8")
+        (home / "config.json").write_text(json.dumps({"model": "test-model", "api": "responses",
+                "baseURL": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
         process, messages = self.start(NATIVE, {"ATHENAEUM_AGENT_HOME":str(home),
             "ATHENAEUM_BIN":str(self.root / "missing-wiki")})
         self.send(process, {"type":"run","requestId":"run","runId":"run", "projectPath":str(self.root),

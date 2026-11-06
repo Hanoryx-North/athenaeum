@@ -222,6 +222,22 @@ pub fn launch(json_out: bool, cwd: &Path, kind: &str, args: &[String]) -> Result
     } else {
         Command::new(program)
     };
+    // The owned agent uses Node too. Packaged CLI users need no global Node install.
+    if kind == "agent" && std::env::var_os("ATHENAEUM_NODE").is_none() {
+        if let Some(node) = beside
+            .as_ref()
+            .map(|dir| {
+                dir.join(if cfg!(windows) {
+                    "../node/node.exe"
+                } else {
+                    "../node/bin/node"
+                })
+            })
+            .filter(|path| path.is_file())
+        {
+            command.env("ATHENAEUM_NODE", node);
+        }
+    }
     if kind == "mcp" {
         command.arg("mcp");
     }

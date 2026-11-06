@@ -60,7 +60,13 @@
     "athenaeum_api",
     "athenaeum_library",
     "athenaeum_admin",
-    "codex",
-    "deepseek-harness"
-  ]
+    "deepseek-harness",
+    "external coding application checkout"
+  ],
+  "runtimeReplacement": {
+    "date": "2026-11-06",
+    "source": "packages/agent/runtime/src",
+    "launcher": "packages/agent/runtime/native-cli",
+    "reason": "Owner requested a focused original coding feature rather than a copied coding application"
+  }
 }

@@ -26,7 +26,7 @@ use crate::panic_guard::run_guarded_async;
 const PROGRESS_EVENT: &str = "cli-progress";
 const MAX_STDOUT_BYTES: u64 = 8 * 1024 * 1024;
 const STDERR_TAIL_LINES: usize = 40;
-const AGENTS: [&str; 3] = ["claude", "codex", "cursor"];
+const AGENTS: [&str; 3] = ["claude", "athenaeum", "cursor"];
 
 /// The job running now, if any. One at a time: two sign-ins or two syncs racing helps nobody.
 #[derive(Default, Clone)]
@@ -199,7 +199,7 @@ impl CliJob {
             CliJob::Sync => args.push("sync".into()),
             CliJob::DisconnectAgents { agents } => {
                 if agents.iter().any(|agent| !AGENTS.contains(&agent.as_str())) {
-                    return Err("invalid_request: choose claude, codex or cursor".into());
+                    return Err("invalid_request: choose athenaeum, claude or cursor".into());
                 }
                 args.push("disconnect-agents".into());
                 if !agents.is_empty() {
@@ -512,9 +512,7 @@ fn run_process(
 pub async fn cli_status() -> Result<CliStatus, String> {
     run_guarded_async("cli_status", async {
         tauri::async_runtime::spawn_blocking(|| {
-            let agent_installed = default_prefix()
-                .map(|p| p.join("agent").join("install.json").is_file())
-                .unwrap_or(false);
+            let agent_installed = crate::harness::native_agent_binary().is_ok();
             let Some(path) = locate_cli() else {
                 return CliStatus {
                     found: false,

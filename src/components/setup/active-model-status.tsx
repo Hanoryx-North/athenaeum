@@ -16,7 +16,7 @@ export function ActiveModelStatus() {
   const [running, setRunning] = useState(false)
   const [tested, setTested] = useState<{ identity: string; result: ProviderTestResult } | null>(null)
   const result = !running && tested?.identity === identity ? tested.result : null
-  const configured = config.provider === "codex-cli" || config.provider === "claude-code" || !!config.model.trim()
+  const configured = !!config.model.trim()
 
   async function verify() {
     setRunning(true)

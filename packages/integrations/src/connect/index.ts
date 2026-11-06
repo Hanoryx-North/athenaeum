@@ -4,7 +4,7 @@ import { run } from '../client/process.ts';
 import { findWorkspace } from '../client/workspace.ts';
 import { AthenaeumClient } from '../client/client.ts';
 import { connectClaude, disconnectClaude, existingChoices, inspectClaude } from './claude.ts';
-import { connectCodex, disconnectCodex, inspectCodex } from './codex.ts';
+import { connectAthenaeum, disconnectAthenaeum, inspectAthenaeum } from './athenaeum.ts';
 import { connectCursor, disconnectCursor, inspectCursor } from './cursor.ts';
 import { detected, homeDir, onPath } from './paths.ts';
 import { connectionWorkspace } from './workspace.ts';
@@ -93,8 +93,8 @@ function chosen(options: ConnectOptions, ctx: Pick<ConnectContext, 'env' | 'home
   return AGENT_IDS.filter((agent) => detected(agent, ctx));
 }
 
-const CONNECT = { claude: connectClaude, codex: connectCodex, cursor: connectCursor };
-const DISCONNECT = { claude: disconnectClaude, codex: disconnectCodex, cursor: disconnectCursor };
+const CONNECT = { claude: connectClaude, athenaeum: connectAthenaeum, cursor: connectCursor };
+const DISCONNECT = { claude: disconnectClaude, athenaeum: disconnectAthenaeum, cursor: disconnectCursor };
 
 export interface ConnectResult {
   ok: boolean;
@@ -109,7 +109,7 @@ export function connect(options: ConnectOptions = {}): ConnectResult {
   const ctx = buildContext(options);
   const agents = chosen(options, ctx);
   if (!agents.length) {
-    return { ok: true, athenaeum: ctx.athenaeum, launcher: ctx.launch, agents: [], note: 'No coding agent found (looked for Claude Code, Codex and Cursor). Install one, or name it with --agent.' };
+    return { ok: true, athenaeum: ctx.athenaeum, launcher: ctx.launch, agents: [], note: 'No coding agent found (looked for Athenaeum Agent, Claude Code and Cursor). Install one, or name it with --agent.' };
   }
   const reports = agents.map((agent) => CONNECT[agent](ctx));
   return { ok: reports.every((r) => r.status !== 'error' && r.status !== 'conflict'), athenaeum: ctx.athenaeum, launcher: ctx.launch, agents: reports };
@@ -165,7 +165,7 @@ export async function diagnose(options: ConnectOptions & { cwd?: string } = {}):
     }
     const inspections: Record<AgentId, () => { connected: boolean; problems: string[]; workspace?: string }> = {
       claude: () => inspectClaude(ctx!),
-      codex: () => inspectCodex(ctx!),
+      athenaeum: () => inspectAthenaeum(ctx!),
       cursor: () => inspectCursor(ctx!),
     };
     for (const agent of chosen(options, ctx)) {

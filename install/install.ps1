@@ -5,7 +5,7 @@
 #
 # It puts a private, checksum-verified Node next to Athenaeum (so it never depends on, or disturbs,
 # whatever Node you have), then runs install.mjs, which installs the rest and connects Claude Code,
-# Codex and Cursor.
+# Claude Code and Cursor.
 #
 # Options are environment variables, so the one-liner above keeps working:
 #   $env:ATHENAEUM_PREFIX            where to install (default: %LOCALAPPDATA%\Athenaeum)

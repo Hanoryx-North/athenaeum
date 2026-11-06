@@ -4,12 +4,12 @@ This is the agent component of the [Athenaeum application](../../README.md).
 The [root instructions](../../AGENTS.md) and [development guide](../../docs/consolidation.md)
 define the current source layout.
 
-The primary native runtime is in [`runtime/`](runtime/README.md). It compiles the
-adapted upstream implementation in-process as `athenaeum-agent`, with its own home
-(`ATHENAEUM_AGENT_HOME`, default `~/.athenaeum-agent`). It does not invoke an installed
-Codex or copy its credentials/sessions. The snapshot, licences and every adaptation
-are recorded and verified by its source manifests. The desktop uses its app-server
-for turns, streaming, coding tools, sessions and approvals.
+The primary runtime is Athenaeum's own implementation in [`runtime/`](runtime/README.md).
+Its focused Node modules own turns, file/command tools, providers, sessions and
+approvals; a small Rust launcher embeds them as `athenaeum-agent`. The desktop
+consumes the runtime through its own app-server adapter. Private state lives under
+`ATHENAEUM_AGENT_HOME` (default `~/.athenaeum-agent`). The runtime is GPL-3.0-only;
+this optional TypeScript adapter retains its MIT licence.
 
 The optional TypeScript Harness adapter is in `src/`. It contributes the `wiki`
 capability, bridge provider, `wiki_*` tools, task context and configured Wiki Agent

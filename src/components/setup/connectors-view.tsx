@@ -53,8 +53,8 @@ export function ConnectorsView() {
                 <header>
                   <h2 className="text-2xl font-semibold">AI model</h2>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Choose a model API or local model server to build wiki pages from sources.
-                    Connect Codex, Claude Code and Cursor in Coding agents to use their own AI.
+                    Choose a model API or local server for Athenaeum Agent and wiki building.
+                    External coding agents use their own accounts.
                   </p>
                 </header>
                 <ActiveModelStatus />

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { useUiPreference } from "@/hooks/useUiPreference"
 
 export const AGENTS = [
-  { id: "codex", name: "Codex", description: "Use the Codex you already work in." },
+  { id: "athenaeum", name: "Athenaeum Agent", description: "Use the coding assistant built into Athenaeum." },
   { id: "claude", name: "Claude Code", description: "Connect your existing Claude Code." },
   { id: "cursor", name: "Cursor", description: "Make your wiki available in Cursor." },
 ] as const
@@ -47,7 +47,7 @@ export function SetupBanner() {
 }
 
 /** One decision per step. Publishing and account access live on separate pages. */
-export function SetupCard({ initialAgent = "codex", onAgentChange, onComplete, onCancel }: {
+export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplete, onCancel }: {
   initialAgent?: Agent
   onAgentChange?: (agent: Agent) => void
   onComplete?: () => void
@@ -194,7 +194,7 @@ export function SetupCard({ initialAgent = "codex", onAgentChange, onComplete, o
             </p>
           </header>
           <div className="space-y-3 rounded-xl border bg-muted/20 p-5 text-sm">
-            <p>Uses your existing {selected.name} account.</p>
+            <p>{agent === "athenaeum" ? "Uses the model provider you choose in Settings." : `Uses your existing ${selected.name} account.`}</p>
             <p className="text-muted-foreground">
               {agent === "cursor"
                 ? "Ask Cursor to search your wiki and propose useful findings."
@@ -203,7 +203,7 @@ export function SetupCard({ initialAgent = "codex", onAgentChange, onComplete, o
             <p className="text-muted-foreground">
               You review proposals before they become wiki pages.
             </p>
-            <p className="text-muted-foreground">This connects wiki memory. You stay signed in through {selected.name}.</p>
+            <p className="text-muted-foreground">{agent === "athenaeum" ? "This connects wiki memory. Configure a model separately in Settings." : `This connects wiki memory. You stay signed in through ${selected.name}.`}</p>
           </div>
           {connecting && (
             <p role="status" className="flex items-center gap-2 text-sm">
@@ -270,8 +270,8 @@ export function SetupCard({ initialAgent = "codex", onAgentChange, onComplete, o
             <h2 className="text-2xl font-semibold">{connected ? `${selected.name} is connected.` : working ? "Checking connection…" : "Connection needs attention"}</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {connected ? <>
-              Reopen {selected.name} in <strong className="text-foreground">{project?.name}</strong>{" "}
-              to load the connection. Then code as usual.
+              {agent === "athenaeum" ? "Open chat for" : `Reopen ${selected.name} in`} <strong className="text-foreground">{project?.name}</strong>{" "}
+              {agent === "athenaeum" ? "and choose a model in Settings to start a task." : "to load the connection. Then code as usual."}
               </> : "Go back to reconnect your agent, or return to Coding agents to check its status."}
             </p>
           </header>

@@ -1,4 +1,4 @@
-// Agent-CLI spawning (claude_cli, codex_cli, cli_resolver) is deliberately absent:
+// Agent-CLI spawning (external CLI providers) is deliberately absent:
 // DeepSeek Harness owns the agent runtime. See docs/porting-athenaeum.md.
 pub mod ebook;
 pub mod external_search;

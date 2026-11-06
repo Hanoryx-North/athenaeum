@@ -131,7 +131,7 @@ def native_smoke() -> None:
 
 # Optional runtime/platform checks are explicit. They are never reported as verified by default.
 STEPS = {
-    "native-agent-config": ("Native identity/memory policy and upstream source hashes", lambda: (run([sys.executable, "packages/agent/runtime/verify_source.py"]), run(["cargo", "+stable", "test", "--locked", "--manifest-path", "validation/native-agent/Cargo.toml", "--target-dir", str(TARGET / "native-config")]))),
+    "native-agent-config": ("Owned runtime configuration, permissions and session behavior", lambda: (run([sys.executable, "packages/agent/runtime/verify_source.py"]), run(["node", "--test", "packages/agent/runtime/src/runtime.test.mjs", "packages/agent/runtime/src/provider.test.mjs"]))),
     "native-agent-runtime": ("Source-built native agent compilation (optional)", lambda: run(["node", "packages/agent/runtime/manage.mjs", "build"])),
     "native-agent-smoke": ("Native service and desktop tool/approval smoke tests (optional)", lambda: native_smoke()),
     "product-automation": ("Per-wiki saving/sync policy and durable page links", lambda: python_tests("product_tests.test_wiki_automation")),
@@ -150,7 +150,7 @@ STEPS = {
     "product-protocol": ("Engine/desktop contract and generated fixture drift", product_protocol),
     "product-mcp-desktop": ("Real MCP server to engine and desktop request surface", mcp),
     "product-agent-to-knowledge": ("Agent proposes; review saves; another session recalls", agent_knowledge),
-    "product-codex-memory": ("Installed setup, instruction repair, disconnect and memory", lambda: python_tests("product_tests.test_codex_setup")),
+    "product-agent-memory": ("Installed setup, instruction repair, disconnect and memory", lambda: python_tests("product_tests.test_agent_setup")),
     "app-desktop": ("Native desktop compilation (optional)", desktop),
     "harness-runtime": ("Optional Harness profile and desktop driver against upstream", harness_runtime),
     "native-packaging": ("Staged native installer resources (optional)", lambda: python_tests("product_tests.test_native_installers")),

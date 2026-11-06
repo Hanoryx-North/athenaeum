@@ -60,7 +60,7 @@ agent chat is an explicit `wiki agent` command. `-C DIR` selects a project;
 otherwise commands discover the nearest ancestor with `.athenaeum/`.
 
 `wiki setup -C DIR` also binds the coding-agent connection to that selected wiki.
-The MCP server then reaches it even when ChatGPT or Codex starts in another folder.
+The MCP server then reaches it even when an agent starts in another folder.
 Reconnecting from another wiki changes the selected wiki; `wiki doctor -C DIR`
 checks that the saved connection actually addresses it. Routine recall and capture
 are quiet; host-controlled tool activity can still be visible. Proposals await
@@ -128,10 +128,11 @@ conflict handling. Signing in alone does not identify which wiki to synchronize.
 Neither local automation settings nor proposals are uploaded.
 
 The built-in chat connects to the native Athenaeum Agent app-server. Its provider
-configuration and credentials live in `~/.athenaeum-agent`; an OpenAI API provider
-chosen in desktop Settings can also be supplied to that isolated process. The
+configuration lives in `~/.athenaeum-agent/config.json`; supported model routes
+chosen in desktop Settings are passed to that isolated process. Keys travel in
+its environment rather than conversation files. The
 optional Harness integration remains selectable in chat. The terminal stays an
-advanced entry point. No Codex credentials or sessions are copied.
+advanced entry point. Agent state and credentials are private to Athenaeum.
 
 `wiki config` reads and writes the desktop's **actual** `app-state.json`:
 
@@ -239,7 +240,7 @@ Hosted projects are not local build targets; the deployed Library client remains
 `dev tasks` exposes each component's package scripts. Native runtime commands such
 as `native:build`, `native:check` and `native:verify-source` are available through
 `dev run agent SCRIPT`. The native source has an intentionally isolated manifest
-and pinned dependency graph, avoiding unrelated upstream workspace programs.
+with no third-party launcher dependencies. Node runtime modules are embedded into the executable.
 
 `dev test` runs `validation/verify_all.py` against current sources and fails on
 skipped tests. Heavy platform/upstream runtime suites are explicit. Use

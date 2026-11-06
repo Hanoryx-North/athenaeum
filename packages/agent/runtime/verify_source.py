@@ -1,25 +1,15 @@
 #!/usr/bin/env python3
-"""Verify every imported source file against the upstream and adaptation manifests."""
-import hashlib
-import json
-import os
+"""Check syntax and wiring of the owned runtime embedded in the platform launcher."""
 from pathlib import Path
+import subprocess
 
 root = Path(__file__).resolve().parent
-if os.name == "nt" and not str(root).startswith("\\\\?\\"):
-    root = Path("\\\\?\\" + str(root))
-upstream = json.loads((root / "upstream.json").read_text(encoding="utf-8"))
-port = json.loads((root / "port.json").read_text(encoding="utf-8"))
-if port["upstreamRevision"] != upstream["revision"]:
-    raise SystemExit("Port and upstream revisions do not match")
-expected = dict(upstream["files"])
-expected.update({name: data["sha256"] for name, data in port["modified"].items()})
-expected.update(port["added"])
-failures = []
-for name, digest in expected.items():
-    file = root / "codex" / name
-    if not file.is_file() or hashlib.sha256(file.read_bytes()).hexdigest() != digest:
-        failures.append(name)
-if failures:
-    raise SystemExit("Missing or modified source:\n" + "\n".join(failures))
-print(f"Verified {len(expected)} files at upstream {upstream['revision']}; {len(port['modified'])} recorded adaptations")
+launcher = (root / 'native-cli/src/main.rs').read_text(encoding='utf-8')
+modules = sorted(p for p in (root / 'src').glob('*.mjs') if not p.name.endswith('.test.mjs'))
+if not modules:
+    raise SystemExit('No runtime modules found')
+for module in modules:
+    if f'../../src/{module.name}' not in launcher:
+        raise SystemExit(f'Runtime module is not embedded in the launcher: {module.name}')
+    subprocess.run(['node', '--check', str(module)], check=True)
+print(f'Verified syntax and launcher wiring for {len(modules)} owned runtime modules')

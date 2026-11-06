@@ -18,8 +18,6 @@ export type Provider =
   | "ollama"
   | "custom"
   | "minimax"
-  | "claude-code"
-  | "codex-cli"
 
 export interface LlmPreset {
   /** Stable id used as the dropdown value. */
@@ -80,43 +78,6 @@ export const LLM_PRESETS: LlmPreset[] = [
       "claude-haiku-4-5",
     ],
     suggestedContextSize: 1000000,
-  },
-  {
-    id: "claude-code-cli",
-    label: "Claude Code CLI (local)",
-    hint: "Uses the local `claude` binary — no API key needed",
-    provider: "claude-code",
-    defaultModel: "claude-sonnet-5-5",
-    // Same ids as the Anthropic preset: the CLI forwards to the same backend.
-    suggestedModels: [
-      "claude-opus-5-5",
-      "claude-sonnet-5-5",
-      "claude-haiku-5-5",
-      "claude-fable-5-1",
-      "claude-opus-5",
-      "claude-sonnet-5",
-      "claude-opus-4-8",
-    ],
-    suggestedContextSize: 1000000,
-  },
-  {
-    id: "codex-cli",
-    label: "Codex CLI (local)",
-    hint: "Uses the local `codex` binary — no API key needed",
-    provider: "codex-cli",
-    defaultModel: "gpt-5.5",
-    // Model ids from the harness's pi-ai catalog (0.87.1, Oct 2026), newest first. (openai-codex)
-    suggestedModels: [
-      "gpt-6-sol",
-      "gpt-6-luna",
-      "gpt-6-astra",
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
-      "gpt-5.5",
-      "gpt-5.3-codex-spark",
-    ],
-    suggestedContextSize: 272000,
   },
   {
     id: "openai",

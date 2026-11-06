@@ -10,19 +10,19 @@ export function homeDir(env: NodeJS.ProcessEnv): string {
 /** Where each agent keeps the files this package edits. Environment overrides match the agents' own. */
 export function agentPaths(env: NodeJS.ProcessEnv, home: string) {
   const claudeDir = env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
-  const codexDir = env.CODEX_HOME || path.join(home, '.codex');
+  const agentDir = env.ATHENAEUM_AGENT_HOME || path.join(home, '.athenaeum-agent');
   return {
     claude: {
       mcp: env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(home, '.claude.json'),
       settings: path.join(claudeDir, 'settings.json'),
       dir: claudeDir,
     },
-    codex: { dir: codexDir, config: path.join(codexDir, 'config.toml'), instructions: path.join(codexDir, 'AGENTS.md'), override: path.join(codexDir, 'AGENTS.override.md') },
+    athenaeum: { dir: agentDir, config: path.join(agentDir, 'config.json'), instructions: path.join(agentDir, 'AGENT.md') },
     cursor: { dir: path.join(home, '.cursor'), mcp: path.join(home, '.cursor', 'mcp.json') },
   };
 }
 
-const COMMANDS: Record<AgentId, string> = { claude: 'claude', codex: 'codex', cursor: 'cursor' };
+const COMMANDS: Record<AgentId, string> = { claude: 'claude', athenaeum: 'athenaeum-agent', cursor: 'cursor' };
 
 export function onPath(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | undefined {
   const exts = platform === 'win32' ? (env.PATHEXT || '.EXE;.CMD;.BAT').split(';').concat('') : [''];

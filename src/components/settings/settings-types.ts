@@ -9,7 +9,7 @@ import type { AzureModelFamily, CloseBehavior, MineruEffort, MineruLocalBackend,
  */
 export interface SettingsDraft {
   // LLM provider
-  provider: "openai" | "anthropic" | "google" | "azure" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
+  provider: "openai" | "anthropic" | "google" | "azure" | "ollama" | "custom" | "minimax"
   apiKey: string
   model: string
   ollamaUrl: string
@@ -19,7 +19,6 @@ export interface SettingsDraft {
   maxContextSize: number
   apiMode: CustomApiMode | undefined
   reasoning: ReasoningConfig | undefined
-  localCliIsolation: boolean
 
   // Embedding
   embeddingEnabled: boolean
@@ -42,7 +41,7 @@ export interface SettingsDraft {
   // Multimodal (image captioning at ingest time)
   multimodalEnabled: boolean
   multimodalUseMainLlm: boolean
-  multimodalProvider: "openai" | "anthropic" | "google" | "azure" | "ollama" | "custom" | "minimax" | "claude-code" | "codex-cli"
+  multimodalProvider: "openai" | "anthropic" | "google" | "azure" | "ollama" | "custom" | "minimax"
   multimodalApiKey: string
   multimodalModel: string
   multimodalOllamaUrl: string

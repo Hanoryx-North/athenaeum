@@ -1,4 +1,4 @@
-export const AGENT_IDS = ['claude', 'codex', 'cursor'] as const;
+export const AGENT_IDS = ['athenaeum', 'claude', 'cursor'] as const;
 export type AgentId = (typeof AGENT_IDS)[number];
 
 export type CaptureMode = 'off' | 'instruct' | 'nudge';

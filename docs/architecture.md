@@ -8,7 +8,7 @@
 
 The knowledge library is a plain Rust library with no UI, no Tauri, no HTTP
 client and no model dependency. The CLI and desktop shell consume it locally;
-the separately built agent runtime consumes its versioned Wiki contract.
+the owned agent runtime under `packages/agent/runtime` consumes its versioned Wiki contract.
 
 ```text
                     ┌──────────────────────┐
@@ -34,7 +34,7 @@ the separately built agent runtime consumes its versioned Wiki contract.
 ```
 
 The boundary is specified in [agent-integration.md](agent-integration.md).
-The agent runtime (`deepseek-harness` with the `athenaeum_agent` bundle) never reaches through it
+The owned agent runtime (and optional external Harness adapter) never reaches through it
 into `KnowledgeStore` or SQLite, and neither does any other client.
 
 ### Clients of the one engine
@@ -361,7 +361,7 @@ the knowledge belongs to the user.
 | Phase | State |
 | --- | --- |
 | 0 — Foundation: config, SQLite, schema, journal, CLI | **Done** |
-| 1 — External model agent: agent loop, tools, permissions, sessions | **Runtime responsibility; intentionally not built here.** DeepSeek Harness serves it |
+| 1 — External model agent: agent loop, tools, permissions, sessions | **Owned runtime responsibility.** `packages/agent/runtime` serves it |
 | 2 — Repository understanding: file/symbol/AST indexes, git history | **Deterministic extraction done:** bounded file scanning, Rust/TypeScript/JavaScript/Python/Go declarations with spans and visibility, imports, calls, implements and test references, local dependency edges and Git modification history. Compiler-grade AST identities and broader language coverage remain. |
 | 3 — Core: nodes, edges, evidence, provenance, authority, anchors | **Done**; model-safe curation operations, conservative near-duplicate resolution, and the §47 evidence bar on promotion are exposed |
 | 4 — Wiki agent: navigation, briefs, role configuration | Library-side navigation and briefs done; the Wiki agent is harness model configuration |
@@ -379,7 +379,7 @@ The chat panel is a client of `@deepseek-ai/dsh-sdk-client`; a small Node driver
 loads that installed package and relays notifications between Tauri and the SDK.
 The Harness profile owns the turn, tools, permissions and session. The UI shows
 session/tool progress and the final committed response; the SDK has no per-turn
-cancel operation, so Stop closes the runtime and the next turn starts a fresh one.
+cancel operation for native turns; Stop aborts the active request and keeps the conversation available.
 The app keeps local knowledge usable without this runtime, a model or a network.
 
 Wiki curation calls create proposals and only a person accepting one in Review

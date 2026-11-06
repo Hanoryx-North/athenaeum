@@ -1,246 +1,52 @@
 # Installing Athenaeum
 
-Athenaeum is one thing to install. It gives you the desktop app, the `athenaeum` command, and the
-connection that lets your coding agents (Claude Code, Codex, Cursor) use your project's wiki as they
-work. Claude Code has supported session/turn hooks. Codex and Cursor use MCP with explicit
-instructions to recall project knowledge and propose discoveries; they have no lifecycle hooks here.
+Use the platform installer from the GitHub release. It supplies the application,
+CLI, MCP integration and private Node runtime. The built-in coding assistant is
+`athenaeum-agent`; the optional separately installed Harness launcher is
+`athenaeum-harness` and cannot overwrite it.
 
-```text
-install once ──▶ athenaeum setup (per project) ──▶ use your agent as usual
-                                                     │   recalls what the wiki knows
-                                                     │   proposes what it learns
-                                                     ▼
-                       you accept proposals in the app ──▶ pages ──▶ (optionally) the Library
-```
+Open or create a project. Select a model provider in Settings to use app chat.
+Under **Connectors → Coding agents**, choose **Athenaeum Agent** to connect the
+project's wiki memory, or choose an optional Claude Code/Cursor MCP connection.
+Setup verifies the connection before showing Ready. Wiki memory and model access
+are separate: local knowledge needs no API key; the assistant uses your configured
+model provider. See [agent memory](agent-memory.md).
 
-## 1. Install with the native wizard
+## Command-line installation
 
-In a prepared source checkout, `wiki start` opens the standalone app immediately
-and returns to the terminal. If missing, it builds once using the incremental
-cache; `wiki start --build` refreshes it. Normal launches need no development
-server. See [Wiki CLI](wiki-cli.md#install-and-start).
+The release's `install/install.mjs` supports a selected prefix and external agent
+connections. Platform `install.sh` / `install.ps1` wrappers run the same installer.
+Supported options include `--prefix DIR`, `--agents athenaeum,claude,cursor`,
+`--capture off|instruct|nudge`, `--auto-sync`, and `--no-agents`. Read `--help`
+for the release's full options. Existing user configuration is preserved; managed
+blocks are backed up, and malformed or manually owned entries are left untouched.
 
-For editing a source checkout, run `npm install` once, then `npm start`. This
-opens the native desktop with Vite live updates; leave it running as you edit.
-UI changes do not rebuild Rust, and backend changes rebuild incrementally.
-The first development launch compiles native dependencies once. `wiki start --dev`
-is the equivalent workspace command. Local iteration needs no installer or
-release build; see [the desktop development workflow](../README.md#desktop-app).
+`wiki setup` creates or connects a wiki; `wiki doctor` verifies local wiring;
+`wiki disconnect-agents` removes only managed integration entries. Saved model
+credentials and unrelated configuration remain yours. Auto sync is opt-in.
 
-The verified 2026-10-27 Windows candidate is a local NSIS artifact at
-`target/release/bundle/nsis/Athenaeum_0.1.0_x64-setup.exe`. The repository is private and has no
-published latest release; the public download and updater channel are not verified. This candidate
-does not establish installation support for macOS or Linux. See the cross-repository verification
-record in `athenaeum_validation/RELEASE_COMPLETION.md` for evidence and remaining checks.
+## Agent state and models
 
-Download the package for your system from the
-[latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest):
+The built-in assistant stores `config.json`, `AGENT.md` and private conversation
+files under `~/.athenaeum-agent` (`ATHENAEUM_AGENT_HOME` overrides it). Configure
+terminal models there; the desktop passes its Settings route through the child
+process environment. Keys belong in environment variables, not source files or
+wiki pages. The runtime supports Responses, Chat Completions and Anthropic APIs.
+Local model servers may use loopback HTTP; remote endpoints require HTTPS.
 
-- **Windows:** open `Athenaeum_<version>_x64-setup.exe`, the native NSIS setup wizard.
-- **macOS:** open `Athenaeum_<version>_aarch64.pkg` (Apple silicon) or
-  `Athenaeum_<version>_x64.pkg` (Intel) in Apple's Installer. It installs the app in
-  Applications; macOS may request administrator authorization. A `.dmg` is also available.
-- **Linux:** install the `.deb` or run the `.AppImage`.
+Commands and file changes require approval. Headless commands deny changes by
+default; `--yes` is an explicit opt-in. Approved commands run with user privileges,
+without an OS sandbox. See [runtime limits](../packages/agent/runtime/README.md).
 
-On first launch, choose Library sign-in or local use and click **Next**. Library
-sign-in accepts your username/email and password inside Athenaeum, with no device
-code to enter. The CLI exchanges a temporary account session for a scoped token,
-ends the temporary session, and saves only the token. Creating a new account still
-opens the Library registration page in your browser.
+External clients retain their own accounts and execution. Claude configuration
+honours `CLAUDE_CONFIG_DIR`; Cursor uses its MCP settings. No external agent
+credentials or sessions are imported into Athenaeum.
 
-Open a project, then go to **Connectors → Coding agents**, select **Codex**, click
-**Next**, then **Connect Codex**. The connection is checked before **Ready** appears;
-click **Finish** to open your wiki. You can also select Claude Code or Cursor. Setup installs the local
-wiki tools and Codex memory instructions, using your existing Codex session and login.
-Wiki memory needs no additional API key, subscription or agent runtime. Reopen Codex
-after setup to load the connection. Library connection is optional.
+## Source builds and verification
 
-See [Codex wiki memory](codex-memory.md) for the recall and recording routine.
-The separate Athenaeum Agent runtime remains an advanced, optional CLI integration;
-it is not part of this setup flow.
-
-The project chooser also offers **Clone from Library**. Choose a hosted `owner/wiki`, a new
-folder name and its parent directory; private wikis use browser sign-in. An existing coding folder
-can be opened before it has a wiki, then initialized through guided setup.
-
-Account access is separate in **Connectors → Library account**. Model configuration
-is in **Connectors → AI model**, and remains available in Settings too.
-
-In **Knowledge → Library**, name your wiki, click **Next**, sign in if needed,
-then click **Publish wiki**. This explicitly shares accepted pages under `wiki/`
-with a new private wiki (or a public wiki if you choose that option). Linked wikis have **Pull**,
-**Push**, **Sync**, status and hosted-history controls. A conflict holds local work in place and
-blocks push. **Compare versions** shows local, Library and last shared text; keep a version or
-combine them for editing, remove the markers, then keep the edited local version and sync.
-
-Setup offers connection checks, repair by rerunning the selected agent’s setup, and
-per-agent disconnect actions. Disconnect preserves other settings and wiki content.
-
-The package contains the matching `athenaeum` CLI, a private checksum-verified Node runtime,
-and the MCP integration. Base setup copies these resources locally and works offline.
-You do not need Node, Rust, a terminal installer command, or a downloaded shell script.
-The app invokes its packaged Node entry point directly.
-
-Advanced Athenaeum Agent installation uses `athenaeum_agent`'s own packaged installer to
-install its pinned DeepSeek Harness runtime from npm and mount the packaged wiki bundle.
-This step needs internet access. Its `athenaeum-agent` launcher starts the unmodified
-Harness with the `athenaeum` profile; coding needs a model API key (`DEEPSEEK_API_KEY`).
-The app's chat uses this same installed profile through the Harness SDK.
-
-Open a new terminal after setup. On macOS, setup adds a marked PATH entry to the login
-profile for zsh (or bash when it is the user's configured shell). Windows uses the user PATH.
-Setup shows progress and errors, can be cancelled, and is safe to retry.
-
-### What it puts where
-
-Everything lives under one directory, and nothing outside it is changed except the launcher links and
-your agents' own settings (below).
-
-| Where | What |
-| --- | --- |
-| `…/Athenaeum/bin/` | `athenaeum` (the command), `athenaeum-integrations`, `athenaeum-mcp` |
-| `…/Athenaeum/lib/athenaeum-integrations.mjs` | The agent integration, one file |
-| `…/Athenaeum/node/` | A private Node, so the integration keeps working whatever you do to your own |
-| `…/Athenaeum/install.json` | What was installed and where |
-
-The directory is `%LOCALAPPDATA%\Athenaeum` on Windows, `~/Library/Application Support/Athenaeum` on macOS
-and `~/.local/share/athenaeum` on Linux. On macOS and Linux the three commands are linked into
-`~/.local/bin`; on Windows `bin` is added to your user `PATH`.
-
-Advanced script options (after `sh -s --` for the shell installer; as `ATHENAEUM_INSTALL_ARGS` on Windows):
-`--prefix DIR`, `--agents claude,codex,cursor`, `--capture off|instruct|nudge`, `--auto-sync`,
-`--no-agents`, `--no-link`, and `--cli PATH|URL` / `--integrations PATH|URL` to install builds you
-already have.
-
-## 2. Set up a project
-
-```sh
-cd your-project
-athenaeum setup
-```
-
-`setup` is safe to repeat. It creates the project's knowledge base and its `athenaeum.json` identity,
-indexes the project's files and symbols (no model is involved), adds `.athenaeum/` to `.gitignore` in a
-Git project, and re-checks that your agents are connected. Add `--library` to back the wiki up online
-(below). The guided setup in the app does the same project setup after installing the chosen tools.
-
-## 3. Use your coding agent as usual
-
-What changes in each agent:
-
-| | Claude Code | Codex | Cursor |
-| --- | --- | --- | --- |
-| Tools (`wiki_context`, `wiki_search`, `wiki_create`, …) | MCP server | MCP server | MCP server |
-| Knowledge recalled for each task | hook | instructed in `AGENTS.md` | the agent asks |
-| Note on when to record knowledge | session-start hook | `AGENTS.md` block | — |
-| Recording useful findings before finishing | hook | instructed in `AGENTS.md` | the agent asks |
-
-Codex gets a managed block in its active global `AGENTS.md` (or a non-empty
-`AGENTS.override.md`), conditional on a project having `.athenaeum/`. It directs Codex
-to recall before each task and propose durable findings before finishing. This is
-instruction-driven behavior, not an enforced lifecycle hook. Cursor receives tools only.
-The connection check detects missing or outdated Codex instructions; rerun setup to repair them.
-
-In a project that has a knowledge base, Claude Code is handed a short brief of what the wiki knows that
-relates to your prompt, inside the engine's trust wrapper: reference material, never instruction. In a
-project without one, the hooks do nothing and the agent behaves exactly as before. If anything about
-Athenaeum fails, a hook stays silent and exits cleanly; a broken wiki never breaks your coding session.
-
-**Storing what the agent learns.** The agent is told to record durable, non-obvious things (why a decision
-was made, a trap that cost time, a convention) with `wiki_create`. That only *proposes* it. A person
-accepts it, in the app under **Review** or with `athenaeum proposals` / `athenaeum accept`, and accepting
-is what writes the Markdown page. Conversation text never becomes permanent knowledge by itself.
-
-`--capture` controls the recording instructions: `instruct` (default) installs the Codex
-recall/record routine and tells Claude Code once per session; `nudge`
-also asks Claude Code, at most once per session and only after it edited files without proposing anything, whether
-there is something worth recording; `off` removes the instructions.
-
-## 4. The Library (optional)
-
-The Library is a GitHub-like store for your *accepted wiki text*, browsable at
-<https://wiki.hanoryx.com>. It holds Markdown and the minimal metadata for identity and history, and never
-raw sources, code, indexes, agent sessions or credentials.
-
-```sh
-athenaeum setup --library          # sign in once in a browser, create a private repository, link it
-athenaeum sync                     # pull, then push accepted pages; stops at conflicts
-```
-
-Nothing is sent until you sync. If you pass `--auto-sync` to the installer or to `setup`, Claude Code also
-syncs at the end of a turn, but only when the project is linked and out of step, at most once a minute, in
-the foreground of your own session, and it stops at conflicts or a missing network instead of forcing
-anything. It is never a background process.
-
-## Checking and repairing
-
-```sh
-athenaeum doctor
-```
-
-lists every link (the command, this project, the Library sign-in, each agent's configuration) and the one
-thing to do about any that is broken. `athenaeum setup` repairs what `doctor` reports.
-
-## Updating
-
-The desktop has an updater for signed, published releases. No updater channel is published for the
-local Windows candidate; run the replacement NSIS installer to update it. Open **Connectors → Coding agents**
-again to reconnect the selected agent and refresh its memory instructions
-from the installed integration. Advanced Athenaeum Agent updates use its separate installer.
-Project wikis and credentials are preserved.
-
-## Removing
-
-```sh
-node install.mjs --uninstall        # from a checkout; or `athenaeum-integrations disconnect` to only unwire agents
-```
-
-Removes exactly what the installer made. Entries `connect` added to your agents' settings are removed
-and nothing else in those files is touched; a first copy of each file it edited is kept beside it as
-`*.athenaeum-backup`. Your projects' wikis and your Library account are untouched.
-
-## What this changes in your agents' settings
-
-| File | Change |
-| --- | --- |
-| `~/.claude.json` | adds `mcpServers.athenaeum` |
-| `~/.claude/settings.json` | adds three hook entries (`SessionStart`, `UserPromptSubmit`, `Stop`) that run `athenaeum-integrations hook claude …` |
-| `~/.codex/config.toml` | adds a delimited `[mcp_servers.athenaeum]` block |
-| `~/.codex/AGENTS.md` | adds a delimited note |
-| `~/.cursor/mcp.json` | adds `mcpServers.athenaeum` |
-
-(`CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honoured.) Existing entries are preserved. A file that is not
-valid JSON, or a hand-written `[mcp_servers.athenaeum]` in Codex's config, is reported and left alone.
-
-## Requirements
-
-- Windows 10 or later, macOS 11 or later, or Linux (glibc), x64 or arm64.
-- Native base setup needs no network. Athenaeum Agent runtime setup needs the npm registry;
-  connecting or syncing Athenaeum Library needs its server. Advanced script installation also needs GitHub and nodejs.org.
-- **While the `athenaeum` repository is private** the release files cannot be downloaded without signing
-  in, so the one-liners return a 404. Download the release assets (`athenaeum-cli-<target>.tar.gz` or
-  `.zip`, and `athenaeum-integrations.mjs`) and install them with
-  `node install.mjs --cli <archive> --integrations <file>`.
-
-## Advanced command-line installation
-
-The existing `install.sh`, `install.ps1` and `install.mjs` remain available for Linux,
-automation and CLI-only installs. They are optional alternatives to the native wizards:
-
-```sh
-curl -fsSL https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.sh | sh
-```
-
-```powershell
-irm https://github.com/Hanoryx-North/athenaeum/releases/latest/download/install.ps1 | iex
-```
-
-These install the engine CLI and external-agent integration. To install Athenaeum Agent
-without the desktop, use that repository's own installer. No agent runtime is implemented here.
-
-## Not covered
-
-- **Codex and Cursor hooks.** Codex uses persistent memory instructions rather than enforced hooks; Cursor receives MCP tools only.
-- **Platform signing credentials.** Updater signatures are separate from OS code signing.
-  Apple app/installer signing and notarization require release credentials; Windows certificate
-  signing is not configured. See [releasing.md](releasing.md).
+Use the [README](../README.md) for the supported build commands. Build workspace
+packages before consumers and run the validation runner with `--fail-on-skip`.
+The native agent build needs only Rust and Node; it does not compile a copied
+agent workspace. Platform desktop installers need the platform's Tauri tooling.
+Builds and scripted local tests do not prove hosted provider access or validate
+installers on another operating system.

@@ -476,7 +476,7 @@ jobs:
             echo
             echo "### Set up your coding agent"
             echo
-            echo "Open a project and go to **Knowledge → Library**. Guided setup installs the CLI and lets you choose Athenaeum Agent (app chat and the athenaeum-agent command), or connect your existing Codex, Claude Code or Cursor through MCP. No terminal installer command is required."
+            echo "Open a project and go to **Knowledge → Library**. Guided setup installs the CLI and lets you use Athenaeum Agent in app chat and the terminal, or connect Claude Code or Cursor through MCP. No terminal installer command is required."
             echo
             echo "Connect Athenaeum Library if you want to sync shared, accepted wiki pages. Agent runtime setup needs internet access; CLI and MCP setup use packaged resources."
             echo

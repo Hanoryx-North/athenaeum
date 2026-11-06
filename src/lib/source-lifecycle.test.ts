@@ -145,11 +145,11 @@ describe("source-lifecycle path helpers", () => {
         ],
       },
       {
-        name: ".codex",
-        path: "/external/imported/.codex",
+        name: ".private-agent",
+        path: "/external/imported/.private-agent",
         is_dir: true,
         children: [
-          { name: "config.yaml", path: "/external/imported/.codex/config.yaml", is_dir: false },
+          { name: "config.yaml", path: "/external/imported/.private-agent/config.yaml", is_dir: false },
         ],
       },
     ])
@@ -186,7 +186,7 @@ describe("source-lifecycle path helpers", () => {
       "/project/raw/sources/imported/.claude/research.md",
     )
     expect(mocks.copyFile).not.toHaveBeenCalledWith("/external/imported/.claude/settings.json", expect.anything())
-    expect(mocks.copyFile).not.toHaveBeenCalledWith("/external/imported/.codex/config.yaml", expect.anything())
+    expect(mocks.copyFile).not.toHaveBeenCalledWith("/external/imported/.private-agent/config.yaml", expect.anything())
   })
 
   it("rejects importing the project folder or folders inside it", async () => {
@@ -300,7 +300,7 @@ describe("source-lifecycle path helpers", () => {
       { id: "p1", name: "Project", path: "/project" },
       [
         "/project/raw/sources/.claude/settings.json",
-        "/project/raw/sources/.codex/config.yaml",
+        "/project/raw/sources/.private-agent/config.yaml",
         "/project/raw/sources/notes.md",
       ],
       {

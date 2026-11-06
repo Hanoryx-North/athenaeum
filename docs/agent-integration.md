@@ -14,20 +14,17 @@ needs its own graph or may open `knowledge.db`.
 > is `athenaeum -C DIR bridge`; `athenaeum bridge --workspace DIR` is accepted as the old
 > spelling. See [scope.md](scope.md#retired-code).
 >
-> Below, **"Repository 2"** means the agent runtime: `deepseek-harness` with the `athenaeum_agent`
-> bundle (the MCP server in `athenaeum_integrations` is a second, equal consumer of the same bridge).
-
-The integration is intentionally shaped like this:
+The agent runtime is owned source under `packages/agent/runtime`; the optional
+Harness adapter remains a separate runtime integration. Both use this same bridge.
+Older descriptions of separate repositories below are historical ownership labels,
+not requirements for sibling checkouts.
 
 ```text
-Agent runtime: deepseek-harness + athenaeum_agent
-  Agent loop · providers · tools · permissions · sessions
-                    │
-                    │ WikiProvider adapter
-                    │ protocol v1 JSON
-                    ▼
-Athenaeum / Wiki Library (this repository)
-  context · graph · curation · evidence · history · knowledge.db
+Desktop / wiki CLI / owned agent / optional external clients
+                  ↓ versioned bridge
+            one knowledge engine
+                  ↓
+       Markdown vault + rebuildable index
 ```
 
 The runtime knows the versioned Wiki protocol. It does not know that this
@@ -35,7 +32,7 @@ implementation uses Rust, SQLite, FTS5, or content-addressed blobs.
 
 ## Repository ownership
 
-| Athenaeum — this repository | Agent runtime — `deepseek-harness` + `athenaeum_agent` |
+| Athenaeum — this repository | Agent runtime — `packages/agent/runtime` or optional Harness |
 | --- | --- |
 | Knowledge nodes and typed edges | Agent loop and conversation messages |
 | Evidence, provenance and authority | Model providers and streaming |
@@ -125,7 +122,7 @@ operations, closed vocabularies and retrieval budgets supported by the build.
 It works even before a project has initialized a knowledge base. Do not
 duplicate the vocabularies in Repository 2.
 
-## Coding agents (Claude Code, Codex, Cursor)
+## Coding agents (Athenaeum Agent, Claude Code, Cursor)
 
 People's own coding agents are clients of the same bridge, through `athenaeum_integrations`: an MCP server
 (`wiki_*` tools) and, for Claude Code, hooks that recall knowledge for each prompt and tidy up when a turn

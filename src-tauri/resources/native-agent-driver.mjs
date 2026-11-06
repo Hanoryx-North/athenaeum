@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline'
 
 const binary = process.argv[2]
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`)
-const runtime = spawn(binary, ['app-server'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+const runtime = spawn(binary, ['app-server'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ATHENAEUM_NODE: process.execPath } })
 runtime.stderr.on('data', (chunk) => process.stderr.write(chunk))
 let serial = 0
 let active = null
@@ -53,8 +53,8 @@ createInterface({ input: runtime.stdout, crlfDelay: Infinity }).on('line', (line
       if (!active) { write({ id: message.id, result: { decision: 'decline' } }); return }
       approvals.set(String(message.id), message.id)
       notify('approval/request', { id: String(message.id),
-        title: message.method.includes('commandExecution') ? 'Allow this command?' : 'Allow these file changes?',
-        detail: params.command || params.reason || 'The agent needs your approval to continue.' })
+        title: message.method.includes('commandExecution') ? 'Run this command with your permissions?' : 'Allow these file changes?',
+        detail: params.command ? `${params.command}\n\nRuns with your account’s file and network access.` : params.reason || 'The agent needs your approval to continue.' })
     } else {
       // Unsupported interactive requests fail explicitly; they are never approved.
       write({ id: message.id, error: { code: -32601, message: 'This interaction is not supported in the desktop yet. Use the advanced terminal.' } })
@@ -144,17 +144,7 @@ async function handle(request) {
     completion.catch(() => {})
     let threadId = sessions.get(request.sessionId)
     if (!threadId) {
-      const config = {}
-      const baseURL = process.env.ATHENAEUM_AGENT_RESPONSES_URL
-      if (baseURL) {
-        config.model_provider = 'athenaeum-desktop'
-        config['model_providers.athenaeum-desktop'] = { name: 'Athenaeum', base_url: baseURL,
-          wire_api: 'responses', env_key: 'ATHENAEUM_LLM_API_KEY' }
-      }
-      const result = await rpc('thread/start', { cwd: request.projectPath,
-        approvalPolicy: 'on-request', sandbox: 'workspace-write', config,
-        developerInstructions: "You are Athenaeum Agent, built into Athenaeum. Use the native coding tools and permissions. Recall relevant wiki knowledge before work. When capturing a durable finding, use wiki_link to connect it to genuinely relevant existing pages from the brief; include source paths and verification evidence. Never invent a relationship just to fill the graph. The user's per-wiki automation settings decide when proposals become saved pages.",
-        ...(process.env.ATHENAEUM_AGENT_MODEL ? { model: process.env.ATHENAEUM_AGENT_MODEL } : {}) })
+      const result = await rpc('thread/start', { cwd: request.projectPath, sessionId: request.sessionId })
       threadId = result.thread.id
       sessions.set(request.sessionId, threadId)
     }

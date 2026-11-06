@@ -17,7 +17,7 @@ function ProjectAgents({ workspace }: { workspace: string }) {
   const { doctor, busy, error, check } = useSetupStore()
   const [adding, setAdding] = useUiPreference(`agent-setup:${workspace}`, false, (value) => typeof value === "boolean")
   const connected = AGENTS.filter((agent) => doctor?.checks.some((c) => c.id === `agent-${agent.id}` && c.ok))
-  const [agent, setAgent] = useUiPreference<Agent>(`setup-agent:${workspace}`, "codex", (value) => AGENTS.some((a) => a.id === value))
+  const [agent, setAgent] = useUiPreference<Agent>(`setup-agent:${workspace}`, "athenaeum", (value) => AGENTS.some((a) => a.id === value))
 
   useEffect(() => { void check(workspace) }, [workspace, check])
 
@@ -32,7 +32,7 @@ function ProjectAgents({ workspace }: { workspace: string }) {
     <section className="space-y-6" aria-label="Coding agents">
       <header>
         <h2 className="text-2xl font-semibold">Coding agents</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Connect the coding agents you use to this project’s wiki. Your existing agent account handles the AI.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Connect the coding agents you use to this project’s wiki. Athenaeum Agent uses your Settings model. External agents use their own accounts.</p>
       </header>
       {busy === "check" && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Checking connections…</p>}
       {connected.length > 0 ? (

@@ -120,18 +120,6 @@ export async function streamChat(
 ): Promise<void> {
   const { onToken, onDone, onError } = callbacks
 
-  // Subprocess agent-CLI providers are not served here. This client exists for
-  // ingest — reading a source and writing wiki pages — which is a direct model
-  // call with no tool loop. Anything that needs an agent goes to athenaeum_agent
-  // over the harness, not to a CLI spawned from the frontend. See AGENTS.md.
-  if (config.provider === "claude-code" || config.provider === "codex-cli") {
-    throw new Error(
-      `Provider "${config.provider}" is not available in Athenaeum. Agent runtimes are ` +
-        `owned by DeepSeek Harness through athenaeum_agent; configure an HTTP model ` +
-        `provider for ingest instead.`,
-    )
-  }
-
   const providerConfig = getProviderConfig(config)
 
   // Combined abort: (a) user cancel, (b) our long-horizon timeout.

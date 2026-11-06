@@ -505,11 +505,7 @@ fn read_driver_stderr(stderr: std::process::ChildStderr, tail: &Arc<StdMutex<Vec
 }
 
 /// Launch the source-built Athenaeum runtime as a headless service for our own UI.
-fn native_command(
-    app: &AppHandle,
-    workspace: &Path,
-    route: Option<&HarnessRoute>,
-) -> Result<Command, String> {
+pub(crate) fn native_agent_binary() -> Result<PathBuf, String> {
     let prefix = default_prefix()?;
     let executable = if cfg!(windows) {
         "athenaeum-agent.exe"
@@ -518,7 +514,11 @@ fn native_command(
     };
     let mut candidates = Vec::new();
     if let Some(path) = env::var_os("ATHENAEUM_AGENT_BIN") {
-        candidates.push(PathBuf::from(path));
+        let path = PathBuf::from(path);
+        return path
+            .is_file()
+            .then_some(path)
+            .ok_or_else(|| "ATHENAEUM_AGENT_BIN does not name a file.".to_string());
     }
     // Development uses the one checkout's native runtime build.
     if cfg!(debug_assertions) {
@@ -529,9 +529,18 @@ fn native_command(
         );
     }
     candidates.push(prefix.join("bin").join(executable));
-    let binary = candidates.into_iter().find(|path| path.is_file()).ok_or(
+    candidates.into_iter().find(|path| path.is_file()).ok_or(
         "Athenaeum Agent is not installed. Build or install its native runtime, or select the optional Harness integration."
-    )?;
+    ).map_err(str::to_string)
+}
+
+fn native_command(
+    app: &AppHandle,
+    workspace: &Path,
+    route: Option<&HarnessRoute>,
+) -> Result<Command, String> {
+    let prefix = default_prefix()?;
+    let binary = native_agent_binary()?;
     let node = private_node_path(&prefix)
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("node"));
@@ -559,17 +568,26 @@ fn native_command(
         if route.model != "native-configuration" {
             command.env("ATHENAEUM_AGENT_MODEL", &route.model);
         }
-        if let Some(key) = &route.api_key {
-            command.env("ATHENAEUM_LLM_API_KEY", key);
-        }
+        // An explicitly keyless Settings route must not inherit a different provider's key.
+        command.env(
+            "ATHENAEUM_LLM_API_KEY",
+            route.api_key.as_deref().unwrap_or(""),
+        );
         if let Some(base) = route
             .pi_provider
             .as_ref()
             .and_then(|p| p.get("baseURL"))
             .and_then(Value::as_str)
         {
-            command.env("ATHENAEUM_AGENT_RESPONSES_URL", base);
+            command.env("ATHENAEUM_AGENT_BASE_URL", base);
         }
+    }
+    if let Some(api) = route
+        .and_then(|r| r.pi_provider.as_ref())
+        .and_then(|p| p.get("api"))
+        .and_then(Value::as_str)
+    {
+        command.env("ATHENAEUM_AGENT_API", api);
     }
     #[cfg(windows)]
     {

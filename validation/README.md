@@ -21,7 +21,7 @@ an individual skipped test is recorded as skipped, never as passed; use
 and `bench` are optional and describe their requirements in `--list`.
 
 The upstream Harness test requires `DSH_REPO` pointing at a built checkout of the
-pinned release. The source-verified native runtime is built with `npm run native:build -w
+pinned release. The owned native runtime is built with `npm run native:build -w
 athenaeum-agent`; `native-agent-smoke` exercises the executable and desktop adapter
 against a scripted loopback provider. Native packaging requires `ATHENAEUM_NATIVE_TOOLS`; neither is
 claimed by the ordinary local adapter/product checks. Browser setup checks remain

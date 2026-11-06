@@ -27,8 +27,8 @@ export function FirstLaunch({ onComplete }: { onComplete: () => Promise<void> })
         <header className="space-y-3">
           <h1 className="text-3xl font-semibold tracking-tight">Welcome to Athenaeum</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            A wiki that grows with your work. Sign in, open a wiki, then connect the coding
-            agent you already use.
+            A wiki that grows with your work. Open a wiki, use Athenaeum’s coding assistant,
+            or connect an agent you already use.
           </p>
         </header>
         <LibraryAccount onContinue={() => void finish()} continuing={saving} />

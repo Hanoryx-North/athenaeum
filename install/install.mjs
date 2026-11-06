@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Installs Athenaeum for the person's coding agents: the `athenaeum` command, the agent
-// integration (the MCP server and hooks Claude Code and Codex use), and the private Node that
+// integration (the MCP server and hooks Athenaeum Agent and Claude Code use), and the private Node that
 // runs it, all under one prefix. Then it connects the agents that are installed. Nothing outside
 // the prefix is touched except a few launcher links (or, on Windows, an entry on the user's PATH)
 // and the agents' own settings, which `athenaeum-integrations disconnect` undoes exactly.
@@ -9,7 +9,7 @@
 // Run directly it needs Node 20 or newer:
 //
 //   node install/install.mjs [--prefix DIR] [--cli PATH|URL] [--integrations PATH|URL]
-//                            [--agents claude,codex,cursor] [--capture off|instruct|nudge]
+//                            [--agents athenaeum,claude,cursor] [--capture off|instruct|nudge]
 //                            [--auto-sync] [--no-agents] [--no-link] [--uninstall]
 //
 // `--cli` and `--integrations` default to the latest GitHub release and exist so a build can be
@@ -247,7 +247,7 @@ export async function install(args, { env = process.env, home = homedir(), platf
   console.log('Next, in each project you want a knowledge base for:\n')
   console.log('  cd your-project')
   console.log('  athenaeum setup                 # creates the wiki; add --library to back it up online\n')
-  console.log('then use Claude Code or Codex as usual. Run `athenaeum doctor` any time to check the wiring.')
+  console.log('then use Athenaeum Agent or Claude Code as usual. Run `athenaeum doctor` any time to check the wiring.')
   return l
 }
 

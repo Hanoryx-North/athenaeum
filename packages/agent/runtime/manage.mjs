@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Build and run the imported source, without invoking a separately installed Codex.
+// Build and run Athenaeum’s platform launcher and embedded agent modules.
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

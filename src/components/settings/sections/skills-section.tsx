@@ -143,7 +143,7 @@ export function SkillsSection() {
       <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
         {t("settings.sections.skills.paths", {
           defaultValue:
-            "Scanned folders: .athenaeum/skills, ~/.claude/skills, ~/.codex/skills, ~/.agents/skills.",
+            "Scanned folders: .athenaeum/skills, ~/.claude/skills, ~/.agents/skills.",
         })}
       </div>
 

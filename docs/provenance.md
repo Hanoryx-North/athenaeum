@@ -1,5 +1,9 @@
 # Provenance of copied code
 
+This records historical imports. Current ownership is defined by
+[AGENTS.md](../AGENTS.md) and [the consolidation guide](consolidation.md). The
+integrated coding runtime is now original source maintained inside this checkout.
+
 This project was bootstrapped from existing codebases rather than written from scratch.
 This file records exactly what came from where, so that fixes can be carried across in
 either direction and nobody has to guess later.
@@ -44,8 +48,8 @@ llm_wiki's too. Three files were rewritten rather than copied and carry their ow
 | `src-tauri/src/panic_guard.rs` | same path | The async half restored, having been dropped at bootstrap when every command here was synchronous. |
 
 **Not taken, permanently:** `src-tauri/src/agent/` (13,512 lines), `commands/claude_cli.rs`,
-`commands/codex_cli.rs`, `commands/cli_resolver.rs`, and the frontend's CLI transports.
-DeepSeek Harness owns the agent runtime.
+`commands/cli_resolver.rs`, and the frontend's CLI transports.
+The owned runtime now lives under `packages/agent/runtime`; Harness remains an optional external integration.
 
 **Not taken, for now:** `api_server.rs` and `clip_server.rs`, and the `cors.rs`,
 `server_bind.rs` and `commands/page_embedding.rs` that existed only to serve them.
@@ -103,9 +107,9 @@ It was used as a **reference** for two things:
   rendered result.
 - The separation between a tool's implementation and its prompt text.
 
-The agent loop is no longer anyone's port of it: the runtime is DeepSeek
-Harness, which owns tools, permissions, sessions and providers as plugins.
-Nothing of that belongs in this Wiki Library repository either way.
+The current integrated agent is original Athenaeum code in `packages/agent/runtime`
+under GPL-3.0-only. The optional Harness adapter retains its MIT notice; external
+Harness source is not copied into this repository.
 
 ## Generated, not copied
 

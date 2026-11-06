@@ -109,13 +109,32 @@ export function harnessRouteFor(config: LlmConfig): HarnessRouteResult {
   }
 }
 
-/** Native app-server configuration is isolated from any installed Codex app. */
+/** Route the selected Settings provider into the owned Athenaeum runtime. */
 export function nativeRouteFor(config: LlmConfig): HarnessRouteResult {
-  if (config.provider === "openai" && config.apiKey.trim()) {
-    return { ok: true, route: { provider: "athenaeum-native", model: config.model.trim() || "native-configuration",
-      apiKeyEnv: SETTINGS_KEY_ENV, apiKey: config.apiKey,
-      piProvider: { baseURL: "https://api.openai.com/v1" } } }
+  const model = config.model.trim()
+  if (!model) return { ok: false, reason: "Choose a model in Settings to use chat." }
+  let api: string, baseURL: string
+  switch (config.provider) {
+    case "openai": api = "responses"; baseURL = "https://api.openai.com/v1"; break
+    case "anthropic": api = "anthropic"; baseURL = "https://api.anthropic.com/v1"; break
+    case "ollama":
+      api = "chat-completions"
+      baseURL = `${(config.ollamaUrl.trim() || "http://localhost:11434").replace(/\/+$/, "")}/v1`
+      break
+    case "custom":
+      baseURL = config.customEndpoint.trim().replace(/\/(?:chat\/completions|responses|messages)\/?$/, "")
+      if (!baseURL) return { ok: false, reason: "Set the endpoint URL in Settings to use chat." }
+      api = config.apiMode === "anthropic_messages" ? "anthropic" : "chat-completions"
+      break
+    case "minimax":
+      api = "anthropic"; baseURL = config.customEndpoint.trim() || "https://api.minimax.io/anthropic"
+      break
+    default:
+      return { ok: false, reason: "Athenaeum Agent supports OpenAI, Anthropic, Ollama and compatible custom APIs. Choose one in Settings, or select the optional Harness runtime." }
   }
-  // Native provider/auth configuration belongs to ~/.athenaeum-agent/config.toml.
-  return { ok: true, route: { provider: "athenaeum-native", model: "native-configuration" } }
+  if (!["ollama", "custom"].includes(config.provider) && !config.apiKey.trim()) {
+    return { ok: false, reason: "Add the provider API key in Settings to use chat." }
+  }
+  return { ok: true, route: withKey({ provider: "athenaeum-native", model,
+    ...(config.apiKey.trim() ? { apiKeyEnv: SETTINGS_KEY_ENV } : {}), piProvider: { baseURL, api } }, config.apiKey) }
 }

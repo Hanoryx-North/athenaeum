@@ -82,7 +82,7 @@ export async function refreshProjectFileTree(
     // The full project scan hides dot-prefixed entries (`.git`,
     // `.athenaeum`, …), which is correct for most of the tree. But
     // `raw/sources` may hold user-added dotfolders (`.claude`,
-    // `.codex`) whose files back real `sources:` references. Scan
+    // `.private-agent`) whose files back real `sources:` references. Scan
     // that subtree with `includeHidden` and merge it in so those
     // sources resolve instead of rendering as "not found". The
     // raw/sources scan is best-effort — a project without sources

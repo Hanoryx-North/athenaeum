@@ -52,12 +52,12 @@ class NativePackaging(unittest.TestCase):
         env = dict(os.environ)
         # Keep all config, caches, profiles, credentials and launchers in the fixture.
         for key in list(env):
-            if key.startswith(("ATHENAEUM_", "DSH_", "CODEX_", "CLAUDE_")):
+            if key.startswith(("ATHENAEUM_", "DSH_", "CLAUDE_")):
                 env.pop(key)
         env.update(HOME=str(home), USERPROFILE=str(home), LOCALAPPDATA=str(home / "AppData/Local"),
                    XDG_DATA_HOME=str(home / ".local/share"), XDG_CONFIG_HOME=str(home / ".config"),
                    XDG_CACHE_HOME=str(home / ".cache"), SHELL="/bin/zsh",
-                   CODEX_HOME=str(home / ".codex"), CLAUDE_CONFIG_DIR=str(home / ".claude"))
+                   CLAUDE_CONFIG_DIR=str(home / ".claude"))
         if sys.platform == "darwin":
             prefix = home / "Library/Application Support/Athenaeum"
         elif sys.platform == "win32":
@@ -102,7 +102,7 @@ class NativePackaging(unittest.TestCase):
         self.assert_ok(self.invoke(command, env))
         self.assertEqual(page.read_text(), "# Keep local work\n")
         self.assertFalse((home / ".claude.json").exists())
-        self.assertFalse((home / ".codex/config.toml").exists())
+        self.assertFalse((home / ".athenaeum-agent/config.json").exists())
         if sys.platform == "darwin":
             self.assertEqual((home / ".zprofile").read_text().count("# Athenaeum command-line tools"), 1)
         self.assert_ok(self.invoke([manifest["node"], prefix / "lib/athenaeum-integrations.mjs", "--help"], env))

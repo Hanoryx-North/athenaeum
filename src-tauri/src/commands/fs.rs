@@ -1500,7 +1500,7 @@ pub async fn create_missing_wiki_page(
 ///
 /// Hidden (dot-prefixed) entries are shown only when `include_hidden`
 /// is set. That flag is reserved for the `raw/sources` content area,
-/// where dotfolders like `.claude` / `.codex` are legitimate sources
+/// where dotfolders like `.claude` / `.private-agent` are legitimate sources
 /// the user deliberately added. Every other caller keeps hiding dot
 /// entries so internal state (`.athenaeum`, `.git`), caches, and secrets
 /// (`.env`) never leak into trees or the ingest candidate set.

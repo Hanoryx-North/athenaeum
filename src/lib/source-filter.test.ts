@@ -48,8 +48,8 @@ describe("source-filter", () => {
 
   it("identifies config-like files that should not be imported from hidden tool folders", () => {
     expect(isSensitiveConfigSourceFile("/external/.claude/settings.json")).toBe(true)
-    expect(isSensitiveConfigSourceFile("/external/.codex/config.yaml")).toBe(true)
-    expect(isSensitiveConfigSourceFile("/external/.codex/config.toml")).toBe(true)
+    expect(isSensitiveConfigSourceFile("/external/.private-agent/config.yaml")).toBe(true)
+    expect(isSensitiveConfigSourceFile("/external/.private-agent/config.toml")).toBe(true)
     expect(isSensitiveConfigSourceFile("/external/.cursor/rules.yml")).toBe(true)
     expect(isSensitiveConfigSourceFile("/external/.gemini/config.xml")).toBe(true)
     expect(isSensitiveConfigSourceFile("/external/.mcp/.env")).toBe(true)

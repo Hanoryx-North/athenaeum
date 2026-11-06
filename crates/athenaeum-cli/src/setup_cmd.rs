@@ -52,7 +52,7 @@ pub struct SetupArgs {
     /// Turn that off again.
     #[arg(long, conflicts_with = "auto_sync")]
     pub no_auto_sync: bool,
-    /// Which coding agents to connect: claude, codex, cursor. Default: the ones installed.
+    /// Which coding agents to connect: athenaeum, claude, cursor. Default: the ones installed.
     #[arg(long, value_delimiter = ',', value_name = "AGENT")]
     pub agents: Vec<String>,
     /// Do not touch any coding agent's settings.
@@ -566,7 +566,7 @@ fn connect_agents(args: &SetupArgs, auto_sync: Option<bool>, project: &Path) -> 
         return (
             Step::failed(
                 "agents",
-                "the agent integration (athenaeum-integrations) is not installed, so Claude Code and Codex were not connected",
+                "the agent integration (athenaeum-integrations) is not installed, so Athenaeum Agent and Claude Code were not connected",
                 "Run the Athenaeum installer, or pass --integrations <path> to the athenaeum-integrations launcher.",
             ),
             Value::Null,
@@ -672,7 +672,7 @@ fn finish(
         vec!["Fix the step marked FAIL above, then run `athenaeum setup` again. It is safe to repeat."]
     } else {
         vec![
-            "Open Claude Code or Codex in this project and work as usual: it recalls what the wiki knows and proposes what it learns.",
+            "Open Athenaeum Agent or Claude Code in this project and work as usual: it recalls what the wiki knows and proposes what it learns.",
             "Review what agents propose in the Athenaeum app (Review), or with `athenaeum proposals`; accepting writes the page.",
             "`athenaeum sync` shares accepted pages with the Library once it is connected. `athenaeum doctor` checks every link.",
         ]
