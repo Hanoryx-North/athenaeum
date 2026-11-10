@@ -63,6 +63,7 @@ export async function modelTurn(settings, history, tools, system, signal, delta)
   if (api === 'responses') body = { model: config.model, instructions: system, input: history, tools: tools.map((tool) => ({ ...tool, strict: false })), include: ['reasoning.encrypted_content'], stream: true, store: false }
   else if (api === 'chat-completions') body = { model: config.model, messages: [{ role: 'system', content: system }, ...messages(history)], tools: tools.map(({ type, ...tool }) => ({ type, function: tool })), stream: true }
   else body = { model: config.model, system, messages: anthropicMessages(history), tools: tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })), stream: true, max_tokens: 8192 }
+  if (config.maxOutputTokens !== undefined) body[api === 'responses' ? 'max_output_tokens' : api === 'chat-completions' ? 'max_completion_tokens' : 'max_tokens'] = config.maxOutputTokens
   const timeout = AbortSignal.timeout(180000)
   const requestSignal = AbortSignal.any([signal, timeout])
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' }

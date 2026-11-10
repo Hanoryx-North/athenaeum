@@ -248,6 +248,7 @@ pub fn run() {
             cli_tools::cli_cancel,
             cli_tools::cli_install_tools,
             harness::harness_check,
+            harness::chatgpt_account,
             harness::harness_start_turn_stream,
             harness::harness_cancel_turn,
             harness::harness_disconnect,

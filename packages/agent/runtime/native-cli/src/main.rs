@@ -9,6 +9,8 @@ use std::{
 const SOURCES: &[(&str, &str)] = &[
     ("cli.mjs", include_str!("../../src/cli.mjs")),
     ("agent.mjs", include_str!("../../src/agent.mjs")),
+    ("context.mjs", include_str!("../../src/context.mjs")),
+    ("learning.mjs", include_str!("../../src/learning.mjs")),
     ("config.mjs", include_str!("../../src/config.mjs")),
     ("tools.mjs", include_str!("../../src/tools.mjs")),
     ("provider.mjs", include_str!("../../src/provider.mjs")),

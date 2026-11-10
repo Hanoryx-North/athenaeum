@@ -2,25 +2,30 @@
 import { createInterface } from 'node:readline'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
-import { agentHome, loadConfig } from './config.mjs'
-import { openSession, runTurn } from './agent.mjs'
+import { stat } from 'node:fs/promises'
+import { agentHome, loadConfig, sessionFile } from './config.mjs'
+import { inspectSession, openSession, runTurn } from './agent.mjs'
+import { learningStatus, LearningWorker } from './learning.mjs'
 
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\n')
 const argv = process.argv.slice(2)
 function help() {
-  process.stdout.write(`athenaeum-agent — Athenaeum's coding assistant\n\nUsage: athenaeum-agent [exec|app-server] [options] [task]\n  -C, --cwd PATH   Selected project directory\n  --session ID     Resume a saved conversation in that directory\n  --json           Emit structured activity in headless mode\n  --yes            Explicitly approve local commands, file edits and MCP calls\n  --ephemeral      Do not persist this headless conversation\n  --help           Show help\n\nConfigure a model and API endpoint in ~/.athenaeum-agent/config.json or Settings.\nCommands run with your privileges. There is no operating-system sandbox.\n`)
+  process.stdout.write(`athenaeum-agent — Athenaeum's coding assistant\n\nUsage: athenaeum-agent [exec|app-server|inspect|memory] [options] [task]\n  -C, --cwd PATH   Selected project directory\n  --session ID     Resume a saved conversation in that directory\n  inspect          Read saved context and memory diagnostics without a model call\n  memory           List background learning job diagnostics without transcripts\n  --json           Emit structured activity in headless mode\n  --yes            Explicitly approve local commands, file edits and MCP calls\n  --ephemeral      Do not persist this headless conversation\n  --help           Show help\n\nConfigure a model and API endpoint in ~/.athenaeum-agent/config.json or Settings.\nCommands run with your privileges. There is no operating-system sandbox.\n`)
 }
 if (argv.includes('--help') || argv.includes('-h')) { help(); process.exit(0) }
 if (argv.includes('--version')) { process.stdout.write('athenaeum-agent 0.1.0\n'); process.exit(0) }
 
 async function server(home, config) {
+  const learning = new LearningWorker(home, config)
+  const learningTimer = setInterval(() => { void learning.wake() }, 5000).unref()
+  void learning.wake()
   const sessions = new Map(), running = new Map(), approvals = new Map()
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
   const reply = (id, result) => send({ id, result })
   const emit = (threadId, method, params) => send({ method, params: { threadId, ...params } })
   const stop = () => { for (const run of running.values()) run.controller.abort(); input.close() }
   process.once('SIGTERM', stop); process.once('SIGINT', stop)
-  input.on('close', () => { for (const run of running.values()) run.controller.abort() })
+  input.on('close', () => { clearInterval(learningTimer); void learning.close(); for (const run of running.values()) run.controller.abort() })
   async function handle(request) {
     const { id, method, params = {} } = request
     if (!method) {
@@ -31,10 +36,16 @@ async function server(home, config) {
     try {
       if (method === 'initialized') return
       if (method === 'initialize') { reply(id, { name: 'Athenaeum Agent', version: '0.1.0', agentHome: home }); return }
+      if (method === 'memory/read') { reply(id, await learningStatus(home)); return }
       if (method === 'thread/start' || method === 'thread/resume') {
         const session = await openSession(home, params.cwd || process.cwd(), params.sessionId)
         if (sessions.size >= 64 && !sessions.has(session.id)) throw new Error('Session limit reached. Restart the service to load another conversation.')
         sessions.set(session.id, session); reply(id, { thread: { id: session.id } }); return
+      }
+      if (method === 'thread/read') {
+        const session = sessions.get(params.threadId)
+        if (!session) throw new Error('Unknown conversation. Resume it before inspection.')
+        reply(id, { thread: inspectSession(session) }); return
       }
       if (method === 'turn/interrupt') {
         const run = running.get(params.threadId)
@@ -62,6 +73,7 @@ async function server(home, config) {
       try {
         await runTurn({ home, session, config, input: params.input, signal: controller.signal, approve, emit: (method, values) => emit(session.id, method, values) })
         emit(session.id, 'turn/completed', { turn: { id: turnId, status: 'completed' } })
+        void learning.wake()
       } catch (error) {
         emit(session.id, 'turn/completed', { turn: { id: turnId, status: controller.signal.aborted ? 'interrupted' : 'failed', error: { message: error.message } } })
       } finally { running.delete(session.id) }
@@ -76,7 +88,10 @@ async function server(home, config) {
 async function main() {
   const home = await agentHome(), config = await loadConfig(home)
   if (argv[0] === 'app-server') { await server(home, config); return }
+  if (argv[0] === 'memory' && argv.length === 1) { send(await learningStatus(home)); return }
   const args = [...argv]
+  const inspect = args[0] === 'inspect'
+  if (inspect) args.shift()
   if (args[0] === 'exec') args.shift()
   let cwd = process.cwd(), sessionId, yes = false, json = false, ephemeral = false
   const task = []
@@ -92,7 +107,12 @@ async function main() {
     else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`)
     else task.push(arg)
   }
+  if (inspect) {
+    if (!sessionId || task.length || yes || ephemeral) throw new Error('Usage: athenaeum-agent inspect -C PROJECT --session ID [--json]')
+    await stat(sessionFile(home, sessionId))
+  }
   const session = await openSession(home, cwd, sessionId)
+  if (inspect) { send(inspectSession(session)); return }
   const controller = new AbortController()
   process.once('SIGINT', () => controller.abort()); process.once('SIGTERM', () => controller.abort())
   // Ephemeral mode has a private disposable state directory, never writes session history.
@@ -101,6 +121,8 @@ async function main() {
   const { tmpdir } = await import('node:os')
   const transient = ephemeral ? await mkdtemp(resolve(tmpdir(), 'athenaeum-turn-')) : null
   const terminal = task.length ? null : createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY })
+  const learning = new LearningWorker(home, config)
+  controller.signal.addEventListener('abort', () => { void learning.close() }, { once: true })
   const approve = async (_kind, detail) => {
     if (yes) return
     if (!terminal || !process.stdin.isTTY) throw new Error('Permission denied: use the desktop approval controls, an interactive terminal, or explicitly select --yes.')
@@ -113,6 +135,8 @@ async function main() {
         emit: (method, params) => { if (json) send({ method, params }); else if (method === 'item/agentMessage/delta') process.stdout.write(params.delta) } })
       if (json) send({ type: 'result', sessionId: state.id, text: result })
       else process.stdout.write('\n')
+      // Ephemeral conversations leave no learning jobs or retained transcripts.
+      if (!ephemeral) await learning.wake()
     } catch (error) { if (controller.signal.aborted) throw new Error('Turn cancelled.'); throw error }
   }
   try {
@@ -129,6 +153,6 @@ async function main() {
         if (prompt.trim()) { try { await turn(prompt) } catch (error) { process.stderr.write(`${error.message}\n`) } }
       }
     }
-  } finally { terminal?.close(); if (transient) await rm(transient, { recursive: true, force: true }) }
+  } finally { terminal?.close(); await learning.close(); if (transient) await rm(transient, { recursive: true, force: true }) }
 }
 main().catch((error) => { process.stderr.write(`Athenaeum Agent: ${error.message}\n`); process.exitCode = 1 })

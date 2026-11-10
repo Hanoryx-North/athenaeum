@@ -13,6 +13,10 @@ import subprocess
 import sys
 import time
 
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8",
@@ -139,7 +143,7 @@ def native_smoke() -> None:
 # Optional runtime/platform checks are explicit. They are never reported as verified by default.
 STEPS = {
     "product-cloud-backup": ("Private cloud backup, restore, pause and conflict handling (optional hosted API)", cloud_backup),
-    "native-agent-config": ("Owned runtime configuration, permissions and session behavior", lambda: (run([sys.executable, "packages/agent/runtime/verify_source.py"]), run(["node", "--test", "packages/agent/runtime/src/runtime.test.mjs", "packages/agent/runtime/src/provider.test.mjs"]))),
+    "native-agent-config": ("Owned runtime configuration, permissions, context continuation and session behavior", lambda: (run([sys.executable, "packages/agent/runtime/verify_source.py"]), run(["node", "--test", *[str(path.relative_to(ROOT)) for path in sorted((ROOT / "packages/agent/runtime/src").glob("*.test.mjs"))]]))),
     "native-agent-runtime": ("Source-built native agent compilation (optional)", lambda: run(["node", "packages/agent/runtime/manage.mjs", "build"])),
     "native-agent-smoke": ("Native service and desktop tool/approval smoke tests (optional)", lambda: native_smoke()),
     "product-automation": ("Per-wiki saving/sync policy and durable page links", lambda: python_tests("product_tests.test_wiki_automation")),

@@ -210,7 +210,9 @@ impl CliJob {
                     check_server(server)?;
                     args.extend(["--server".into(), server.clone()]);
                 }
-                if *automatic { args.push("--automatic".into()); }
+                if *automatic {
+                    args.push("--automatic".into());
+                }
             }
             CliJob::DisconnectAgents { agents } => {
                 if agents.iter().any(|agent| !AGENTS.contains(&agent.as_str())) {
@@ -627,6 +629,14 @@ pub async fn cli_run(
         tauri::async_runtime::spawn_blocking(move || {
             let mut command = Command::new(cli);
             command.args(args).env("ATHENAEUM_PROGRESS", "json");
+            // Live source development must use the adapters built from this checkout.
+            if cfg!(debug_assertions) && std::env::var_os("ATHENAEUM_INTEGRATIONS").is_none() {
+                let bundle = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../packages/integrations/dist/athenaeum-integrations.mjs");
+                if bundle.is_file() {
+                    command.env("ATHENAEUM_INTEGRATIONS", bundle);
+                }
+            }
             run_process(&app, &state, command, label, false, input)
         })
         .await

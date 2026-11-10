@@ -82,6 +82,23 @@ test('cancellation aborts the provider request', async (t) => {
   await ready; controller.abort()
   await assert.rejects(request, /abort/i)
 })
+
+test('output budgets use each provider API field and reject invalid values before network access', async (t) => {
+  const fields = ['max_output_tokens', 'max_completion_tokens', 'max_tokens']
+  let request = 0
+  const config = await provider(t, (body, response) => {
+    assert.equal(body[fields[request++]], 2048)
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify(body.model === 'anthropic' ? { content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }
+      : body.model === 'chat-completions' ? { choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }
+      : { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }] }))
+  })
+  for (const api of ['responses', 'chat-completions', 'anthropic']) {
+    assert.equal((await modelTurn({ ...config, api, model: api, maxOutputTokens: 2048 }, input, [], 'system', new AbortController().signal, () => {})).text, 'ok')
+  }
+  for (const maxOutputTokens of [-1, 0, 1.5, '2048', 65537]) await assert.rejects(modelTurn({ ...config, maxOutputTokens }, input, [], 'system', new AbortController().signal, () => {}), /maxOutputTokens/)
+  assert.equal(request, 3)
+})
 test('completed tool work survives a failed model request and resumes with correct error activity', async (t) => {
   const { mkdtemp, mkdir, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
@@ -107,4 +124,43 @@ test('completed tool work survives a failed model request and resumes with corre
   const resumed = await openSession(home, root, session.id)
   assert.equal(resumed.history.at(-1).type, 'function_call_output')
   assert.equal(await runTurn({ ...context, session: resumed, input: [{ type: 'text', text: 'Continue.' }] }), 'Resumed with the failed command result.')
+})
+
+test('interruption in a parallel tool group checkpoints completed changes and explicitly closes pending calls', async (t) => {
+  const { mkdtemp, mkdir, readFile, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { openSession, runTurn } = await import('./agent.mjs')
+  const directory = await mkdtemp(join(tmpdir(), 'athenaeum-interrupt-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const root = join(directory, 'project'), home = join(directory, 'home'); await mkdir(root)
+  let requests = 0
+  const config = await provider(t, (body, response) => {
+    if (requests++ === 0) {
+      sse(response, [
+        ...[
+          { type: 'function_call', call_id: 'edit', name: 'write_file', arguments: '{"path":"done.txt","content":"completed edit"}' },
+          { type: 'function_call', call_id: 'command', name: 'exec_command', arguments: '{"cmd":"echo should-not-run"}' },
+          { type: 'function_call', call_id: 'later', name: 'write_file', arguments: '{"path":"later.txt","content":"must not exist"}' },
+        ].map((item) => ({ type: 'response.output_item.done', item })),
+        { type: 'response.completed', response: {} },
+      ]); return
+    }
+    const outputs = body.input.filter((item) => item.type === 'function_call_output')
+    assert.equal(outputs.length, 3)
+    assert.match(outputs[0].output, /done.txt/)
+    assert.match(outputs[1].output, /may have run/)
+    assert.match(outputs[2].output, /Not executed/)
+    sse(response, [{ type: 'response.output_text.delta', delta: 'Resumed after interruption.' }, { type: 'response.completed', response: {} }])
+  })
+  config.mcpServers = { athenaeum: { enabled: false } }
+  const session = await openSession(home, root), controller = new AbortController()
+  const options = { home, session, config, input: [{ type: 'text', text: 'Edit and verify.' }], signal: controller.signal, emit: () => {}, approve: async (kind) => {
+    if (kind === 'commandExecution') { controller.abort(); controller.signal.throwIfAborted() }
+  } }
+  await assert.rejects(runTurn(options), /abort/i)
+  assert.equal(await readFile(join(root, 'done.txt'), 'utf8'), 'completed edit')
+  await assert.rejects(readFile(join(root, 'later.txt')), { code: 'ENOENT' })
+  const resumed = await openSession(home, root, session.id)
+  assert.equal(await runTurn({ ...options, session: resumed, signal: new AbortController().signal, input: [{ type: 'text', text: 'Continue.' }] }), 'Resumed after interruption.')
 })

@@ -69,7 +69,7 @@ test('read/search/list tools operate on files and report bounded results', async
 })
 test('command timeout, cancellation, output bounds and credential isolation', async (t) => {
   const { root, signal } = await fixture(t)
-  const node = JSON.stringify(process.execPath)
+  const node = process.platform === 'win32' ? `"${process.execPath}"` : `'${process.execPath.replaceAll("'", "'\\''")}'`
   const timed = await command(`${node} -e "setInterval(()=>{},1000)"`, root, 50, signal)
   assert.equal(timed.timedOut, true)
   const controller = new AbortController()
@@ -92,6 +92,8 @@ test('sessions persist atomically, reject traversal and bind to one workspace', 
   await assert.rejects(openSession(home, dir, session.id), /different workspace/)
 })
 test('MCP configuration passes argv without a shell, denies review tools and handles cancellation', async (t) => {
+  let connection
+  t.after(async () => { await connection?.close() })
   const { dir, root } = await fixture(t)
   const { connectTools, McpClient } = await import('./mcp.mjs')
   const fixturePath = join(dir, 'mcp-fixture.cjs')
@@ -103,8 +105,7 @@ if(m.method==='tools/list') reply({tools:[{name:'wiki_context',inputSchema:{type
 if(m.method==='tools/call') reply({content:[{type:'text',text:'reference material'}]});
 });`)
   const signal = new AbortController().signal
-  const connection = await connectTools({ mcpServers: { athenaeum: { command: process.execPath, args: [fixturePath] } } }, root, signal)
-  t.after(() => connection.close())
+  connection = await connectTools({ mcpServers: { athenaeum: { command: process.execPath, args: [fixturePath] } } }, root, signal)
   assert.deepEqual(connection.tools.map((tool) => tool.name), ['wiki_context'])
   const handler = connection.handlers.get('wiki_context')
   assert.equal((await handler.client.request('tools/call', { name: handler.tool, arguments: {} }, signal)).content[0].text, 'reference material')

@@ -7,9 +7,13 @@ import { openConnectors } from "@/stores/connectors-store"
 import { normalizePath } from "@/lib/path-utils"
 import { cn } from "@/lib/utils"
 import { useUiPreference } from "@/hooks/useUiPreference"
+import { useChatgptStore } from "@/stores/chatgpt-store"
+import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { ChatgptConnection } from "./chatgpt-connection"
 
 export const AGENTS = [
   { id: "athenaeum", name: "Athenaeum Agent", description: "Use the coding assistant built into Athenaeum." },
+  { id: "chatgpt", name: "ChatGPT", description: "Sign in with ChatGPT and use it inside Athenaeum." },
   { id: "claude", name: "Claude Code", description: "Connect your existing Claude Code." },
   { id: "cursor", name: "Cursor", description: "Make your wiki available in Cursor." },
 ] as const
@@ -62,19 +66,25 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
   const [connecting, setConnecting] = useState(false)
   const [status, setStatus] = useState("")
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const chatgptAccount = useChatgptStore((s) => s.workspace === workspace ? s.account : null)
   const selected = AGENTS.find((item) => item.id === agent)!
-  const connected = doctor?.checks.some((item) => item.id === `agent-${agent}` && item.ok) === true
+  const memoryAgent = agent === "chatgpt" ? "athenaeum" : agent
+  const connected = doctor?.checks.some((item) => item.id === `agent-${memoryAgent}` && item.ok) === true && (agent !== "chatgpt" || chatgptAccount !== null)
   const working = connecting || busy !== null
 
   useEffect(() => {
     if (workspace) void check(workspace)
   }, [workspace, check])
   useEffect(() => {
+    if (workspace && agent === "chatgpt") void useChatgptStore.getState().check(workspace)
+  }, [workspace, agent])
+  useEffect(() => {
     setConnectionError(null)
   }, [workspace])
 
   async function connect() {
     if (!workspace || working) return
+    if (agent === "chatgpt" && !chatgptAccount) return
     setConnecting(true)
     setConnectionError(null)
     setStatus("Preparing your connection…")
@@ -86,10 +96,10 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
         return
       if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
       setStatus(`Connecting ${selected.name}…`)
-      const ok = await setup(workspace, { job: "setup", agents: [agent], capture: "instruct" })
+      const ok = await setup(workspace, { job: "setup", agents: [memoryAgent], capture: "instruct" })
       if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
       const report = useSetupStore.getState().doctor
-      if (!ok || !report?.checks.some((c) => c.id === `agent-${agent}` && c.ok)) {
+      if (!ok || !report?.checks.some((c) => c.id === `agent-${memoryAgent}` && c.ok)) {
         setConnectionError(
           `Could not finish connecting ${selected.name}. Check the details below, then try again.`,
         )
@@ -97,10 +107,11 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
       }
       try {
         localStorage.setItem(`athenaeum.setup.complete:${workspace}`, "1")
-        localStorage.setItem(`athenaeum.setup.route:${workspace}`, "external")
+        localStorage.setItem(`athenaeum.setup.route:${workspace}`, agent === "chatgpt" ? "internal" : "external")
       } catch {
         /* The connection itself is already saved by setup. */
       }
+      if (agent === "chatgpt") useAgentRuntimeStore.getState().setRuntime("chatgpt")
       setPage(2)
     } finally {
       setConnecting(false)
@@ -139,11 +150,10 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
           <header>
             <h2 className="text-2xl font-semibold">Which coding agent do you use?</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Choose the one you already use to code. Athenaeum will give it access to this
-              project’s wiki.
+              Choose an assistant to use in Athenaeum or connect to this project's wiki.
             </p>
           </header>
-          <div className="space-y-3" role="radiogroup" aria-label="Coding agent">
+          <div className="space-y-2" role="radiogroup" aria-label="Coding agent">
             {AGENTS.map((item) => (
               <button
                 key={item.id}
@@ -155,7 +165,7 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
                   setConnectionError(null)
                 }}
                 className={cn(
-                  "flex w-full items-center justify-between rounded-xl border p-5 text-left focus-visible:ring-2 focus-visible:ring-ring",
+                  "flex w-full items-center justify-between rounded-xl border p-4 text-left focus-visible:ring-2 focus-visible:ring-ring",
                   agent === item.id ? "border-primary bg-primary/5" : "hover:bg-muted/30",
                 )}
               >
@@ -193,7 +203,10 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
                 : `One click connects ${selected.name} to ${project?.name}.`}
             </p>
           </header>
-          <div className="space-y-3 rounded-xl border bg-muted/20 p-5 text-sm">
+          {agent === "chatgpt" ? <>
+            <ChatgptConnection workspace={workspace} />
+            <p className="text-sm text-muted-foreground">ChatGPT can work with this project and recall wiki knowledge. You review proposed wiki pages. Your existing ChatGPT conversations aren't imported.</p>
+          </> : <div className="space-y-3 rounded-xl border bg-muted/20 p-5 text-sm">
             <p>{agent === "athenaeum" ? "Uses the model provider you choose in Settings." : `Uses your existing ${selected.name} account.`}</p>
             <p className="text-muted-foreground">
               {agent === "cursor"
@@ -204,7 +217,7 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
               You review proposals before they become wiki pages.
             </p>
             <p className="text-muted-foreground">{agent === "athenaeum" ? "This connects wiki memory. Configure a model separately in Settings." : `This connects wiki memory. You stay signed in through ${selected.name}.`}</p>
-          </div>
+          </div>}
           {connecting && (
             <p role="status" className="flex items-center gap-2 text-sm">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -233,7 +246,7 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
                 </Button>
               )}
               <Button
-                disabled={working}
+                disabled={working || (agent === "chatgpt" && !chatgptAccount)}
                 onClick={() => (connected && !connectionError ? setPage(2) : void connect())}
               >
                 {working
@@ -255,7 +268,7 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
                     .map((step) => step.detail) ?? []),
                   ...progress.slice(-15),
                   ...(doctor?.checks
-                    .filter((c) => !c.ok && (c.id === `agent-${agent}` || c.id === "integrations"))
+                    .filter((c) => !c.ok && (c.id === `agent-${memoryAgent}` || c.id === "integrations"))
                     .map((c) => c.detail) ?? []),
                 ].join("\n")}
               </pre>
@@ -270,8 +283,8 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
             <h2 className="text-2xl font-semibold">{connected ? `${selected.name} is connected.` : working ? "Checking connection…" : "Connection needs attention"}</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               {connected ? <>
-              {agent === "athenaeum" ? "Open chat for" : `Reopen ${selected.name} in`} <strong className="text-foreground">{project?.name}</strong>{" "}
-              {agent === "athenaeum" ? "and choose a model in Settings to start a task." : "to load the connection. Then code as usual."}
+              {agent === "athenaeum" || agent === "chatgpt" ? "Open chat for" : `Reopen ${selected.name} in`} <strong className="text-foreground">{project?.name}</strong>{" "}
+              {agent === "chatgpt" ? "to start a task with your ChatGPT account." : agent === "athenaeum" ? "and choose a model in Settings to start a task." : "to load the connection. Then code as usual."}
               </> : "Go back to reconnect your agent, or return to Coding agents to check its status."}
             </p>
           </header>
@@ -283,7 +296,14 @@ export function SetupCard({ initialAgent = "athenaeum", onAgentChange, onComplet
             <Button variant="ghost" onClick={() => setPage(1)}>
               Back
             </Button>
-            <Button disabled={!connected || working} onClick={() => { setPage(0); if (onComplete) onComplete(); else openConnectors("agents") }}>Finish</Button>
+            <Button disabled={!connected || working} onClick={() => {
+              setPage(0)
+              if (onComplete) onComplete(); else openConnectors("agents")
+              if (agent === "chatgpt") {
+                useAgentRuntimeStore.getState().setRuntime("chatgpt")
+                useWikiStore.getState().setActiveView("chat")
+              }
+            }}>{agent === "chatgpt" ? "Open chat" : "Finish"}</Button>
           </footer>
         </>
       )}

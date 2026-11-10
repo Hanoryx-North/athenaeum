@@ -7,6 +7,8 @@ import { normalizePath } from "@/lib/path-utils"
 import { useUiPreference } from "@/hooks/useUiPreference"
 import { saveUiPreference } from "@/lib/ui-preferences"
 import { AGENTS, SetupCard, type Agent } from "./setup-card"
+import { useChatgptStore } from "@/stores/chatgpt-store"
+import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
 
 export function CodingAgentsView() {
   const project = useWikiStore((s) => s.project)
@@ -15,11 +17,18 @@ export function CodingAgentsView() {
 
 function ProjectAgents({ workspace }: { workspace: string }) {
   const { doctor, busy, error, check } = useSetupStore()
+  const account = useChatgptStore((s) => s.workspace === workspace ? s.account : null)
+  const runtime = useAgentRuntimeStore((s) => s.runtime)
   const [adding, setAdding] = useUiPreference(`agent-setup:${workspace}`, false, (value) => typeof value === "boolean")
-  const connected = AGENTS.filter((agent) => doctor?.checks.some((c) => c.id === `agent-${agent.id}` && c.ok))
+  const connected = AGENTS.filter((agent) => agent.id === "chatgpt"
+    ? account && doctor?.checks.some((c) => c.id === "agent-athenaeum" && c.ok)
+    : doctor?.checks.some((c) => c.id === `agent-${agent.id}` && c.ok))
   const [agent, setAgent] = useUiPreference<Agent>(`setup-agent:${workspace}`, "athenaeum", (value) => AGENTS.some((a) => a.id === value))
 
   useEffect(() => { void check(workspace) }, [workspace, check])
+  useEffect(() => {
+    if (runtime === "chatgpt") void useChatgptStore.getState().check(workspace)
+  }, [workspace, runtime])
 
   function finish() {
     saveUiPreference(`setup-step:${workspace}`, 0)
@@ -32,7 +41,7 @@ function ProjectAgents({ workspace }: { workspace: string }) {
     <section className="space-y-6" aria-label="Coding agents">
       <header>
         <h2 className="text-2xl font-semibold">Coding agents</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Connect the coding agents you use to this project’s wiki. Athenaeum Agent uses your Settings model. External agents use their own accounts.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Use Athenaeum Agent or sign in with ChatGPT to work inside Athenaeum. You can also connect Claude Code or Cursor to this project's wiki.</p>
       </header>
       {busy === "check" && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Checking connections…</p>}
       {connected.length > 0 ? (

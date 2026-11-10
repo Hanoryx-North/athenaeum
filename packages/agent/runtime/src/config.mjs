@@ -30,6 +30,7 @@ export async function loadConfig(home, env = process.env) {
 export function providerConfig(config) {
   if (!config.model || typeof config.model !== 'string') throw new Error('Choose a model in Settings or ~/.athenaeum-agent/config.json.')
   if (!['responses', 'chat-completions', 'anthropic'].includes(config.api)) throw new Error('Unsupported agent API. Choose responses, chat-completions or anthropic.')
+  if (config.maxOutputTokens !== undefined && (!Number.isInteger(config.maxOutputTokens) || config.maxOutputTokens < 1 || config.maxOutputTokens > 65536)) throw new Error('maxOutputTokens must be an integer between 1 and 65536.')
   const base = new URL(config.baseURL || (config.api === 'anthropic' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1'))
   if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('The model endpoint must be an HTTP(S) base URL without credentials, query or fragment.')
   if (base.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)) throw new Error('Remote model endpoints require HTTPS.')

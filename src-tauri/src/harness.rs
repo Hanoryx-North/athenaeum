@@ -192,7 +192,9 @@ impl HarnessRuntime {
         route: Option<&HarnessRoute>,
         identity: String,
     ) -> Result<Self, String> {
-        let mut command = if route.is_some_and(|route| route.provider == "athenaeum-native") {
+        let mut command = if route.is_some_and(|route| {
+            route.provider == "athenaeum-native" || route.provider == "athenaeum-chatgpt"
+        }) {
             native_command(app, &workspace, route)?
         } else {
             let (manifest_path, prefix, manifest) = locate_install()?;
@@ -456,9 +458,8 @@ fn read_driver_output(
                     .and_then(|mut pending| pending.remove(request_id));
                 let Some(sender) = sender else { continue };
                 let result = match kind {
-                    "ready" | "result" | "cancel-accepted" | "approval-accepted" | "shutdown" => {
-                        Ok(message)
-                    }
+                    "ready" | "result" | "account" | "cancel-accepted" | "approval-accepted"
+                    | "shutdown" => Ok(message),
                     "cancelled" => Ok(json!({ "cancelled": true })),
                     "error" | "fatal" => Err(message
                         .get("message")
@@ -540,7 +541,12 @@ fn native_command(
     route: Option<&HarnessRoute>,
 ) -> Result<Command, String> {
     let prefix = default_prefix()?;
-    let binary = native_agent_binary()?;
+    let chatgpt = route.is_some_and(|route| route.provider == "athenaeum-chatgpt");
+    let binary = if chatgpt {
+        codex_binary()?
+    } else {
+        native_agent_binary()?
+    };
     let node = private_node_path(&prefix)
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("node"));
@@ -553,7 +559,7 @@ fn native_command(
         .unwrap_or_else(|| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/native-agent-driver.mjs")
         });
-    let mut command = Command::new(node);
+    let mut command = Command::new(&node);
     command
         .arg(driver)
         .arg(plain_path(binary))
@@ -561,10 +567,47 @@ fn native_command(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if chatgpt {
+        command.env("ATHENAEUM_CHATGPT_MODE", "1");
+        command.env_remove("OPENAI_API_KEY");
+        command.env_remove("ATHENAEUM_LLM_API_KEY");
+        let source_bundle = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../packages/integrations/dist/athenaeum-integrations.mjs");
+        let bundle = if cfg!(debug_assertions) && source_bundle.is_file() {
+            source_bundle
+        } else {
+            prefix.join("lib/athenaeum-integrations.mjs")
+        };
+        let cli = crate::cli_tools::locate_cli()
+            .ok_or("Install the Athenaeum CLI to connect ChatGPT to the wiki.")?;
+        if !bundle.is_file() {
+            return Err(
+                "Build or install Athenaeum integrations to connect ChatGPT to the wiki.".into(),
+            );
+        }
+        let args = vec![
+            bundle.to_string_lossy().into_owned(),
+            "mcp".to_string(),
+            "--athenaeum".into(),
+            cli.to_string_lossy().into_owned(),
+            "--repo".into(),
+            workspace.to_string_lossy().into_owned(),
+            "--capture".into(),
+            "instruct".into(),
+            "--allow".into(),
+            "propose".into(),
+            "--caller".into(),
+            "athenaeum-chatgpt".into(),
+        ];
+        command.env(
+            "ATHENAEUM_CHATGPT_MCP",
+            json!({ "command": &node, "args": args }).to_string(),
+        );
+    }
     if let Some(cli) = crate::cli_tools::locate_cli() {
         command.env("ATHENAEUM_BIN", cli);
     }
-    if let Some(route) = route {
+    if let Some(route) = route.filter(|_| !chatgpt) {
         if route.model != "native-configuration" {
             command.env("ATHENAEUM_AGENT_MODEL", &route.model);
         }
@@ -595,6 +638,39 @@ fn native_command(
         command.creation_flags(0x08000000);
     }
     Ok(command)
+}
+
+/// Use an installed official Codex runtime. Never run a shell wrapper or copy account tokens.
+fn codex_binary() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("ATHENAEUM_CODEX_BIN") {
+        let path = PathBuf::from(path);
+        if path.is_file()
+            && !matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("cmd" | "bat" | "ps1")
+            )
+        {
+            return Ok(plain_path(path));
+        }
+        return Err("ATHENAEUM_CODEX_BIN must name the official Codex executable or bin/codex.js, not a shell wrapper.".into());
+    }
+    let mut dirs: Vec<PathBuf> = env::var_os("PATH")
+        .map(|p| env::split_paths(&p).collect())
+        .unwrap_or_default();
+    if let Some(appdata) = env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(appdata).join("npm"));
+    }
+    for dir in dirs {
+        for candidate in [
+            dir.join(if cfg!(windows) { "codex.exe" } else { "codex" }),
+            dir.join("node_modules/@openai/codex/bin/codex.js"),
+        ] {
+            if candidate.is_file() {
+                return Ok(plain_path(candidate));
+            }
+        }
+    }
+    Err("ChatGPT needs the official Codex runtime. Install it with npm install -g @openai/codex, then check the connection again.".into())
 }
 
 fn locate_install() -> Result<(PathBuf, PathBuf, InstallManifest), String> {
@@ -747,6 +823,30 @@ pub async fn harness_check(
         .await?;
     serde_json::from_value(response)
         .map_err(|error| format!("The Harness runtime returned an invalid status: {error}"))
+}
+
+/// ChatGPT authentication stays in the official runtime; the UI receives account metadata only.
+#[tauri::command]
+pub async fn chatgpt_account(
+    app: AppHandle,
+    state: State<'_, HarnessChatState>,
+    project_path: String,
+    action: String,
+    login_id: Option<String>,
+) -> Result<Value, String> {
+    if !["status", "start", "cancel", "logout"].contains(&action.as_str()) {
+        return Err("Choose status, start, cancel or logout.".into());
+    }
+    let route = HarnessRoute {
+        provider: "athenaeum-chatgpt".into(),
+        model: "chatgpt-default".into(),
+        api_key: None,
+        api_key_env: None,
+        pi_provider: None,
+    };
+    let runtime = state.runtime_for(&app, Path::new(&project_path), Some(&route))?;
+    let response = runtime.request(json!({ "type": "account", "requestId": runtime.next_request_id("account"), "action": action, "loginId": login_id })).await?;
+    Ok(response.get("result").cloned().unwrap_or(Value::Null))
 }
 
 #[tauri::command]

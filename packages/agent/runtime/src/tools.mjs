@@ -74,8 +74,8 @@ export function command(cmd, cwd, timeoutMs, signal) {
   return new Promise((resolveResult, reject) => {
     signal.throwIfAborted()
     const windows = process.platform === 'win32'
-    const child = spawn(windows ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', windows ? ['/d', '/s', '/c', cmd] : ['-c', cmd],
-      { cwd, env: cleanEnvironment(), detached: !windows, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(windows ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', windows ? ['/d', '/s', '/c', `"${cmd}"`] : ['-c', cmd],
+      { cwd, env: cleanEnvironment(), detached: !windows, windowsHide: true, windowsVerbatimArguments: windows, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = '', truncated = false, timedOut = false
     const collect = (chunk) => { const remaining = MAX_OUTPUT - Buffer.byteLength(output); if (remaining > 0) output += chunk.subarray(0, remaining).toString(); if (chunk.length > remaining) truncated = true }
     child.stdout.on('data', collect); child.stderr.on('data', collect)

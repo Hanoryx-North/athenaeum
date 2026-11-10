@@ -24,7 +24,8 @@ class WikiCli(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.settings = self.root / "app-state.json"
-        self.environment = {"WIKI_SETTINGS_FILE": str(self.settings), "ATHENAEUM_LIBRARY_TOKEN": "test-secret"}
+        self.environment = {"WIKI_SETTINGS_FILE": str(self.settings), "ATHENAEUM_LIBRARY_TOKEN": "test-secret",
+                            "WIKI_DEV_ROOT": str(self.root)}
 
     def cli(self, *args, ok=True, input=None, env=None, timeout=120):
         result = subprocess.run([BIN, *map(str, args)], cwd=self.root, env=child_env({**self.environment, **(env or {})}),

@@ -464,19 +464,14 @@ fn sync_state_and_runtime_files_never_leave_the_machine() {
     a.write(".athenaeum/knowledge.db", "binary");
     a.write("raw/sources/paper.pdf", "not text");
     a.write("raw/sources/private.md", "private source text\n");
-    a.write("purpose.md", "# Private purpose\n");
+    a.write("purpose.md", "# Shared wiki purpose\n");
     engine(&a, &server).push("one").unwrap();
     let paths: Vec<String> = server.revisions.borrow()[0]
         .manifest
         .iter()
         .map(|e| e.path.clone())
         .collect();
-    assert!(
-        paths
-            .iter()
-            .all(|p| p == "athenaeum.json" || p.starts_with("wiki/") && p.ends_with(".md")),
-        "{paths:?}"
-    );
+    assert_eq!(paths, ["athenaeum.json", "purpose.md", "wiki/a.md"]);
 }
 
 #[test]

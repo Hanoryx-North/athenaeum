@@ -11,8 +11,8 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { registerDesktopAction } from "@/lib/desktop-control"
 import { openConnectors } from "@/stores/connectors-store"
 import { resolveTaskLlmConfig } from "@/lib/llm-task-routing"
-import { harnessRouteFor, nativeRouteFor } from "@/lib/harness-route"
-import { useUiPreference } from "@/hooks/useUiPreference"
+import { CHATGPT_ROUTE, harnessRouteFor, nativeRouteFor } from "@/lib/harness-route"
+import { useAgentRuntimeStore, type AgentRuntime } from "@/stores/agent-runtime-store"
 import { supportsImageInput } from "@/lib/llm-providers"
 import { executeIngestWrites } from "@/lib/ingest"
 import { deleteFile, openPathInProject, readFile } from "@/commands/fs"
@@ -440,11 +440,12 @@ export function ChatPanel() {
   const searchApiConfig = useWikiStore((s) => s.searchApiConfig)
   const anyTxtAvailable = hasConfiguredAnyTxt(searchApiConfig.anyTxt)
   // The chat agent follows the provider chosen in Settings for chat.
-  const [agentRuntime, setAgentRuntime] = useUiPreference<"native" | "harness">("chat-agent-runtime", "native", (value) => value === "native" || value === "harness")
+  const agentRuntime = useAgentRuntimeStore((s) => s.runtime)
+  const setAgentRuntime = useAgentRuntimeStore((s) => s.setRuntime)
   const [approval, setApproval] = useState<{ id: string; title: string; detail: string } | null>(null)
   const [approvalError, setApprovalError] = useState<string | null>(null)
   const [approvalBusy, setApprovalBusy] = useState(false)
-  const chatRoute = useMemo(() => agentRuntime === "native" ? nativeRouteFor(llmConfig) : harnessRouteFor(llmConfig), [llmConfig, agentRuntime])
+  const chatRoute = useMemo(() => agentRuntime === "chatgpt" ? { ok: true as const, route: CHATGPT_ROUTE } : agentRuntime === "native" ? nativeRouteFor(llmConfig) : harnessRouteFor(llmConfig), [llmConfig, agentRuntime])
   // A new route restarts the runtime, and a restarted runtime refuses the session ids
   // the old one held, so every conversation starts afresh (carrying its history).
   const chatRouteKey = chatRoute.ok ? JSON.stringify(chatRoute.route) : ""
@@ -1067,8 +1068,9 @@ export function ChatPanel() {
               Agent
               <select aria-label="Agent runtime" value={agentRuntime} disabled={activeStreaming}
                 className="max-w-48 rounded border bg-background px-2 py-1"
-                onChange={(event) => setAgentRuntime(event.target.value as "native" | "harness")}>
+                onChange={(event) => setAgentRuntime(event.target.value as AgentRuntime)}>
                 <option value="native">Athenaeum Agent</option>
+                <option value="chatgpt">ChatGPT</option>
                 <option value="harness">Harness (advanced)</option>
               </select>
             </label>

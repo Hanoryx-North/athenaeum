@@ -175,6 +175,87 @@ class NativeAgent(unittest.TestCase):
         self.assertEqual(len(json.loads(proposals.stdout)), 1)
         self.assertEqual(list((self.workspace / "wiki").rglob("*.md")), [])
 
+    def test_automatic_recall_reaches_the_model_quietly_and_inspection_survives_restart(self):
+        wiki = Path(os.environ.get("ATHENAEUM_BIN") or
+            Path(__file__).resolve().parents[2] / "target/debug" /
+            ("wiki.exe" if os.name == "nt" else "wiki"))
+        self.assertTrue(wiki.is_file(), "Build the wiki CLI before native smoke tests")
+
+        def knowledge(*args):
+            result = subprocess.run([str(wiki), "-C", str(self.workspace), *args, "--json"],
+                env=self.env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return json.loads(result.stdout)
+
+        knowledge("init")
+        proposed = knowledge("create", "Retry budget is three", "--type", "decision",
+            "--summary", "Retry budget is three to prevent outage amplification.")
+        # Simulate a separate person reviewing the disposable fixture, never an
+        # agent accepting a proposal as part of its turn.
+        node = proposed.get("node", proposed)
+        knowledge("accept", node["id"], "--as", "test-human-reviewer")
+        self.env["ATHENAEUM_BIN"] = str(wiki)
+        requests = []
+        outputs = [{"type": "message", "id": "result", "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Ready to fix retries."}]}]
+        server = self.scripted_provider(outputs, requests)
+        (self.home / "config.json").write_text(json.dumps({"model": "test-model", "api": "responses",
+            "baseURL": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
+        result = self.invoke("exec", "--json", "--session", "quiet-recall", "Fix the retry budget.")
+        self.assertEqual(len(requests), 1, "Recall must not make an additional model call")
+        call = next(item for item in requests[0]["input"] if item.get("name") == "wiki_context")
+        recalled = next(item for item in requests[0]["input"] if item.get("type") == "function_call_output"
+                        and item["call_id"] == call["call_id"])
+        self.assertIn("Retry budget is three", recalled["output"])
+        self.assertIn("reference", recalled["output"].lower())
+        self.assertNotIn("wiki_context", result.stdout)
+        self.assertNotIn("Retry budget is three", result.stdout)
+        inspected = json.loads(self.invoke("inspect", "--session", "quiet-recall", "--json").stdout)
+        self.assertEqual(inspected["memory"]["status"], "recalled")
+        self.assertGreater(inspected["memory"]["nodes"], 0)
+        self.assertNotIn("history", inspected)
+
+    def test_background_learning_uses_its_model_and_only_queues_evidenced_knowledge(self):
+        wiki = Path(os.environ.get("ATHENAEUM_BIN") or
+            Path(__file__).resolve().parents[2] / "target/debug" /
+            ("wiki.exe" if os.name == "nt" else "wiki"))
+        self.assertTrue(wiki.is_file())
+        self.env["ATHENAEUM_BIN"] = str(wiki)
+        initialized = subprocess.run([str(wiki), "-C", str(self.workspace), "init"],
+            env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        (self.workspace / "retry.mjs").write_text("export const retryBudget = 3\n", encoding="utf-8")
+        candidate = {"type": "gotcha", "title": "Bound retries to protect the shared quota",
+            "summary": "The retry budget is three to prevent outage amplification.",
+            "content": "The source bounds retry work. Outage behavior has not been tested.",
+            "evidence": [{"path": "retry.mjs", "excerpt": "export const retryBudget = 3"}]}
+        outputs = [
+            {"type": "function_call", "call_id": "read", "name": "read_file", "arguments": '{"path":"retry.mjs"}'},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Retry investigation completed."}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": json.dumps({"candidates": [candidate]})}]},
+        ]
+        requests = []
+        server = self.scripted_provider(outputs, requests)
+        (self.home / "config.json").write_text(json.dumps({"model": "coding-model", "api": "responses",
+            "baseURL": f"http://127.0.0.1:{server.server_port}/v1",
+            "backgroundMemory": {"enabled": True, "model": "cheap-model"}}), encoding="utf-8")
+        result = self.invoke("exec", "--json", "--session", "learning", "Read retry.mjs and investigate the retry budget.")
+        self.assertEqual([request["model"] for request in requests], ["coding-model", "coding-model", "cheap-model"])
+        self.assertNotIn(candidate["title"], result.stdout)
+        self.assertNotIn("candidates", result.stdout)
+        proposals = subprocess.run([str(wiki), "-C", str(self.workspace), "proposals", "--json"],
+            env=self.env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        self.assertEqual(proposals.returncode, 0, proposals.stdout + proposals.stderr)
+        queued = json.loads(proposals.stdout)
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["node"]["title"], candidate["title"])
+        self.assertIn("retry.mjs", json.dumps(queued[0]))
+        self.assertEqual(list((self.workspace / "wiki").rglob("*.md")), [])
+        jobs = json.loads(self.invoke("memory").stdout)["jobs"]
+        self.assertEqual(jobs[0]["status"], "completed")
+        self.assertEqual(len(jobs[0]["proposed"]), 1)
+        self.assertNotIn("history", jobs[0])
+
 
 if __name__ == "__main__":
     unittest.main()

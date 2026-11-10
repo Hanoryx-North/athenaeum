@@ -1,6 +1,6 @@
 # Athenaeum Agent runtime
 
-Athenaeum's own coding assistant, maintained here as six Node modules and a small
+Athenaeum's own coding assistant, maintained here as Node modules and a small
 Rust platform launcher. It is a feature of the Markdown wiki application. It has
 no copied coding application, terminal UI framework, cloud task service, voice
 stack or upstream agent build graph. The launcher embeds the modules, extracts
@@ -12,6 +12,8 @@ on normal exit. Packaged desktops supply their private Node executable.
 | Source | Responsibility |
 | --- | --- |
 | `src/agent.mjs` | Model/tool turn loop, project instructions and conversation state |
+| `src/context.mjs` | Bounded conversation summaries and recoverable checkpoints |
+| `src/learning.mjs` | Separate bounded learning jobs, source checks and proposal capture |
 | `src/tools.mjs` | File read/write/patch, literal search, listing, images and shell execution |
 | `src/provider.mjs` | Responses, OpenAI-compatible Chat Completions and Anthropic streaming |
 | `src/mcp.mjs` | Bounded stdio MCP client; optional proposal-only wiki connection |
@@ -37,6 +39,8 @@ node --test packages/agent/runtime/src/*.test.mjs
 wiki agent -- --help
 wiki agent -- -C /path/to/project
 wiki agent -- exec --json -C /path/to/project "Investigate the failing tests"
+wiki agent -- inspect --json -C /path/to/project --session SESSION_ID
+wiki agent -- memory
 ```
 
 The executable is `target/native-runtime/debug/athenaeum-agent` (`.exe` on Windows).
@@ -72,6 +76,78 @@ Sessions are private JSON files under the agent home. `--session ID` resumes one
 Skills are ordinary instruction files available through file tools; the runtime
 has no independent plugin installer or hidden skill execution loop.
 
+Before each turn, the runtime quietly calls the connected wiki's `wiki_context`
+once using the task text. It supplies the engine's reference-material wrapper
+verbatim to the coding model without adding chat or tool activity messages.
+Empty, unavailable or oversized results do not interrupt coding or trigger retries.
+The connection's `capture: "off"` setting disables this automatic lookup. Explicit
+wiki tools remain available. No extra model request is needed for recall.
+
+`inspect` reads saved memory diagnostics and compaction records without returning
+conversation contents or making a model call. The app-server exposes the same
+information through `thread/read` after `thread/start` or `thread/resume`.
+
+## Background learning
+
+Background extraction is opt-in because it spends additional model usage. Configure
+an inexpensive model supported by the selected connection in the agent's `config.json`:
+
+```json
+{
+  "backgroundMemory": {
+    "enabled": true,
+    "model": "your-supported-inexpensive-model"
+  }
+}
+```
+
+The background model uses the same endpoint, API and credentials as coding. It does
+not switch billing methods or fall back to the coding model. No job runs without
+an explicit model and enabled setting. `capture: "off"` also disables learning.
+
+A completed coding turn queues a private bounded job. A separate worker in the
+native service processes jobs without chat messages or tool activity. Terminal
+execution prints the coding result before draining learning work. Ephemeral turns
+retain no learning jobs. Pending jobs resume after a restart; failed jobs remain
+diagnostic records and are not automatically retried.
+
+Each job makes at most one background model request, limited to 2048 output tokens,
+and proposes at most two
+findings. Turns without successful source observations make no extraction request.
+The model gets no execution or review tools. The worker checks exact excerpts
+against current files observed in the turn, rejects private paths and common
+credential formats, and searches existing knowledge before creating a proposal.
+Only new proposals receive evidence. Nothing is accepted or written to the vault.
+Source matching supports review; it does not establish that a model's interpretation
+is correct. Completed jobs retain diagnostics without the turn transcript.
+
+`wiki agent -- memory` and app-server `memory/read` expose job status without
+transcripts. New jobs are deferred when eight jobs already await processing.
+Each job has a 128 KiB input limit. An OS-owned process lock prevents concurrent
+workers from processing the same queue, and releases automatically on process exit.
+
+## Conversation continuation
+
+The default input budget is 256 KiB, counting history, system instructions and tool
+schemas. Set `contextMaxBytes` in the agent's `config.json` to change this budget,
+between 16 KiB and 6 MiB. This is a byte guard, not a model token-window measurement.
+Choose a smaller budget for models with smaller context windows.
+
+At 75 percent of that budget, the runtime summarizes completed history using the
+selected coding connection. This makes an additional model request on that connection,
+limited to 4096 output tokens or the configured `maxOutputTokens`, whichever is lower.
+It retains the latest user request, recent history, and complete tool call/output
+groups. Summaries are reference material and never grant approval. The original
+history is archived under `sessions/SESSION_ID.checkpoints/` before the replacement
+is saved atomically. Interrupted or failed summaries leave the conversation intact.
+Checkpoints stay private to the agent home and are not knowledge or sync exports.
+
+Set `autoCompact: false` to disable summarization. Oversized individual inputs or
+tool groups fail explicitly instead of being discarded. Summary text does not enter
+chat; context diagnostics remain available through `inspect` and `thread/read`.
+This uses the local summary/checkpoint pattern studied in OpenAI Codex's
+`codex-rs/core/src/compact.rs`. No upstream source was copied.
+
 ## Permissions and limits
 
 Commands and file edits require explicit approval in the desktop or interactive
@@ -83,15 +159,17 @@ shell commands can access resources beyond the workspace. Provider credentials
 are removed from the shell environment. External MCP tools require approval;
 wiki tools use the proposal-only server grant and never expose review operations.
 
-A turn has at most 64 model steps, 32 tool calls per step and 6 MiB of conversation
-context. Tool output is bounded to 64 KiB, text file reads/writes to 1 MiB, and images
+A turn has at most 64 coding model steps and 32 tool calls per step.
+Tool output is bounded to 64 KiB, text file reads/writes to 1 MiB, and images
 to 5 MiB. Commands default to a two-minute timeout (maximum ten minutes). Cancellation
-aborts model/MCP requests, pending approvals and running command groups. Context
-limits produce an explicit error; history is never silently truncated.
+aborts model/MCP requests, pending approvals and running command groups.
+If interrupted within a tool group, the runtime checkpoints completed results and
+marks unfinished operations explicitly. A started operation without a recorded
+result requires inspecting workspace state before retrying.
 
 This focused runtime does not claim the removed application's PTY terminal,
 platform sandbox implementations, cloud services, voice, delegated agents,
-automatic worktrees or context compaction. Git/worktrees and local development
+automatic worktrees. Git/worktrees and local development
 tools are available through approved commands; additional integrations use MCP.
 
 ## Verification

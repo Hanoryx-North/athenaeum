@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { cleanEnvironment } from './tools.mjs'
 
@@ -63,13 +64,19 @@ export class McpClient {
     throw new Error('MCP tool pagination limit exceeded.')
   }
   close() {
+    if (this.closing) return this.closing
     this.fail(new Error('MCP connection closed.')); this.lines.close(); this.child.stdin.end()
     const child = this.child
-    setTimeout(() => { if (child.exitCode === null) child.kill() }, 500).unref()
+    this.closing = new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null || !child.pid) { resolve(); return }
+      const timer = setTimeout(() => child.kill(), 500)
+      child.once('close', () => { clearTimeout(timer); resolve() })
+    })
+    return this.closing
   }
 }
 export async function connectTools(config, cwd, signal) {
-  const connections = [], tools = [], handlers = new Map()
+  const connections = [], tools = [], handlers = new Map(), diagnostics = []
   const servers = { athenaeum: { command: process.env.ATHENAEUM_BIN || 'wiki', args: ['mcp', '--', '--allow', 'propose', '--caller', 'athenaeum-agent'], required: false }, ...config.mcpServers }
   try {
     for (const [id, server] of Object.entries(servers)) {
@@ -82,18 +89,47 @@ export async function connectTools(config, cwd, signal) {
           const name = id === 'athenaeum' ? tool.name : `${id}__${tool.name}`
           if (handlers.has(name) || stagedHandlers.has(name)) throw new Error('Duplicate MCP tool name.')
           // Never expose wiki review/admin operations, even from a permissive server.
-          if (id === 'athenaeum' && !/^wiki_(context|search|show|navigate|path|history|status|schema|list|create|link|repository_info)$/.test(name)) continue
+          if (id === 'athenaeum' && !/^wiki_(context|search|show|open|navigate|path|history|status|schema|list|create|link|attach_evidence|repository_info)$/.test(name)) continue
           stagedHandlers.set(name, { client, tool: tool.name, approval: id !== 'athenaeum' })
           stagedTools.push({ type: 'function', name, description: tool.description || name, parameters: tool.inputSchema })
         }
         tools.push(...stagedTools)
         for (const [name, handler] of stagedHandlers) handlers.set(name, handler)
       } catch (error) {
-        client.close()
+        await client.close()
         if (signal.aborted || server.required !== false) throw error
-        process.stderr.write(`Optional MCP server ${id} unavailable; continuing without it.\n`)
+        diagnostics.push({ server: id, status: 'unavailable' })
       }
     }
-    return { tools, handlers, close: () => connections.forEach((client) => client.close()) }
-  } catch (error) { connections.forEach((client) => client.close()); throw error }
+    return { tools, handlers, diagnostics, close: () => Promise.all(connections.map((client) => client.close())) }
+  } catch (error) { await Promise.all(connections.map((client) => client.close())); throw error }
+}
+
+export async function recallContext(connection, task, signal) {
+  const checkedAt = new Date().toISOString()
+  const status = (state) => ({ diagnostic: { status: state, checkedAt }, items: [] })
+  const handler = connection.handlers.get('wiki_context')
+  if (!handler || handler.approval) return status('unavailable')
+  if (!task.trim()) return status('no_text')
+  const args = { task: task.trim().slice(0, 4000), depth: 2, maxNodes: 12 }
+  try {
+    const result = await handler.client.request('tools/call', { name: handler.tool, arguments: args }, signal)
+    signal.throwIfAborted()
+    if (result?.isError) return status('unavailable')
+    const brief = result?.structuredContent?.brief
+    if (brief && !brief.nodes?.length && !brief.warnings?.length) return status('empty')
+    const text = result?.content?.filter((part) => part.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('\n')
+    if (!text?.trim()) return status('empty')
+    // Preserve the engine's trust wrapper verbatim. Never truncate a wrapper or
+    // leak oversized/private server results into the primary conversation.
+    if (Buffer.byteLength(text) > 32 * 1024) return status('over_budget')
+    const callId = `recall-${randomUUID()}`
+    return { diagnostic: { status: 'recalled', checkedAt, ...(Array.isArray(brief?.nodes) ? { nodes: brief.nodes.length } : {}) }, items: [
+      { type: 'function_call', call_id: callId, name: 'wiki_context', arguments: JSON.stringify(args) },
+      { type: 'function_call_output', call_id: callId, output: text },
+    ] }
+  } catch (error) {
+    if (signal.aborted) throw error
+    return status('unavailable')
+  }
 }

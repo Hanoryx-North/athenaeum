@@ -30,12 +30,18 @@ const path = require('node:path');
       window.connectedAgents = [];
       window.modelFails = false;
       window.modelBodyRead = false;
+      window.chatgptSignedIn = false;
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         unregisterCallback() {},
         invoke: async (command, args) => {
           window.calls.push({ command, args });
+          if (command === 'chatgpt_account') {
+            if (args.action === 'start') return { loginId: 'test-login', authUrl: 'https://auth.openai.com/test-login' };
+            if (args.action === 'logout' || args.action === 'cancel') { window.chatgptSignedIn = false; return {}; }
+            return { account: window.chatgptSignedIn ? { type: 'chatgpt', email: 'tester@example.com', planType: 'plus' } : null };
+          }
           if (command === 'plugin:http|fetch') { if (window.modelFails) throw new Error('Model login expired'); window.modelBodyRead = false; return 1; }
           if (command === 'plugin:http|fetch_send') return { status: 200, statusText: 'OK', url: 'https://model.test/v1/chat/completions', headers: [['content-type', 'text/event-stream']], rid: 2 };
           if (command === 'plugin:http|fetch_read_body') {
@@ -46,7 +52,7 @@ const path = require('node:path');
           if (command === 'cli_status') return { found: true, path: '/test/wiki', version: 'test', agentInstalled: false };
           if (command === 'cli_run') {
             const job = args.job.job;
-            if (job === 'doctor') return { exitCode: window.connected ? 0 : 1, output: { ok: window.connected, checks: ['athenaeum', 'claude', 'cursor'].map(id => ({ id: `agent-${id}`, ok: window.connectedAgents.includes(id), detail: window.connectedAgents.includes(id) ? 'connected' : 'not connected' })) }, stderr: [] };
+            if (job === 'doctor') return { exitCode: window.connected ? 0 : 1, output: { ok: window.connected, checks: ['athenaeum', 'codex', 'claude', 'cursor'].map(id => ({ id: `agent-${id}`, ok: window.connectedAgents.includes(id), detail: window.connectedAgents.includes(id) ? 'connected' : 'not connected' })) }, stderr: [] };
             if (job === 'setup') {
               window.connected = !window.failSetup;
               if (window.connected) window.connectedAgents = [...new Set([...window.connectedAgents, ...args.job.agents])];
@@ -62,8 +68,9 @@ const path = require('node:path');
     });
     await page.goto(`${process.env.SETUP_UI_BASE || 'http://127.0.0.1:1420'}/__setup_test__`);
     await page.evaluate(async () => {
-      window.React = (await import('/node_modules/.vite/deps/react.js')).default;
-      window.root = (await import('/node_modules/.vite/deps/react-dom_client.js')).default.createRoot(document.getElementById('root'));
+      const runtime = await import('/src/test-helpers/setup-runtime.ts');
+      window.React = runtime.React;
+      window.root = runtime.createRoot(document.getElementById('root'));
       window.wiki = (await import('/src/stores/wiki-store.ts')).useWikiStore;
       window.setup = (await import('/src/stores/setup-store.ts')).useSetupStore;
       window.mount = async (file, name, props = {}) => {
@@ -88,6 +95,25 @@ const path = require('node:path');
       window.wiki.setState({ project: { id: 'test', name: 'Test project', path: 'C:/test-project' } });
       await window.mount('/src/components/setup/connectors-view.tsx', 'ConnectorsView');
     });
+    await page.getByRole('button', { name: 'Add agent', exact: true }).click();
+    await page.getByRole('radio', { name: /ChatGPT/ }).click();
+    await page.screenshot({ path: path.join(process.env.TEMP || '.', 'athenaeum-chatgpt-picker.png') });
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByRole('heading', { name: 'Connect ChatGPT', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
+    await page.getByText(/Finish signing in with ChatGPT in your browser/).waitFor();
+    await page.evaluate(() => { window.chatgptSignedIn = true; });
+    await page.getByText(/Signed in as tester@example.com/).waitFor();
+    await page.screenshot({ path: path.join(process.env.TEMP || '.', 'athenaeum-chatgpt-connected.png') });
+    await page.getByRole('button', { name: 'Connect ChatGPT', exact: true }).click();
+    await page.getByRole('heading', { name: 'ChatGPT is connected.' }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.calls.find(call => call.args?.job?.agents?.includes('athenaeum')).args.job.agents), ['athenaeum']);
+    await page.getByRole('button', { name: 'Open chat', exact: true }).click();
+    assert.equal(await page.evaluate(() => window.wiki.getState().activeView), 'chat');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('athenaeum.ui:chat-agent-runtime'))), 'chatgpt');
+    await page.evaluate(async () => { window.chatgptSignedIn = false; window.connectedAgents = []; window.connected = false; window.setup.setState({ doctor: { ok: true, checks: [] } }); (await import('/src/stores/chatgpt-store.ts')).useChatgptStore.setState({ account: null, workspace: null, login: null }); });
     await page.getByRole('button', { name: 'Add agent', exact: true }).click();
     await page.getByRole('radio', { name: /Athenaeum Agent/ }).click();
     await page.getByRole('button', { name: 'Next', exact: true }).click();

@@ -28,6 +28,7 @@ export type HarnessRouteResult =
 export const SETTINGS_KEY_ENV = "ATHENAEUM_LLM_API_KEY"
 /** The route a custom endpoint is registered under in the runtime. */
 export const SETTINGS_ROUTE_ID = "athenaeum-settings"
+export const CHATGPT_ROUTE: HarnessRoute = { provider: "athenaeum-chatgpt", model: "chatgpt-default" }
 
 const CATALOG_PROVIDERS: Partial<Record<LlmConfig["provider"], string>> = {
   openai: "openai",
