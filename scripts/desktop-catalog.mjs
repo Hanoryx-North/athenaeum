@@ -124,11 +124,14 @@ export default function desktopCatalogPlugin() {
     load(source) {
       if (source !== resolved) return
       const catalog = buildDesktopCatalog(root)
+      this.addWatchFile(`${root}/src-tauri/src/lib.rs`)
+      for (const source of new Set(catalog.native.map(command => command.source))) this.addWatchFile(`${root}/${source}`)
       const modules = [...new Set([...catalog.entries, ...catalog.stores].map(row => row.module))]
       return `export const catalog = ${JSON.stringify(catalog)};\nexport const modules = {${modules.map(m => `${JSON.stringify(m)}: () => import(${JSON.stringify(`/src/${m}.ts`)})`).join(',')}};`
     },
     handleHotUpdate(context) {
-      if (!context.file.includes('/src/stores/') && !SERVICES.some(m => context.file.replaceAll('\\', '/').endsWith(`/src/${m}.ts`))) return
+      const file = context.file.replaceAll('\\', '/')
+      if (!file.includes('/src/stores/') && !file.includes('/src-tauri/src/') && !SERVICES.some(m => file.endsWith(`/src/${m}.ts`))) return
       const module = context.server.moduleGraph.getModuleById(resolved)
       if (module) { context.server.moduleGraph.invalidateModule(module); return [...context.modules, module] }
     },

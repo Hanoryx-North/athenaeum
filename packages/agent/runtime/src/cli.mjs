@@ -6,6 +6,7 @@ import { stat } from 'node:fs/promises'
 import { agentHome, loadConfig, sessionFile } from './config.mjs'
 import { inspectSession, openSession, runTurn } from './agent.mjs'
 import { learningStatus, LearningWorker } from './learning.mjs'
+import { memoryServer } from './memory-service.mjs'
 
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\n')
 const argv = process.argv.slice(2)
@@ -16,16 +17,28 @@ if (argv.includes('--help') || argv.includes('-h')) { help(); process.exit(0) }
 if (argv.includes('--version')) { process.stdout.write('athenaeum-agent 0.1.0\n'); process.exit(0) }
 
 async function server(home, config) {
-  const learning = new LearningWorker(home, config)
-  const learningTimer = setInterval(() => { void learning.wake() }, 5000).unref()
-  void learning.wake()
+  let learning = new LearningWorker(home, config), checkingLearning = false, closing = false
+  const wakeLearning = async () => {
+    if (checkingLearning || closing) return
+    checkingLearning = true
+    try {
+      const latest = await loadConfig(home)
+      if (JSON.stringify([latest.backgroundMemory, latest.capture]) !== JSON.stringify([learning.config.backgroundMemory, learning.config.capture])) {
+        await learning.close()
+        learning = new LearningWorker(home, latest)
+      }
+      if (!closing) await learning.wake()
+    } finally { checkingLearning = false }
+  }
+  const learningTimer = setInterval(() => { void wakeLearning().catch(() => {}) }, 5000).unref()
+  void wakeLearning().catch(() => {})
   const sessions = new Map(), running = new Map(), approvals = new Map()
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity })
   const reply = (id, result) => send({ id, result })
   const emit = (threadId, method, params) => send({ method, params: { threadId, ...params } })
   const stop = () => { for (const run of running.values()) run.controller.abort(); input.close() }
   process.once('SIGTERM', stop); process.once('SIGINT', stop)
-  input.on('close', () => { clearInterval(learningTimer); void learning.close(); for (const run of running.values()) run.controller.abort() })
+  input.on('close', () => { closing = true; clearInterval(learningTimer); void learning.close(); for (const run of running.values()) run.controller.abort() })
   async function handle(request) {
     const { id, method, params = {} } = request
     if (!method) {
@@ -53,6 +66,8 @@ async function server(home, config) {
         reply(id, {}); return
       }
       if (method !== 'turn/start') throw new Error(`Unsupported method: ${method}`)
+      // Settings may enable or pause learning while chat remains connected.
+      config = await loadConfig(home)
       const session = sessions.get(params.threadId)
       if (!session) throw new Error('Unknown conversation.')
       if (running.has(session.id)) throw new Error('A turn is already running in this conversation.')
@@ -73,7 +88,7 @@ async function server(home, config) {
       try {
         await runTurn({ home, session, config, input: params.input, signal: controller.signal, approve, emit: (method, values) => emit(session.id, method, values) })
         emit(session.id, 'turn/completed', { turn: { id: turnId, status: 'completed' } })
-        void learning.wake()
+        void wakeLearning().catch(() => {})
       } catch (error) {
         emit(session.id, 'turn/completed', { turn: { id: turnId, status: controller.signal.aborted ? 'interrupted' : 'failed', error: { message: error.message } } })
       } finally { running.delete(session.id) }
@@ -87,6 +102,7 @@ async function server(home, config) {
 }
 async function main() {
   const home = await agentHome(), config = await loadConfig(home)
+  if (argv[0] === 'memory-server') { await memoryServer(home); return }
   if (argv[0] === 'app-server') { await server(home, config); return }
   if (argv[0] === 'memory' && argv.length === 1) { send(await learningStatus(home)); return }
   const args = [...argv]

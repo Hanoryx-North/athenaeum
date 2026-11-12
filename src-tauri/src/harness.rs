@@ -93,6 +93,16 @@ pub struct HarnessChatState {
     runtime: StdMutex<Option<Arc<HarnessRuntime>>>,
 }
 
+/// Independent transport so background capture cannot interrupt chat or login.
+#[derive(Default)]
+pub struct BackgroundMemoryState(HarnessChatState);
+
+impl BackgroundMemoryState {
+    pub fn shutdown(&self) {
+        self.0.shutdown();
+    }
+}
+
 struct HarnessRuntime {
     workspace: PathBuf,
     /// [`HarnessRoute::identity`] of the route it was launched with; empty for the defaults.
@@ -193,7 +203,9 @@ impl HarnessRuntime {
         identity: String,
     ) -> Result<Self, String> {
         let mut command = if route.is_some_and(|route| {
-            route.provider == "athenaeum-native" || route.provider == "athenaeum-chatgpt"
+            route.provider == "athenaeum-native"
+                || route.provider == "athenaeum-chatgpt"
+                || route.provider == "athenaeum-memory"
         }) {
             native_command(app, &workspace, route)?
         } else {
@@ -523,6 +535,11 @@ pub(crate) fn native_agent_binary() -> Result<PathBuf, String> {
     }
     // Development uses the one checkout's native runtime build.
     if cfg!(debug_assertions) {
+        let source =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../packages/agent/runtime/src/cli.mjs");
+        if source.is_file() {
+            return Ok(source);
+        }
         candidates.push(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../target/native-runtime/debug")
@@ -550,6 +567,34 @@ fn native_command(
     let node = private_node_path(&prefix)
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("node"));
+    if route.is_some_and(|route| route.provider == "athenaeum-memory") {
+        let source = binary
+            .extension()
+            .is_some_and(|extension| extension == "mjs" || extension == "js");
+        let mut command = Command::new(if source { &node } else { &binary });
+        if source {
+            command.arg(&binary);
+        }
+        command
+            .arg("memory-server")
+            .current_dir(workspace)
+            .env("ATHENAEUM_NODE", &node)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(cli) = crate::cli_tools::locate_cli() {
+            command.env("ATHENAEUM_BIN", cli);
+        }
+        if let Ok(codex) = codex_binary() {
+            command.env("ATHENAEUM_CODEX_BIN", codex);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        return Ok(command);
+    }
     let driver = app
         .path()
         .resource_dir()
@@ -823,6 +868,40 @@ pub async fn harness_check(
         .await?;
     serde_json::from_value(response)
         .map_err(|error| format!("The Harness runtime returned an invalid status: {error}"))
+}
+
+/// Background work stays in the owned runtime. This command only relays JSON.
+#[tauri::command]
+pub async fn background_memory(
+    app: AppHandle,
+    state: State<'_, BackgroundMemoryState>,
+    project_path: String,
+    action: String,
+    settings: Option<Value>,
+    thread_id: Option<String>,
+) -> Result<Value, String> {
+    if !["status", "configure", "run", "restart", "stop"].contains(&action.as_str()) {
+        return Err("Choose status, configure, run, restart or stop.".into());
+    }
+    if action == "stop" {
+        state.shutdown();
+        return Ok(json!({ "stopped": true }));
+    }
+    if action == "restart" {
+        state.shutdown();
+    }
+    let route = HarnessRoute {
+        provider: "athenaeum-memory".into(),
+        model: "background-memory".into(),
+        api_key: None,
+        api_key_env: None,
+        pi_provider: None,
+    };
+    let runtime = state
+        .0
+        .runtime_for(&app, Path::new(&project_path), Some(&route))?;
+    let response = runtime.request(json!({ "type": "memory", "requestId": runtime.next_request_id("memory"), "action": if action == "restart" { "status" } else { &action }, "settings": settings, "threadId": thread_id })).await?;
+    Ok(response.get("result").cloned().unwrap_or(Value::Null))
 }
 
 /// ChatGPT authentication stays in the official runtime; the UI receives account metadata only.

@@ -422,7 +422,7 @@ export function createMcpServer(config: IntegrationConfig): McpServer {
         inputSchema: {
           repository,
           node: nodeRef.describe('Node id or exact title the evidence belongs to.'),
-          file: pathText.describe('Project-relative path of the file the evidence anchors to.'),
+          file: pathText.optional().describe('Project-relative path inside this wiki. Omit only for external_source evidence, naming its source workspace and path in note.'),
           symbol: typeText.optional().describe('Symbol inside that file, when the evidence is one.'),
           kind: typeText.optional().describe('Evidence kind, e.g. source_file, symbol, test, git_commit (the engine publishes the closed list).'),
           excerpt: z.string().max(20_000).optional().describe('The lines that support the claim, quoted.'),
@@ -432,7 +432,8 @@ export function createMcpServer(config: IntegrationConfig): McpServer {
       },
       async ({ repository: name, node, file, symbol, kind, excerpt, note }) =>
         safely(async () => {
-          const evidence = await get(name).attachEvidence({ node, kind, anchor: { file, symbol }, excerpt, note }, caller);
+          if (!file && (kind !== 'external_source' || !note?.trim())) throw new Error('Evidence needs a local file, or external_source with a source reference in note.');
+          const evidence = await get(name).attachEvidence({ node, kind, ...(file ? { anchor: { file, symbol } } : {}), excerpt, note }, caller);
           return knowledge({ repository: name, trust: TRUST, evidence, ...proposal });
         }),
     );

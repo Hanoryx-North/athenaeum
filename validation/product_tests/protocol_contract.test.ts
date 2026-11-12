@@ -32,12 +32,12 @@ test('sync v1 agrees on path safety and canonical tree hashing', () => {
   assert.equal(API_VERSION, 1);
   assert.equal(SYNC_PROTOCOL_VERSION, 1);
   // Safe syntax is wider than the sync policy: a raw source is a legal relative path but is
-  // deliberately not shared (private material stays local), so only the manifest and wiki pages sync.
+  // deliberately not shared. Root Markdown documentation, wiki pages and the manifest sync.
   for (const path of ['wiki/decision.md', 'raw/sources/source.txt', MANIFEST_FILE]) {
     assert.equal(validateSyncPath(path), null);
   }
-  for (const path of ['wiki/decision.md', MANIFEST_FILE]) assert.equal(isSyncPath(path), true, path);
-  for (const path of ['raw/sources/source.txt', 'index.md', 'wiki/notes.txt']) {
+  for (const path of ['wiki/decision.md', 'index.md', 'README.md', MANIFEST_FILE]) assert.equal(isSyncPath(path), true, path);
+  for (const path of ['raw/sources/source.txt', 'docs/private.md', 'wiki/notes.txt']) {
     assert.equal(isSyncPath(path), false, path);
   }
   for (const path of ['../secret.md', '.athenaeum/knowledge.db.json', '/absolute.md', 'wiki\\x.md']) {

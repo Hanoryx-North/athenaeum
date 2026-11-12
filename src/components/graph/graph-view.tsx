@@ -8,6 +8,7 @@ import forceAtlas2 from "graphology-layout-forceatlas2"
 import { Network, RefreshCw, ZoomIn, ZoomOut, Maximize, Layers, Tag, Lightbulb, AlertTriangle, Link2, X, Search, Loader2, Filter, RotateCcw, EyeOff } from "lucide-react"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { useResearchStore } from "@/stores/research-store"
+import { useProposalStore } from "@/stores/proposal-store"
 import { Button } from "@/components/ui/button"
 import { useWikiStore, type GraphColorMode } from "@/stores/wiki-store"
 import { readFile, writeFile } from "@/commands/fs"
@@ -801,10 +802,12 @@ export function GraphView() {
     async (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId)
       if (!node) return
-      // Knowledge that is not a file — a decision typed into the knowledge
-      // panel, an edge the agent proposed — is drawn on the same canvas,
-      // but there is nothing on disk to open for it.
-      if (!node.path) return
+      if (!node.path) {
+        await useProposalStore.getState().load({ force: true })
+        useProposalStore.getState().beginEdit(node.id)
+        useWikiStore.getState().setActiveView("review")
+        return
+      }
       try {
         const content = await readFile(node.path)
         setGraphPreview({
@@ -818,6 +821,11 @@ export function GraphView() {
     },
     [nodes],
   )
+
+  useEffect(() => registerDesktopAction("graph.openNode", "(nodeId: string): Promise<void>", nodeId => {
+    if (typeof nodeId !== "string") throw new Error("nodeId must be a string")
+    return handleNodeClick(nodeId)
+  }), [handleNodeClick])
 
   const handleNodeContextMenu = useCallback((nodeId: string, x: number, y: number) => {
     if (!nodeId) {
@@ -1014,7 +1022,7 @@ export function GraphView() {
     <div className="relative flex h-full flex-col">
       {edges.length === 0 && nodes.length > 0 && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground">
-          <p>These pages have no links yet. Link related pages with [[page name]] in their text, or ask your agent to connect them.</p>
+          <p>This knowledge has no links yet. Background memory can propose connections with supporting reasons. Select an unsaved finding to review it.</p>
           <Button size="sm" variant="outline" onClick={() => useWikiStore.getState().setActiveView("review")}>Review unsaved proposals</Button>
         </div>
       )}

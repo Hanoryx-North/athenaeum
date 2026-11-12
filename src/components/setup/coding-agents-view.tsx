@@ -9,6 +9,7 @@ import { saveUiPreference } from "@/lib/ui-preferences"
 import { AGENTS, SetupCard, type Agent } from "./setup-card"
 import { useChatgptStore } from "@/stores/chatgpt-store"
 import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { BackgroundMemory } from "./background-memory"
 
 export function CodingAgentsView() {
   const project = useWikiStore((s) => s.project)
@@ -65,6 +66,7 @@ function ProjectAgents({ workspace }: { workspace: string }) {
         <Button variant="ghost" disabled={busy !== null} onClick={() => void check(workspace)}><RefreshCw className="h-4 w-4" />Check connections</Button>
       </div>
       <p className="text-xs leading-relaxed text-muted-foreground">Connecting saves wiki tools and memory instructions for your agent. New findings appear in Review for you to approve.</p>
+      <BackgroundMemory workspace={workspace} />
     </section>
   )
 }

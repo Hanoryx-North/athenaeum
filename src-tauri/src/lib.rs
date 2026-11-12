@@ -128,6 +128,7 @@ pub fn run() {
             }
             app.manage(commands::file_sync::FileSyncState::default());
             app.manage(harness::HarnessChatState::default());
+            app.manage(harness::BackgroundMemoryState::default());
             app.manage(cli_tools::CliRun::default());
             app.manage(knowledge::AppState::default());
             app.manage(desktop_control::DesktopControl::default());
@@ -249,6 +250,7 @@ pub fn run() {
             cli_tools::cli_install_tools,
             harness::harness_check,
             harness::chatgpt_account,
+            harness::background_memory,
             harness::harness_start_turn_stream,
             harness::harness_cancel_turn,
             harness::harness_disconnect,
@@ -307,6 +309,9 @@ pub fn run() {
         .run(|app, event| {
             if matches!(&event, tauri::RunEvent::Exit) {
                 if let Some(state) = app.try_state::<harness::HarnessChatState>() {
+                    state.shutdown();
+                }
+                if let Some(state) = app.try_state::<harness::BackgroundMemoryState>() {
                     state.shutdown();
                 }
             }

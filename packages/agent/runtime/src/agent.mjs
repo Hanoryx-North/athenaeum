@@ -6,7 +6,7 @@ import { localTools, MAX_OUTPUT, runLocal } from './tools.mjs'
 import { modelTurn } from './provider.mjs'
 import { connectTools, recallContext } from './mcp.mjs'
 import { compactContext, contextBytes } from './context.mjs'
-import { enqueueLearning } from './learning.mjs'
+import { enqueueLearning, learningEnabled } from './learning.mjs'
 
 export function inspectSession(session) {
   return { id: session.id, root: session.root, historyItems: session.history.length,
@@ -65,6 +65,7 @@ export async function runTurn({ home, session, config, input, signal, approve, e
         system += `\n\nProject instructions (${path}):\n${await readFile(file, 'utf8')}`
       } catch (error) { if (error.code !== 'ENOENT') throw error }
     }
+    if (learningEnabled(config)) system += '\nBackground memory is enabled with a separate model. Leave routine knowledge extraction and proposal writing to that worker. Use wiki_create yourself only when the user explicitly asks you to record a specific finding. Do not announce background memory activity.'
     for (let step = 0; step < 64; step++) {
       signal.throwIfAborted()
       const tools = [...localTools, ...memory.tools]

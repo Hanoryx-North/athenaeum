@@ -98,8 +98,7 @@ describe("buildWikiGraph", () => {
     expect(result.nodes[0].type).toBe("thesis")
   })
 
-  it("keeps unsaved curated knowledge off the page canvas", async () => {
-    // Unsaved proposals belong in Review; the page canvas shows saved vault files.
+  it("draws reviewable memory without inventing a file path", async () => {
     mockLoadKnowledgeGraph.mockResolvedValue(
       graph({
         nodes: [
@@ -110,7 +109,7 @@ describe("buildWikiGraph", () => {
 
     const result = await buildWikiGraph("/project")
 
-    expect(result.nodes).toEqual([])
+    expect(result.nodes).toMatchObject([{ id: "d", path: "", origin: "curated", type: "decision" }])
     expect(result.edges).toEqual([])
   })
 

@@ -162,16 +162,28 @@ impl Component {
 }
 
 pub(crate) fn root(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
-    if let Some(root) = explicit
-        .map(Path::to_path_buf)
-        .or_else(|| std::env::var_os("WIKI_DEV_ROOT").map(PathBuf::from))
-    {
+    if let Some(root) = explicit {
         let root = root.canonicalize()?;
         return Ok(if root.join("athenaeum/Cargo.toml").is_file() {
             root.join("athenaeum")
         } else {
             root
         });
+    }
+    // A stale saved environment path must not prevent starting from a valid
+    // checkout. Explicit --root errors remain visible to the caller.
+    if let Some(root) = std::env::var_os("WIKI_DEV_ROOT")
+        .map(PathBuf::from)
+        .and_then(|path| path.canonicalize().ok())
+    {
+        if root.join("athenaeum/Cargo.toml").is_file() {
+            return Ok(root.join("athenaeum"));
+        }
+        if root.join("Cargo.toml").is_file()
+            && root.join("packages/protocol/package.json").is_file()
+        {
+            return Ok(root);
+        }
     }
     for ancestor in cwd.canonicalize()?.ancestors() {
         if ancestor.join("Cargo.toml").is_file()

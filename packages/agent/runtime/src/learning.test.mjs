@@ -8,7 +8,7 @@ import { atomicJson, sessionFile } from './config.mjs'
 import { enqueueLearning, learningStatus, LearningWorker } from './learning.mjs'
 
 const candidate = () => ({ type: 'gotcha', title: 'Retry budget protects the shared quota', summary: 'Keep retry work bounded to prevent outage amplification.', content: 'The retry budget is three. Broader outage behavior has not been tested.', evidence: [{ path: 'retry.mjs', excerpt: 'export const retryBudget = 3' }] })
-async function fixture(t, candidates = [candidate()], { duplicate = false, tools = true, gate } = {}) {
+async function fixture(t, candidates = [candidate()], { duplicate = false, related = false, tools = true, gate } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'athenaeum-learning-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const home = join(dir, 'home'), project = join(dir, 'project'); await mkdir(project)
@@ -27,9 +27,9 @@ async function fixture(t, candidates = [candidate()], { duplicate = false, tools
 const {appendFileSync}=require('node:fs');require('node:readline').createInterface({input:process.stdin}).on('line',line=>{
 const m=JSON.parse(line), reply=result=>process.stdout.write(JSON.stringify({id:m.id,result})+'\\n');
 if(m.method==='initialize')reply({});
-if(m.method==='tools/list')reply({tools:${JSON.stringify(tools ? ['wiki_search', 'wiki_create', 'wiki_attach_evidence', 'wiki_accept'].map((name) => ({ name, inputSchema: { type: 'object' } })) : [])}});
+if(m.method==='tools/list')reply({tools:${JSON.stringify(tools ? ['wiki_search', 'wiki_create', 'wiki_attach_evidence', 'wiki_link', 'wiki_accept'].map((name) => ({ name, inputSchema: { type: 'object' } })) : [])}});
 if(m.method==='tools/call'){appendFileSync(${JSON.stringify(log)},JSON.stringify(m.params)+'\\n');
-const data=m.params.name==='wiki_search'?{items:${duplicate ? '[{node:{id:"existing"}}]' : '[]'}}:m.params.name==='wiki_create'?{node:{id:'node_proposed'},pendingReview:true,durable:false}:{evidence:{id:'evidence'}};
+const data=m.params.name==='wiki_search'?{items:${JSON.stringify(duplicate ? [{ node: { id: 'existing', title: candidate().title } }] : related ? [{ node: { id: 'existing', title: 'Retry behavior during maintenance' } }] : [])}}:m.params.name==='wiki_create'?{node:{id:'node_proposed'},pendingReview:true,durable:false}:{evidence:{id:'evidence'}};
 reply({structuredContent:data,content:[{type:'text',text:'reference material'}]});}
 });`)
   const requests = []
@@ -71,9 +71,9 @@ test('separate learning worker verifies sources, searches first, proposes with e
   assert.equal(f.requests[0].max_output_tokens, 2048)
   assert.deepEqual(f.requests[0].tools, [])
   const calls = await f.calls()
-  assert.deepEqual(calls.map((item) => item.name), ['wiki_search', 'wiki_create', 'wiki_attach_evidence'])
-  assert.match(calls[1].arguments.content, /retry.mjs/)
-  assert.equal(calls[2].arguments.node, 'node_proposed')
+  assert.deepEqual(calls.map((item) => item.name), ['wiki_search', 'wiki_search', 'wiki_create', 'wiki_attach_evidence'])
+  assert.match(calls[2].arguments.content, /retry.mjs/)
+  assert.equal(calls[3].arguments.node, 'node_proposed')
   assert.equal((await learningStatus(f.home)).jobs[0].status, 'completed')
   assert.ok(!JSON.stringify(await learningStatus(f.home)).includes('Investigate retry'))
   const [name] = await readdir(join(f.home, 'memory-jobs'))
@@ -90,8 +90,24 @@ test('learning skips duplicates and never offers review or file execution tools 
   await enqueueLearning(f.home, f.session, f.config)
   const worker = new LearningWorker(f.home, f.config)
   await worker.wake(); await worker.close()
-  assert.deepEqual((await f.calls()).map((item) => item.name), ['wiki_search'])
+  assert.deepEqual((await f.calls()).map((item) => item.name), ['wiki_search', 'wiki_search'])
   assert.deepEqual((await learningStatus(f.home)).jobs[0].proposed, [])
+})
+
+test('source references attach exact observed text and related hits do not suppress distinct findings', async (t) => {
+  const value = { ...candidate(), evidence: [{ source: 'source_1' }], related: [{ node: 'existing', reason: 'Both constrain retry behavior.' }, { node: 'invented', reason: 'Unsupported.' }] }
+  const f = await fixture(t, [value], { related: true })
+  await enqueueLearning(f.home, f.session, f.config)
+  const worker = new LearningWorker(f.home, f.config)
+  await worker.wake(); await worker.close()
+  const calls = await f.calls()
+  assert.deepEqual(calls.map((item) => item.name), ['wiki_search', 'wiki_search', 'wiki_create', 'wiki_attach_evidence', 'wiki_link'])
+  assert.equal(calls[3].arguments.excerpt, 'export const retryBudget = 3')
+  assert.equal(calls[4].arguments.to, 'existing')
+  const input = JSON.parse(f.requests[0].input[0].content)
+  assert.deepEqual(input.sourceObservations, [{ id: 'source_1', path: 'retry.mjs', excerpt: 'export const retryBudget = 3' }])
+  assert.ok(!input.history)
+  assert.equal((await learningStatus(f.home)).jobs[0].outcome, 'proposed')
 })
 
 test('learning refuses stale excerpts, private files, unobserved sources and generated credentials', async (t) => {
@@ -107,7 +123,7 @@ test('learning refuses stale excerpts, private files, unobserved sources and gen
     await enqueueLearning(f.home, f.session, f.config)
     const worker = new LearningWorker(f.home, f.config)
     await worker.wake(); await worker.close()
-    assert.deepEqual(await f.calls(), [])
+    assert.deepEqual((await f.calls()).map((item) => item.name), ['wiki_search'])
   })
 })
 

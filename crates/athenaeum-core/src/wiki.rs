@@ -725,7 +725,7 @@ impl<'a> WikiService<'a> {
     ) -> Result<WikiContext> {
         let seeds = if seed_references.is_empty() {
             self.store
-                .search(task, DEFAULT_CONTEXT_SEEDS)?
+                .search_context(task, DEFAULT_CONTEXT_SEEDS)?
                 .into_iter()
                 .map(|hit| hit.node.id)
                 .collect()

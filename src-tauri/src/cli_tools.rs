@@ -72,6 +72,13 @@ pub fn locate_cli() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("ATHENAEUM_BIN") {
         candidates.push(PathBuf::from(path));
     }
+    if cfg!(debug_assertions) {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../target/debug")
+                .join(exe_name()),
+        );
+    }
     if let Some(prefix) = default_prefix() {
         candidates.push(prefix.join("bin").join(exe_name()));
     }

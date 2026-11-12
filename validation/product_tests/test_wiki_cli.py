@@ -372,10 +372,26 @@ class WikiCli(unittest.TestCase):
             self.assertEqual(int((app / "desktop-pid").read_text()), report["pid"])
         finally:
             if (app / "desktop-pid").exists():
+                pid = int((app / "desktop-pid").read_text())
+                handle = None
+                if os.name == "nt":
+                    import ctypes
+                    from ctypes import wintypes
+                    kernel = ctypes.windll.kernel32
+                    kernel.OpenProcess.restype = wintypes.HANDLE
+                    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+                    handle = kernel.OpenProcess(0x100000, False, pid)
                 try:
-                    os.kill(int((app / "desktop-pid").read_text()), signal.SIGTERM)
+                    os.kill(pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+                finally:
+                    if handle:
+                        # Termination is asynchronous on Windows; the image
+                        # remains locked until the process has actually exited.
+                        self.assertEqual(kernel.WaitForSingleObject(handle, 5000), 0)
+                        kernel.CloseHandle(handle)
 
     def test_dev_missing_root_and_unsupported_task_fail(self):
         self.data("dev", "--root", self.root / "missing", "components", ok=False)
@@ -384,6 +400,11 @@ class WikiCli(unittest.TestCase):
         self.data("dev", "--root", self.root, "--dry-run", "run", "cli", "nonexistent", ok=False)
         (self.root / "validation").mkdir()
         self.data("dev", "--root", self.root, "--dry-run", "build", "validation", ok=False)
+
+    def test_stale_dev_root_does_not_hide_the_current_source_checkout(self):
+        self.workspace()
+        result = self.data("dev", "components", env={"WIKI_DEV_ROOT": str(self.root / "old-checkout")})
+        self.assertTrue(result)
 
     def test_dev_check_and_format_are_scoped_to_the_selected_crate(self):
         self.workspace()

@@ -35,6 +35,32 @@ const SEARCH_INDEX_VERSION: u32 = 2;
 const SEARCH_INDEX_VERSION_KEY: &str = "search_index_version";
 
 impl KnowledgeStore {
+    /// Task recall needs more precision than an interactive keyword search.
+    /// Common sentence words must not seed unrelated projects in a shared wiki.
+    pub fn search_context(&self, task: &str, limit: u32) -> Result<Vec<SearchHit>> {
+        let terms = context_terms(task);
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let minimum = if terms.len() >= 4 { 2 } else { 1 };
+        let hits = self.search(&terms.join(" "), limit.saturating_mul(4).min(100))?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| {
+                let text = hit.node.search_text();
+                let expanded = format!("{} {}", text, identifier_parts(&text)).to_lowercase();
+                let words: std::collections::HashSet<_> =
+                    expanded.split(|c: char| !c.is_alphanumeric()).collect();
+                terms
+                    .iter()
+                    .filter(|term| words.contains(term.as_str()))
+                    .take(minimum)
+                    .count()
+                    >= minimum
+            })
+            .take(limit as usize)
+            .collect())
+    }
     /// Re-index when the stored full-text index was built by an older build.
     ///
     /// A fresh database has no recorded version and no nodes, so this is a no-op rebuild that
@@ -280,10 +306,141 @@ fn fts_terms(raw: &str) -> Option<Vec<String>> {
     }
 }
 
+fn context_terms(task: &str) -> Vec<String> {
+    const COMMON: &[&str] = &[
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "been",
+        "before",
+        "but",
+        "by",
+        "can",
+        "check",
+        "could",
+        "do",
+        "does",
+        "ensure",
+        "every",
+        "everything",
+        "fix",
+        "for",
+        "from",
+        "get",
+        "has",
+        "have",
+        "how",
+        "if",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "like",
+        "make",
+        "me",
+        "my",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "please",
+        "so",
+        "some",
+        "sure",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "through",
+        "to",
+        "up",
+        "use",
+        "using",
+        "verify",
+        "want",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "which",
+        "while",
+        "will",
+        "with",
+        "work",
+        "works",
+        "would",
+        "you",
+        "your",
+    ];
+    let mut terms = Vec::new();
+    for term in task
+        .split(|c: char| !c.is_alphanumeric())
+        .map(str::to_lowercase)
+    {
+        if term.chars().count() < 2 || COMMON.contains(&term.as_str()) || terms.contains(&term) {
+            continue;
+        }
+        terms.push(term);
+        if terms.len() == 32 {
+            break;
+        }
+    }
+    terms
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::NodeType;
+
+    #[test]
+    fn task_recall_does_not_seed_unrelated_claims_from_common_words() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "VPN connection status").with_summary(
+                    "The connection requires evidence before it is shown as connected.",
+                ),
+            )
+            .unwrap();
+        assert!(store
+            .search_context(
+                "Verify and fix the persistent background memory worker and its model routing",
+                5
+            )
+            .unwrap()
+            .is_empty());
+        let memory = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Decision, "Background memory worker")
+                    .with_summary("Its extraction model is configured separately."),
+            )
+            .unwrap();
+        let hits = store
+            .search_context(
+                "Verify and fix the persistent background memory worker and its model routing",
+                5,
+            )
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.id, memory.id);
+        assert!(store
+            .search_context("please make sure it works", 5)
+            .unwrap()
+            .is_empty());
+    }
 
     fn terms(raw: &str) -> Option<Vec<String>> {
         fts_terms(raw)

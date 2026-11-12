@@ -124,9 +124,9 @@ export async function buildWikiGraph(
   const visible = new Map<string, IndexGraphNode>()
   for (const node of index.nodes) {
     if (HIDDEN_KINDS.has(node.kind)) continue
-    // The page graph and Knowledge tree describe the same vault. Repository
-    // index artifacts and unsaved proposals are available in Files and Review.
-    if (node.origin !== "page" && node.origin !== "source") continue
+    // Reviewable memory belongs on the graph too. Keep repository extraction
+    // artifacts out of this canvas, while exposing the claims users can review.
+    if (node.origin === "curated" && !["decision", "gotcha", "procedure", "fact", "rule", "observation"].includes(node.kind)) continue
     visible.set(node.id, node)
   }
   if (visible.size === 0) {

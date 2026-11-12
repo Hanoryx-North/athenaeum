@@ -42,6 +42,14 @@ pub struct AcceptanceBatch {
 pub fn accept_pending(store: &mut KnowledgeStore, settled_only: bool) -> Result<AcceptanceBatch> {
     let mut batch = AcceptanceBatch::default();
     for node in memory::proposals(store, None)? {
+        // A background extraction can fail between creating its proposal and
+        // attaching checked evidence. Such drafts need review, not automatic saving.
+        if settled_only
+            && node.provenance.detail.as_deref() == Some("athenaeum-background-memory")
+            && store.evidence_for(&node.id)?.is_empty()
+        {
+            continue;
+        }
         // Leave time for a capturing agent to attach evidence and relationships.
         if settled_only && (chrono::Utc::now() - node.updated_at).num_seconds() < 15 {
             continue;
@@ -65,5 +73,47 @@ pub fn maintain(store: &mut KnowledgeStore) -> Result<AcceptanceBatch> {
             accept_pending(store, true)
         }
         _ => Ok(AcceptanceBatch::default()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Evidence, EvidenceKind, KnowledgeNode, NodeType, Provenance};
+
+    #[test]
+    fn background_drafts_are_not_automatically_saved_before_evidence_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = KnowledgeStore::open(dir.path().join(".athenaeum")).unwrap();
+        let draft = KnowledgeNode::new(NodeType::Gotcha, "Checked background finding")
+            .with_provenance(Provenance::model("athenaeum-background-memory"));
+        let draft = store.create_node(draft).unwrap();
+        let settled = (chrono::Utc::now() - chrono::Duration::seconds(30)).to_rfc3339();
+        let settle = |store: &KnowledgeStore| {
+            store
+                .connection()
+                .execute(
+                    "UPDATE nodes SET updated_at = ?2 WHERE id = ?1",
+                    rusqlite::params![draft.id.as_str(), settled],
+                )
+                .unwrap();
+        };
+        settle(&store);
+        assert!(accept_pending(&mut store, true)
+            .unwrap()
+            .accepted
+            .is_empty());
+        assert_eq!(memory::proposals(&store, None).unwrap().len(), 1);
+        store
+            .attach_evidence(
+                Evidence::new(draft.id.clone(), EvidenceKind::ExternalSource)
+                    .with_excerpt("An exact source excerpt checked by the worker.")
+                    .with_note("Source workspace and path are outside this wiki."),
+            )
+            .unwrap();
+        settle(&store);
+        let batch = accept_pending(&mut store, true).unwrap();
+        assert!(batch.errors.is_empty(), "{:?}", batch.errors);
+        assert_eq!(batch.accepted.len(), 1);
     }
 }

@@ -24,6 +24,7 @@ import { loadOnboardingComplete, saveOnboardingComplete } from "@/lib/project-st
 import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
 import { useDesktopControl } from "@/hooks/use-desktop-control"
+import { useBackgroundMemory } from "@/hooks/use-background-memory"
 
 function applyDocumentZoom(level: number) {
   document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * level}px`
@@ -42,6 +43,7 @@ function App() {
   const [firstLaunch, setFirstLaunch] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
   useDesktopControl(!loading, handleProjectOpened)
+  useBackgroundMemory(project?.path, !loading)
 
   async function completeOnboarding() {
     await saveOnboardingComplete()

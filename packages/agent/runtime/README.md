@@ -101,8 +101,10 @@ an inexpensive model supported by the selected connection in the agent's `config
 }
 ```
 
-The background model uses the same endpoint, API and credentials as coding. It does
-not switch billing methods or fall back to the coding model. No job runs without
+By default, the background model uses the same endpoint, API and credentials as coding.
+Desktop Background memory can instead select `backend: "chatgpt"`, using the official
+Codex app-server's saved ChatGPT connection. Credentials remain in that runtime.
+Neither route falls back to the coding model. No job runs without
 an explicit model and enabled setting. `capture: "off"` also disables learning.
 
 A completed coding turn queues a private bounded job. A separate worker in the
@@ -114,7 +116,8 @@ diagnostic records and are not automatically retried.
 Each job makes at most one background model request, limited to 2048 output tokens,
 and proposes at most two
 findings. Turns without successful source observations make no extraction request.
-The model gets no execution or review tools. The worker checks exact excerpts
+API extraction gets no tools. ChatGPT extraction uses an ephemeral read-only thread,
+disables shell and configured MCP tools, and rejects tool attempts. The worker checks exact excerpts
 against current files observed in the turn, rejects private paths and common
 credential formats, and searches existing knowledge before creating a proposal.
 Only new proposals receive evidence. Nothing is accepted or written to the vault.
@@ -123,6 +126,12 @@ is correct. Completed jobs retain diagnostics without the turn transcript.
 
 `wiki agent -- memory` and app-server `memory/read` expose job status without
 transcripts. New jobs are deferred when eight jobs already await processing.
+The model receives a completed result and numbered observed source excerpts, then
+selects references for the worker to attach. Cross-workspace excerpts use external
+evidence rather than fictitious paths inside the memory wiki. The desktop starts
+`memory-server` independently of chat; it polls completed local Codex turns through
+`thread/list` and `thread/turns/list`, keeps a cursor and ignores reasoning/images.
+Resuming after a pause does not import turns from the paused interval.
 Each job has a 128 KiB input limit. An OS-owned process lock prevents concurrent
 workers from processing the same queue, and releases automatically on process exit.
 
