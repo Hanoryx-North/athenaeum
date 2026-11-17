@@ -376,6 +376,7 @@ fn page_node(page: &VaultPage, id: NodeId, arrived: bool) -> KnowledgeNode {
         .with_summary(page.summary.clone())
         .with_content(page.body.trim().to_string())
         .with_scope(page.scope.unwrap_or(Scope::Project))
+        .with_applicability(page.applicability.clone())
         .with_authority(authority_for(page, arrived))
         .with_status(NodeStatus::Valid)
         .with_provenance(Provenance::deterministic(page_provenance(page)))
@@ -878,6 +879,7 @@ fn node_changed(existing: &KnowledgeNode, desired: &KnowledgeNode) -> bool {
         || existing.summary != desired.summary
         || existing.content != desired.content
         || existing.scope != desired.scope
+        || existing.applicability != desired.applicability
         || existing.authority != desired.authority
         || existing.status != desired.status
         || existing.provenance != desired.provenance

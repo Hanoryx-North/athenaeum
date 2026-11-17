@@ -1,9 +1,4 @@
-//! Knowledge briefs (buildplan §27) and the trust boundary around them (§48).
-//!
-//! A brief is what the wiki agent hands the primary agent. It is deliberately
-//! *not* a dump of the graph: node summaries, the relationships that connect
-//! them, the source anchors worth opening, and the warnings that would
-//! otherwise be rediscovered the hard way.
+//! Knowledge briefs.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -20,10 +15,6 @@ use crate::store::KnowledgeStore;
 use crate::vault::PageRef;
 
 /// A node as it appears in a brief: summary only, never full content.
-///
-/// Buildplan §28 — stop at the lowest level of detail that answers the
-/// question. Full bodies and source are fetched only if the primary agent
-/// asks for them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefNode {
@@ -37,9 +28,6 @@ pub struct BriefNode {
     pub depth: u8,
     /// The file behind this node when it is a page of the vault, so the brief that opens a task
     /// can point at where to change what the project says without a round trip per node.
-    ///
-    /// Additive: consumers ignore it when they do not know it, and it is absent for every node
-    /// that is not a page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page: Option<PageRef>,
 }
@@ -76,9 +64,6 @@ const MAX_ANCHORS: usize = 12;
 
 impl KnowledgeBrief {
     /// Walk out from `seeds` and assemble what the primary agent needs.
-    ///
-    /// Retrieval is journaled as it happens, which is what later makes it
-    /// possible to ask whether these nodes were ever actually useful (§41).
     pub fn assemble(
         store: &mut KnowledgeStore,
         task: impl Into<String>,
@@ -103,11 +88,7 @@ impl KnowledgeBrief {
         let mut anchors: Vec<String> = Vec::new();
         let mut warnings: Vec<String> = Vec::new();
 
-        // Titles are far more legible than ids in a brief a model has to read,
-        // so relationships are rendered by title. Indexed once rather than
-        // re-scanned per relationship: the walk is budgeted, but the budget is
-        // the caller's to raise, and a linear scan inside the edge loop makes
-        // this quadratic in the size of the brief.
+        // Index titles once to avoid rescanning the walk for each relationship.
         let title_of: HashMap<&NodeId, &str> = reached
             .iter()
             .map(|r| (&r.node.id, r.node.title.as_str()))
@@ -121,14 +102,7 @@ impl KnowledgeBrief {
         for item in &reached {
             let node = &item.node;
 
-            // Every relationship *among the nodes in the brief*, not just the
-            // one the walk happened to arrive by. The traversal tree reaches
-            // each node once, but §27's example brief states all of
-            // `uses` / `constrained_by` / `verified_by` for a single node —
-            // and a relationship between two nodes already on the page is
-            // exactly what the primary agent needs to see. Only outbound
-            // edges are emitted, so each stored edge appears once, in the
-            // direction it was asserted.
+            // Include all established relationships among returned nodes, not only the traversal tree.
             for neighbor in store.neighbors(&node.id, &options.edges)? {
                 // Only relationships between two nodes already on the page:
                 // a neighbour outside the brief has no title to render and
@@ -186,10 +160,6 @@ impl KnowledgeBrief {
 
         anchors.truncate(MAX_ANCHORS);
 
-        // §13: generated text is never automatically authoritative. Each node
-        // already carries its authority, but a reader scanning a numbered
-        // list can miss that one line of it was a model's guess and another
-        // was the user's instruction. Say it once, plainly, with a count.
         let unverified = nodes
             .iter()
             .filter(|node| !authority::is_trustworthy_parts(node.status, node.authority))
@@ -221,11 +191,6 @@ impl KnowledgeBrief {
     }
 
     /// Render for a model prompt, inside an explicit trust boundary.
-    ///
-    /// Buildplan §45–§48: everything in the graph may have originated in a
-    /// README, a code comment or a web page, and a README that says "ignore
-    /// previous instructions" is still just repository data. The wrapper
-    /// states that plainly rather than relying on the model to infer it.
     pub fn to_prompt(&self) -> String {
         let mut out = String::new();
         out.push_str("<retrieved_knowledge>\n");
@@ -306,13 +271,6 @@ static FRAMING_TAG: LazyLock<std::result::Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"(?i)<\s*/?\s*retrieved_knowledge\s*>"));
 
 /// Make it impossible for retrieved text to close the wrapper it arrived in.
-///
-/// A summary, a page title or a source path can contain anything a file can,
-/// including the literal closing tag. Interpolated verbatim, that text would end
-/// the trust boundary early and everything after it would read as if it came
-/// from the caller — which is the one thing the wrapper exists to prevent. The
-/// imitation is escaped rather than deleted, so a reader can still see that
-/// somebody wrote it.
 fn neutralize_framing(body: &str) -> String {
     let Ok(pattern) = FRAMING_TAG.as_ref() else {
         // Without the pattern the only safe rendering is none of the body: a

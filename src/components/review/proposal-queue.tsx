@@ -1,16 +1,3 @@
-/**
- * The engine's review queue: proposals a model made, waiting for a person.
- *
- * The card shows what the engine actually recorded about the proposal —
- * authority, provenance, source anchors, the engine's own reason and
- * confidence — and the two buttons that decide it. Nothing here writes
- * knowledge: accepting calls the engine, which writes the Markdown page, and
- * rejecting writes nothing at all.
- *
- * The text of a proposal can be edited before it is decided, because the
- * person approving a page is the author of record. What gets written is the
- * edited text, not the model's draft.
- */
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   AlertTriangle,
@@ -469,12 +456,7 @@ function ProposalCard({
         <dt className="text-muted-foreground">Confidence</dt>
         <dd>
           {formatConfidence(explanation.confidence)}
-          {explanation.confidence === null && (
-            <span className="text-muted-foreground">
-              {" "}
-              — bridge v1 carries it on the engine&rsquo;s review finding, not on the proposal
-            </span>
-          )}
+
         </dd>
         <dt className="text-muted-foreground">Engine&rsquo;s reason</dt>
         <dd className="break-words">
@@ -484,6 +466,10 @@ function ProposalCard({
             </span>
           )}
         </dd>
+        {node.applicability && <>
+          <dt className="text-muted-foreground">Applies to</dt>
+          <dd className="break-words">{[node.applicability.core ? "Core guidance" : "", ...(node.applicability.stages || []), ...(node.applicability.technologies || []), ...(node.applicability.projects || [])].filter(Boolean).join(" · ") || "All tasks"}</dd>
+        </>}
         <dt className="text-muted-foreground">Recorded</dt>
         <dd>{formatAge(node.createdAt)}</dd>
       </dl>

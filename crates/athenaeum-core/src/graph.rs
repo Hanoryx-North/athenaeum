@@ -1,9 +1,4 @@
 //! Graph navigation.
-//!
-//! Buildplan §22: the primary retrieval operation is NAVIGATE, not TOP-K
-//! CHUNKS. Search finds a seed; this walks outward from it and stops early.
-//! Everything here is deterministic — the walk is the same every time for the
-//! same graph, so a model's choices are the only nondeterminism in retrieval.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -11,14 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
 use crate::id::NodeId;
-use crate::model::{EdgeType, KnowledgeNode};
+use crate::model::{EdgeType, KnowledgeNode, RecallSelection};
 use crate::store::{EdgeFilter, KnowledgeStore};
 
 /// Budget and shape of a walk.
-///
-/// The budgets are the point. An unbounded traversal of a mature graph is
-/// just "dump the database into the model", which is the failure this design
-/// exists to avoid (§25).
 #[derive(Debug, Clone)]
 pub struct NavigationOptions {
     /// How many hops from the seeds to travel.
@@ -27,6 +18,7 @@ pub struct NavigationOptions {
     pub max_nodes: usize,
     /// Which edges may be followed.
     pub edges: EdgeFilter,
+    pub selection: Option<RecallSelection>,
 }
 
 impl Default for NavigationOptions {
@@ -37,6 +29,7 @@ impl Default for NavigationOptions {
             max_depth: 2,
             max_nodes: 25,
             edges: EdgeFilter::traversable(),
+            selection: None,
         }
     }
 }
@@ -78,12 +71,6 @@ pub struct Reached {
 }
 
 /// One traversal step, as seen from the node being left.
-///
-/// A step says which relationship was followed *and* why it exists: the edge's
-/// own note and measured confidence travel with it, so a caller can render
-/// "calls, because the call site resolved to Store::get" rather than only
-/// "calls". Both are optional because both are optional on the edge: a producer
-/// that measured nothing must not be shown as having measured zero.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
@@ -108,14 +95,6 @@ impl Step {
 }
 
 /// Walk outward from `seeds`, breadth-first, within budget.
-///
-/// Returned in visit order: seeds first, then everything one hop out, and so
-/// on. That ordering is what lets a caller stop reading partway down the list
-/// and still have the most relevant knowledge (§28's progressive levels).
-///
-/// Unknown seed ids are skipped rather than erroring — a wiki agent guessing
-/// entity names will inevitably guess wrong sometimes, and a partial answer
-/// beats a failed one.
 pub fn navigate(
     store: &KnowledgeStore,
     seeds: &[NodeId],
@@ -141,7 +120,14 @@ pub fn navigate(
         };
         // Superseded and archived knowledge stays in the database but is not
         // handed to an agent as if it were current (§17).
-        if !node.is_live() {
+        if !node.is_live()
+            || options.selection.as_ref().is_some_and(|selection| {
+                node.applicability.as_ref().is_some_and(|applicability| {
+                    !applicability.matches(selection)
+                        || (applicability.core && crate::portable::memory::is_proposal(&node))
+                })
+            })
+        {
             continue;
         }
 
@@ -166,9 +152,6 @@ pub fn navigate(
 }
 
 /// The shortest chain of relationships connecting two nodes, if any.
-///
-/// Answers "how are these two things related?", which is the question a
-/// directory tree cannot answer at all (§11).
 pub fn shortest_path(
     store: &KnowledgeStore,
     from: &NodeId,
@@ -225,9 +208,6 @@ fn reconstruct(parents: &HashMap<NodeId, Step>, from: &NodeId, to: &NodeId) -> V
 }
 
 /// Nodes with the most relationships — the natural entry points to a graph.
-///
-/// Useful for a cold "what is this project?" question, where there is no
-/// search term to seed from (§50).
 pub fn hubs(store: &KnowledgeStore, limit: u32) -> Result<Vec<(NodeId, u32)>> {
     let mut stmt = store.connection().prepare(
         "SELECT id, degree FROM (

@@ -2,16 +2,17 @@ import { useCallback, useEffect, useState, type FormEvent } from "react"
 import { Search, ChevronDown, ChevronRight } from "lucide-react"
 import type { BridgeBrief, BridgeProposal } from "@athenaeum/protocol/bridge"
 import { acceptProposal, memoryBrief, memoryProposals, rejectProposal } from "@/lib/core-bridge"
+import { normalizePath } from "@/lib/path-utils"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause)
 }
 
-/** A concise view of the local core's graph memory for a later task. */
 export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; openPage: (path: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const [task, setTask] = useState("")
+  const [stage, setStage] = useState("coding")
   const [brief, setBrief] = useState<BridgeBrief | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -26,7 +27,7 @@ export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; o
     setBusy(true)
     setError("")
     try {
-      const context = await memoryBrief(workspace, task.trim())
+      const context = await memoryBrief(workspace, task.trim(), { project: normalizePath(workspace), ...(stage ? { stage } : {}) })
       setBrief(context.brief)
     } catch (cause) {
       setBrief(null)
@@ -86,6 +87,11 @@ export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; o
         <input className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-xs" value={task} onChange={event => setTask(event.target.value)} placeholder="What do I need to know?" aria-label="Task to retrieve knowledge for" />
         <button type="submit" className="rounded bg-primary px-2 text-xs text-primary-foreground disabled:opacity-50" disabled={busy || !task.trim()}>{busy ? "…" : "Find"}</button>
       </form>
+      <select aria-label="Task stage" className="mt-2 w-full rounded border bg-background px-2 py-1 text-xs focus-visible:outline-2 focus-visible:outline-ring" value={stage} onChange={event => setStage(event.target.value)} disabled={busy}>
+        <option value="initialize">Initialize</option><option value="design">Design</option>
+        <option value="coding">Coding</option><option value="debugging">Debugging</option>
+        <option value="verification">Verification</option><option value="tools">Tools</option>
+      </select>
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
       {brief && <div className="mt-3 space-y-2" aria-live="polite">
         {brief.nodes.length === 0 && <p className="text-xs text-muted-foreground">No relevant knowledge yet. Add wiki pages with source evidence to build memory.</p>}
@@ -99,7 +105,7 @@ export function MemoryBriefPanel({ workspace, openPage }: { workspace: string; o
         {brief.warnings.length > 0 && <div className="text-xs text-amber-700"><strong>Review</strong><ul className="mt-1 list-inside list-disc">{brief.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
       </div>}
       {proposalError && <p role="alert" className="mt-3 text-xs text-destructive">{proposalError}</p>}
-      {saved && <p role="status" className="mt-3 text-xs text-muted-foreground">Saved as <button className="text-primary underline-offset-2 hover:underline" onClick={() => openPage(`${workspace.replace(/\/+$/, "")}/${saved}`)}>{saved}</button>. It stays unverified until a source confirms it.</p>}
+      {saved && <p role="status" className="mt-3 text-xs text-muted-foreground">Saved as <button className="text-primary underline-offset-2 hover:underline" onClick={() => openPage(`${workspace.replace(/\/+$/, "")}/${saved}`)}>{saved}</button>.</p>}
       {proposals.length > 0 && <div className="mt-3 space-y-2" aria-label="Proposed by agents">
         <div className="text-xs font-medium">Proposed by agents</div>
         {proposals.map(({ node, evidence }) => <article key={node.id} className="rounded-md border p-2 text-xs">

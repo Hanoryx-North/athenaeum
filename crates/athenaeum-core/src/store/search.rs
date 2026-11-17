@@ -11,7 +11,8 @@ use super::nodes::{map_node, node_columns_for, NODE_COLUMNS};
 use super::KnowledgeStore;
 use crate::error::Result;
 use crate::id::NodeId;
-use crate::model::KnowledgeNode;
+use crate::model::applicability::APPLICABLE_SQL;
+use crate::model::{KnowledgeNode, RecallSelection};
 
 /// A node matched by a search, with its relevance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -38,12 +39,31 @@ impl KnowledgeStore {
     /// Task recall needs more precision than an interactive keyword search.
     /// Common sentence words must not seed unrelated projects in a shared wiki.
     pub fn search_context(&self, task: &str, limit: u32) -> Result<Vec<SearchHit>> {
+        self.search_context_selected(task, limit, &RecallSelection::default())
+    }
+
+    pub fn search_context_selected(
+        &self,
+        task: &str,
+        limit: u32,
+        selection: &RecallSelection,
+    ) -> Result<Vec<SearchHit>> {
+        selection.validate()?;
         let terms = context_terms(task);
         if terms.is_empty() {
             return Ok(Vec::new());
         }
         let minimum = if terms.len() >= 4 { 2 } else { 1 };
-        let hits = self.search(&terms.join(" "), limit.saturating_mul(4).min(100))?;
+        let query = terms
+            .iter()
+            .map(|term| format!("\"{term}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let hits = self.search_matching_selected(
+            &query,
+            limit.saturating_mul(4).min(100),
+            Some(selection),
+        )?;
         Ok(hits
             .into_iter()
             .filter(|hit| {
@@ -84,6 +104,34 @@ impl KnowledgeStore {
             .take(limit as usize)
             .collect())
     }
+    pub fn core_context_seeds(
+        &self,
+        selection: &RecallSelection,
+        limit: u32,
+    ) -> Result<Vec<NodeId>> {
+        selection.validate()?;
+        let sql = format!(
+            "SELECT n.id FROM nodes n WHERE n.status IN ('valid', 'stale', 'stale_requires_review')
+            AND json_extract(n.applicability, '$.core') = 1
+            AND n.provenance_source != 'model' AND {APPLICABLE_SQL}
+            ORDER BY (json_array_length(n.applicability, '$.projects') > 0) DESC,
+                     (json_array_length(n.applicability, '$.technologies') > 0) DESC,
+                     n.title, n.id LIMIT ?2"
+        );
+        let mut statement = self.conn.prepare(&sql)?;
+        let nodes = statement
+            .query_map(
+                params![
+                    rusqlite::types::Null,
+                    limit,
+                    serde_json::to_string(selection)?
+                ],
+                |row| row.get(0),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(nodes)
+    }
+
     /// Re-index when the stored full-text index was built by an older build.
     ///
     /// A fresh database has no recorded version and no nodes, so this is a no-op rebuild that
@@ -161,6 +209,15 @@ impl KnowledgeStore {
     }
 
     fn search_matching(&self, match_expr: &str, limit: u32) -> Result<Vec<SearchHit>> {
+        self.search_matching_selected(match_expr, limit, None)
+    }
+
+    fn search_matching_selected(
+        &self,
+        match_expr: &str,
+        limit: u32,
+        selection: Option<&RecallSelection>,
+    ) -> Result<Vec<SearchHit>> {
         // `rank` sits immediately after the node columns, which is the index
         // `map_node` stops at.
         let rank_column = NODE_COLUMNS.split(',').count();
@@ -170,20 +227,28 @@ impl KnowledgeStore {
              JOIN nodes n ON n.id = nodes_fts.id
              WHERE nodes_fts MATCH ?1
                AND n.status IN ('valid', 'stale', 'stale_requires_review')
-             ORDER BY rank
+               AND (?3 IS NULL OR {APPLICABLE_SQL})
+             ORDER BY rank, n.id
              LIMIT ?2",
             node_columns_for("n")
         );
 
         let mut stmt = self.conn.prepare(&sql)?;
         let hits = stmt
-            .query_map(params![match_expr, limit], |row| {
-                let bm25: f64 = row.get(rank_column)?;
-                Ok(SearchHit {
-                    node: map_node(row)?,
-                    score: -bm25 as f32,
-                })
-            })?
+            .query_map(
+                params![
+                    match_expr,
+                    limit,
+                    selection.map(serde_json::to_string).transpose()?
+                ],
+                |row| {
+                    let bm25: f64 = row.get(rank_column)?;
+                    Ok(SearchHit {
+                        node: map_node(row)?,
+                        score: -bm25 as f32,
+                    })
+                },
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
 
         Ok(hits)

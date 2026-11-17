@@ -165,6 +165,11 @@ enum Command {
     Path(PathArgs),
     /// Assemble a knowledge brief for a task.
     Brief(BriefArgs),
+    /// List engineering principles, or queue them for review in this wiki.
+    Principles {
+        #[arg(long)]
+        propose: bool,
+    },
     /// Show every archived revision of a node.
     History { id: String },
     /// Read the event journal.
@@ -356,6 +361,9 @@ struct AddArgs {
     /// Record this as stated by the user rather than proposed by a model.
     #[arg(long)]
     stated: bool,
+    /// JSON applicability: core, projects, technologies and stages.
+    #[arg(long)]
+    applicability: Option<String>,
 }
 
 #[derive(Args)]
@@ -451,6 +459,16 @@ struct BriefArgs {
     /// Wrap the output in the trust boundary a model should receive.
     #[arg(long)]
     prompt: bool,
+    /// initialize, design, coding, debugging, verification or tools.
+    #[arg(long, value_parser = ["initialize", "design", "coding", "debugging", "verification", "tools"])]
+    stage: Option<String>,
+    /// Exact project identity used by scoped memories.
+    #[arg(long)]
+    project_id: Option<String>,
+    #[arg(long = "technology")]
+    technologies: Vec<String>,
+    #[arg(long, default_value_t = 25)]
+    max_nodes: usize,
 }
 
 #[derive(Args)]
@@ -661,6 +679,21 @@ fn run(cli: &Cli) -> Result<Outcome> {
     // These work on a directory that has no workspace yet, or create the one they work in.
     match &cli.command {
         Command::Commands => return catalog::run(cli.json),
+        Command::Principles { propose: false } => {
+            let principles = athenaeum_core::principles::catalog();
+            emit(cli.json, &principles, || {
+                for principle in &principles {
+                    println!(
+                        "{} [{}]\n{}\n",
+                        principle.title,
+                        principle.stages.join(", "),
+                        principle.summary
+                    );
+                }
+                Ok(())
+            })?;
+            return Ok(Outcome::Ok);
+        }
         Command::Completions { shell } => {
             clap_complete::generate(*shell, &mut Cli::command(), "wiki", &mut std::io::stdout());
             return Ok(Outcome::Ok);
@@ -771,6 +804,16 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
         }
 
+        Command::Principles { .. } => {
+            let proposed = athenaeum_core::principles::propose(&mut store)?;
+            emit(cli.json, &proposed, || {
+                println!(
+                    "{} principle(s) queued for review. Run `wiki proposals`.",
+                    proposed.len()
+                );
+                Ok(())
+            })?;
+        }
         Command::Add(args) => {
             let mut node =
                 KnowledgeNode::new(parse_value(&args.node_type, "node type")?, &args.title)
@@ -778,6 +821,9 @@ fn run(cli: &Cli) -> Result<Outcome> {
                     .with_content(&args.content)
                     .with_authority(parse_value(&args.authority, "authority")?)
                     .with_scope(parse_value(&args.scope, "scope")?);
+            if let Some(raw) = &args.applicability {
+                node = node.with_applicability(Some(serde_json::from_str(raw)?));
+            }
             if let Some(id) = &args.id {
                 node = node.with_id(id.as_str());
             }
@@ -1071,25 +1117,19 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
         Command::Brief(args) => {
             let task = args.task.join(" ");
-            let seeds = if args.seed.is_empty() {
-                store
-                    .search(&task, 5)?
-                    .into_iter()
-                    .map(|hit| hit.node.id)
-                    .collect::<Vec<_>>()
-            } else {
-                args.seed
-                    .iter()
-                    .map(|raw| resolve(&store, raw).map(|node| node.id))
-                    .collect::<Result<Vec<_>>>()?
-            };
-
-            let brief = KnowledgeBrief::assemble(
-                &mut store,
-                &task,
-                &seeds,
-                &NavigationOptions::default().depth(args.depth),
-            )?;
+            let brief = athenaeum_core::wiki::WikiService::new(&mut store)
+                .context_selected(
+                    &task,
+                    &args.seed,
+                    Some(args.depth),
+                    Some(args.max_nodes),
+                    athenaeum_core::model::RecallSelection {
+                        project: args.project_id.clone(),
+                        technologies: args.technologies.clone(),
+                        stage: args.stage.clone(),
+                    },
+                )?
+                .brief;
 
             emit(cli.json, &brief, || {
                 if args.prompt {

@@ -2,9 +2,10 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { atomicJson, instructions, sessionFile } from './config.mjs'
-import { localTools, MAX_OUTPUT, runLocal } from './tools.mjs'
+import { localTools, runLocal, serializeToolOutput } from './tools.mjs'
 import { modelTurn } from './provider.mjs'
 import { connectTools, recallContext } from './mcp.mjs'
+import { projectSelection } from './project-context.mjs'
 import { compactContext, contextBytes } from './context.mjs'
 import { enqueueLearning, learningEnabled } from './learning.mjs'
 
@@ -46,8 +47,10 @@ export async function runTurn({ home, session, config, input, signal, approve, e
   try {
     let system = config.capture === 'off' ? instructions.split('When wiki_context')[0] : instructions
     if (config.capture !== 'off') {
-      const recalled = await recallContext(memory, input.filter((item) => item.type === 'text').map((item) => item.text).join('\n'), signal,
-        { previous: session.memory, identity: JSON.stringify([session.root, config.mcpServers?.athenaeum || null]) })
+      const task = input.filter((item) => item.type === 'text').map((item) => item.text).join('\n')
+      const selection = await projectSelection(session.root, task, config.memoryContext)
+      const recalled = await recallContext(memory, task, signal,
+        { previous: session.memory, selection, identity: JSON.stringify([session.root, config.mcpServers?.athenaeum || null]) })
       history.push(...recalled.items)
       session.memory = recalled.diagnostic
       system += '\nAutomatic task recall has already been attempted. Use its result only when relevant. Do not repeat memory lookup for this question if it was empty or unavailable. Never announce routine memory activity or diagnostics unless the user asks.'
@@ -103,7 +106,7 @@ export async function runTurn({ home, session, config, input, signal, approve, e
           try {
             const args = JSON.parse(call.arguments)
             if (localTools.some((tool) => tool.name === call.name)) {
-              output = await runLocal(call.name, args, { root: session.root, signal, approve })
+              output = await runLocal(call.name, args, { root: session.root, home, signal, approve })
               if (call.name === 'exec_command') failed = output.exitCode !== 0 || output.timedOut
             }
             else {
@@ -120,8 +123,7 @@ export async function runTurn({ home, session, config, input, signal, approve, e
             failed = true; output = { error: error.message }
           }
           const image = output?.image
-          const serialized = image ? 'Image loaded.' : JSON.stringify(output) ?? 'null'
-          const bounded = Buffer.byteLength(serialized) > MAX_OUTPUT ? Buffer.from(serialized).subarray(0, MAX_OUTPUT - 32).toString('utf8') + '\n[Output truncated]' : serialized
+          const bounded = image ? 'Image loaded.' : serializeToolOutput(output)
           history.push({ type: 'function_call_output', call_id: call.call_id, output: bounded })
           unfinished.delete(call.call_id)
           if (image) images.push({ type: 'input_image', image_url: image })

@@ -16,6 +16,9 @@ for the running desktop, and `wiki dev tasks --json` for builds and checks.
 Discovery is generated from the parser and app functions. Read the relevant
 entry's parameters/signature before calling it. Do not invent command names.
 
+Prefer command limits and selectors over repeatedly filtering full output. Preserve
+validation exit codes; run checks directly or use pipeline failure propagation.
+
 Standalone operations work without the app. Live operations use
 `wiki desktop call ACTION --stdin --json` with a positional JSON argument array,
 or `wiki desktop invoke NATIVE_COMMAND --stdin --json` with a named JSON object.
@@ -40,6 +43,9 @@ for a full project switch; low-level `fs.openProject` only reads project metadat
 ## Choose the right operation
 
 - Knowledge: `list`, `show`, `search`, `navigate`, `path`, `brief`, `history`.
+  Use `brief --stage initialize|design|coding|debugging|verification|tools`,
+  `--project-id`, `--technology` and `--max-nodes` to select relevant guidance.
+  `principles` lists starter guidance; `principles --propose` queues it for review.
 - Proposals: `create`, `proposals`, `accept`, `reject`. Follow the owner's saving
   policy. A model must not accept its own memory proposal.
 - Relationships: `link`, `unlink EDGE_ID`, live `knowledge-api.api.linkNodes`, and the native

@@ -18,7 +18,7 @@ use crate::model::{
 pub(crate) const NODE_COLUMNS: &str =
     "id, type, title, summary, content, scope, authority, status, \
      provenance_source, provenance_detail, provenance_session, last_verified_at, \
-     created_at, updated_at, version";
+     created_at, updated_at, version, applicability";
 
 /// [`NODE_COLUMNS`] qualified with a table alias, for queries that join.
 pub(crate) fn node_columns_for(alias: &str) -> String {
@@ -91,6 +91,9 @@ impl KnowledgeStore {
     /// Fails if the id is already taken; use [`KnowledgeStore::update_node`]
     /// to change an existing one so that its history is preserved.
     pub fn create_node(&mut self, node: KnowledgeNode) -> Result<KnowledgeNode> {
+        if let Some(applicability) = &node.applicability {
+            applicability.validate()?;
+        }
         let session = node.provenance.session.clone();
         let tx = self.conn.transaction()?;
 
@@ -110,8 +113,8 @@ impl KnowledgeStore {
         tx.execute(
             "INSERT INTO nodes (id, type, title, title_key, summary, content, scope, authority, status,
                                 provenance_source, provenance_detail, provenance_session,
-                                last_verified_at, created_at, updated_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                                last_verified_at, created_at, updated_at, version, applicability)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 node.id,
                 node.node_type.as_str(),
@@ -129,6 +132,7 @@ impl KnowledgeStore {
                 to_sql_time(&node.created_at),
                 to_sql_time(&node.updated_at),
                 node.version,
+                node.applicability.as_ref().map(serde_json::to_string).transpose()?,
             ],
         )?;
 
@@ -317,6 +321,9 @@ impl KnowledgeStore {
         reason: Option<String>,
         actor: Provenance,
     ) -> Result<KnowledgeNode> {
+        if let Some(applicability) = &node.applicability {
+            applicability.validate()?;
+        }
         let previous = self.get_node(&node.id)?;
 
         let mut updated = node;
@@ -331,8 +338,8 @@ impl KnowledgeStore {
 
         tx.execute(
             "INSERT INTO node_versions
-                (node, version, title, summary, content, authority, status, reason, recorded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (node, version, title, summary, content, authority, status, reason, recorded_at, applicability)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 snapshot.node,
                 snapshot.version,
@@ -343,6 +350,7 @@ impl KnowledgeStore {
                 snapshot.status.as_str(),
                 snapshot.reason,
                 to_sql_time(&snapshot.recorded_at),
+                snapshot.applicability.as_ref().map(serde_json::to_string).transpose()?,
             ],
         )?;
 
@@ -351,7 +359,7 @@ impl KnowledgeStore {
                               content = ?6, scope = ?7, authority = ?8, status = ?9,
                               provenance_source = ?10, provenance_detail = ?11,
                               provenance_session = ?12, last_verified_at = ?13,
-                              updated_at = ?14, version = ?15
+                              updated_at = ?14, version = ?15, applicability = ?16
              WHERE id = ?1",
             params![
                 updated.id,
@@ -369,6 +377,11 @@ impl KnowledgeStore {
                 updated.last_verified_at.as_ref().map(to_sql_time),
                 to_sql_time(&updated.updated_at),
                 updated.version,
+                updated
+                    .applicability
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
             ],
         )?;
 
@@ -515,7 +528,7 @@ impl KnowledgeStore {
     /// Every archived revision of a node, newest first.
     pub fn history(&self, id: &NodeId) -> Result<Vec<NodeVersion>> {
         let mut stmt = self.conn.prepare(
-            "SELECT node, version, title, summary, content, authority, status, reason, recorded_at
+            "SELECT node, version, title, summary, content, authority, status, reason, recorded_at, applicability
              FROM node_versions WHERE node = ?1 ORDER BY version DESC",
         )?;
         let versions = stmt
@@ -530,6 +543,7 @@ impl KnowledgeStore {
                     status: parse_enum(&row.get::<_, String>(6)?, "status")?,
                     reason: row.get(7)?,
                     recorded_at: parse_time(&row.get::<_, String>(8)?)?,
+                    applicability: json_column(row, 9)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -566,6 +580,7 @@ pub(crate) fn map_node(row: &Row<'_>) -> rusqlite::Result<KnowledgeNode> {
         created_at: parse_time(&row.get::<_, String>(12)?)?,
         updated_at: parse_time(&row.get::<_, String>(13)?)?,
         version: row.get(14)?,
+        applicability: json_column(row, 15)?,
     })
 }
 
@@ -577,6 +592,23 @@ pub(crate) fn title_key(title: &str) -> String {
         .filter(|ch| !ch.is_ascii_whitespace() && *ch != '-' && *ch != '_')
         .map(|ch| ch.to_ascii_lowercase())
         .collect()
+}
+
+fn json_column<T: serde::de::DeserializeOwned>(
+    row: &Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<T>> {
+    row.get::<_, Option<String>>(index)?
+        .map(|text| {
+            serde_json::from_str(&text).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    index,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })
+        })
+        .transpose()
 }
 
 #[cfg(test)]

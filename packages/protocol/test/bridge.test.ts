@@ -5,7 +5,7 @@ import {
   BRIDGE_REVIEW_KINDS, BRIDGE_REVIEW_SEVERITIES, BRIDGE_SOURCE_SCOPES, bridgeRequest, existingNodesFromError,
 } from '../src/index.js'
 import type {
-  BridgeBrief, BridgeBriefNode, BridgeCapabilities, BridgeCaller, BridgeContext, BridgeEdge, BridgeEvidence,
+  BridgeApplicability, BridgeRecallSelection, BridgeBrief, BridgeBriefNode, BridgeCapabilities, BridgeCaller, BridgeContext, BridgeEdge, BridgeEvidence,
   BridgeEvidenceCreate, BridgeGraphPath, BridgeIndexReport, BridgeLimits, BridgeLinkCreate, BridgeMethod, BridgeNode, BridgeNodeCreate, BridgeNodeDetail,
   BridgeNodeUpdate, BridgeNodeUtility, BridgeNodeVersion, BridgePage, BridgePathStep, BridgeProposal, BridgeProvenance,
   BridgeRelatedNode, BridgeRequest, BridgeRequestEnvelope, BridgeResponseMap, BridgeReviewFinding,
@@ -23,6 +23,8 @@ const anchor = object<BridgeSourceAnchor>({
   file: str, symbol: optional(str), lineStart: optional(int), lineEnd: optional(int),
   regionHash: optional(str), contentHash: optional(str), commit: optional(str),
 })
+const applicability = object<BridgeApplicability>({ core: optional(bool), projects: optional(arrayOf(str)), technologies: optional(arrayOf(str)), stages: optional(arrayOf(str)) })
+const selection = object<BridgeRecallSelection>({ project: optional(str), technologies: optional(arrayOf(str)), stage: optional(str) })
 const requestSpecs: { [M in BridgeMethod]: Check } = {
   capabilities: object<Req<'capabilities'>>({ method: lit('capabilities') }),
   search: object<Req<'search'>>({ method: lit('search'), query: str, limit: optional(int) }),
@@ -31,10 +33,10 @@ const requestSpecs: { [M in BridgeMethod]: Check } = {
   related: object<Req<'related'>>({ method: lit('related'), node: str, includeProposed: optional(bool) }),
   evidence: object<Req<'evidence'>>({ method: lit('evidence'), node: str }),
   history: object<Req<'history'>>({ method: lit('history'), node: str }),
-  context: object<Req<'context'>>({ method: lit('context'), task: str, seeds: optional(arrayOf(str)), depth: optional(int), maxNodes: optional(int) }),
+  context: object<Req<'context'>>({ method: lit('context'), task: str, seeds: optional(arrayOf(str)), depth: optional(int), maxNodes: optional(int), selection: optional(selection) }),
   create: object<Req<'create'>>({
     method: lit('create'), caller,
-    input: object<BridgeNodeCreate>({ type: str, title: str, summary: optional(str), content: optional(str), scope: optional(str) }),
+    input: object<BridgeNodeCreate>({ type: str, title: str, summary: optional(str), content: optional(str), scope: optional(str), applicability: optional(applicability) }),
   }),
   update: object<Req<'update'>>({
     method: lit('update'), caller,
@@ -65,7 +67,7 @@ const requestSpecs: { [M in BridgeMethod]: Check } = {
 const provenance = object<BridgeProvenance>({ source: str, detail: optional(str), session: optional(str) })
 const node = object<BridgeNode>({
   id: str, type: str, title: str, summary: str, content: str, scope: str, authority: str, status: str,
-  provenance, lastVerifiedAt: optional(str), createdAt: str, updatedAt: str, version: int,
+  applicability: optional(applicability), provenance, lastVerifiedAt: optional(str), createdAt: str, updatedAt: str, version: int,
 })
 const edge = object<BridgeEdge>({
   id: str, from: str, to: str, type: str, provenance, status: str, scope: str,
@@ -75,7 +77,7 @@ const evidence = object<BridgeEvidence>({
   id: str, node: str, kind: str, anchor: optional(anchor), blobHash: optional(str), excerpt: optional(str), note: optional(str), createdAt: str,
 })
 const version = object<BridgeNodeVersion>({
-  node: str, version: int, title: str, summary: str, content: str, authority: str, status: str, reason: optional(str), recordedAt: str,
+  node: str, version: int, title: str, summary: str, content: str, authority: str, status: str, reason: optional(str), recordedAt: str, applicability: optional(applicability),
 })
 const utility = object<BridgeNodeUtility>({ retrievals: int, uses: int, citations: int, verifications: int, rejections: int })
 const related = object<BridgeRelatedNode>({

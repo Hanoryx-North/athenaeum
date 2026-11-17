@@ -315,7 +315,10 @@ mod tests {
 
         let set = scan(root, &SyncLimits::default()).unwrap();
         let paths: Vec<_> = set.entries.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(paths, vec!["README.md", "purpose.md", "schema.md", "wiki/a.md"]);
+        assert_eq!(
+            paths,
+            vec!["README.md", "purpose.md", "schema.md", "wiki/a.md"]
+        );
         let skipped: Vec<_> = set.skipped.iter().map(|s| s.path.as_str()).collect();
         assert!(skipped.contains(&"raw/sources/paper.pdf"));
         assert!(skipped.contains(&"raw/sources/blob.md"));

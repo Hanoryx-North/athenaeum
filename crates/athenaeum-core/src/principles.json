@@ -1,0 +1,52 @@
+[
+  {
+    "title": "Start with the smallest working project",
+    "summary": "For an empty project, establish the user flow, source boundaries, one runnable path and its verification command. Reuse the project's tools; add dependencies and abstractions when a concrete need appears.",
+    "stages": ["initialize"]
+  },
+  {
+    "title": "Make the correct path easy to use",
+    "summary": "Use clear module boundaries, narrow APIs and types to prevent recurring mistakes. Enforce forbidden dependencies mechanically. Remove obsolete patterns so new code follows useful examples.",
+    "stages": ["initialize", "design", "coding"]
+  },
+  {
+    "title": "Turn repeated corrections into checks",
+    "summary": "For a confirmed recurring defect, fix the cause and add an appropriate lint, type constraint or regression check. Keep judgment in brief guidance. Choose checks from evidence; examples such as React effects or timers are not universal bans.",
+    "stages": ["coding", "debugging"]
+  },
+  {
+    "title": "Keep comments and documentation useful",
+    "summary": "Let names, APIs and code explain behavior. Keep comments for non-obvious constraints, rationale or hazards. Remove narration, stale rules and workaround justifications. Maintain concise setup, help and usage instructions when people or agents need them.",
+    "stages": ["initialize", "design", "coding", "tools"]
+  },
+  {
+    "title": "Verify the behavior being changed",
+    "summary": "Run checks that exercise the user's outcome and relevant failure paths. Use runtime state or rendered evidence for interface changes. Consider property or model checking when invariants justify it. A successful build verifies compilation, not the whole feature.",
+    "stages": ["coding", "debugging", "verification"]
+  },
+  {
+    "title": "Make agent tools return useful slices",
+    "summary": "Offer limits, offsets, ranges, field selection and batch reads where repeated usage needs them. Keep defaults compact, state what was omitted and give the next request. Preserve relevant matches rather than relying on blind truncation.",
+    "stages": ["design", "tools"]
+  },
+  {
+    "title": "Preserve failures through output reduction",
+    "summary": "Keep the actual command exit status, timeout and truncation state. Preserve a useful failure tail and a full log when available. Do not infer success from the last filtering process in a pipeline; use pipeline failure propagation or run validation directly.",
+    "stages": ["debugging", "verification", "tools"]
+  },
+  {
+    "title": "Treat workarounds as usability evidence",
+    "summary": "Repeated filters, JSON parsing loops and immediate retries can reveal missing selection or batching. Inspect the intent and reproduce the friction before changing the interface. Normal exploration and retries alone do not prove a defect.",
+    "stages": ["design", "debugging", "tools"]
+  },
+  {
+    "title": "Keep help and skills aligned with behavior",
+    "summary": "Teach working flags in command help and relevant skills; remove obsolete advice when behavior changes. Exercise documented commands against the actual parser. Stale instructions cause repeated wrong calls.",
+    "stages": ["initialize", "tools", "verification"]
+  },
+  {
+    "title": "Measure useful outcomes before automating",
+    "summary": "Replay representative observed tasks with reviewed expected results and hold some cases back. Compare correctness, turns, latency and failure visibility. Token savings alone do not establish better outcomes. Strengthen the inner coding and verification loop before scaling automation.",
+    "stages": ["design", "verification"]
+  }
+]

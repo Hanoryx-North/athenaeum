@@ -476,6 +476,17 @@ function parseProvenance(value: unknown, path: string) {
   return provenance
 }
 
+function parseApplicability(record: Record<string, unknown>, path: string): EngineNode["applicability"] {
+  if (record.applicability === undefined || record.applicability === null) return undefined
+  const applicability = recordAt(record.applicability, `${path}.applicability`)
+  return {
+    ...(applicability.core === undefined ? {} : { core: booleanAt(applicability.core, `${path}.applicability.core`) }),
+    ...(applicability.projects === undefined ? {} : { projects: textArrayAt(applicability.projects, `${path}.applicability.projects`) }),
+    ...(applicability.technologies === undefined ? {} : { technologies: textArrayAt(applicability.technologies, `${path}.applicability.technologies`) }),
+    ...(applicability.stages === undefined ? {} : { stages: textArrayAt(applicability.stages, `${path}.applicability.stages`) }),
+  }
+}
+
 export function parseEngineNode(value: unknown, path = "node"): EngineNode {
   const record = recordAt(value, path)
   const node: EngineNode = {
@@ -495,6 +506,8 @@ export function parseEngineNode(value: unknown, path = "node"): EngineNode {
     updatedAt: textAt(fieldAt(record, "updatedAt", path), `${path}.updatedAt`),
     version: numberAt(fieldAt(record, "version", path), `${path}.version`),
   }
+  const applicability = parseApplicability(record, path)
+  if (applicability !== undefined) node.applicability = applicability
   const lastVerifiedAt = optionalTextAt(record, "lastVerifiedAt", path)
   if (lastVerifiedAt !== undefined) node.lastVerifiedAt = lastVerifiedAt
   return node
@@ -590,6 +603,8 @@ export function parseEngineVersion(value: unknown, path = "version"): EngineVers
     status: textAt(fieldAt(record, "status", path), `${path}.status`),
     recordedAt: textAt(fieldAt(record, "recordedAt", path), `${path}.recordedAt`),
   }
+  const applicability = parseApplicability(record, path)
+  if (applicability !== undefined) version.applicability = applicability
   const reason = optionalTextAt(record, "reason", path)
   if (reason !== undefined) version.reason = reason
   return version

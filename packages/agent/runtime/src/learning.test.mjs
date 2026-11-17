@@ -293,3 +293,15 @@ test('long text is analyzed completely, resumes at its checkpoint and proposes r
   await captureText(job, f.config, connection, new AbortController().signal)
   assert.equal(f.requests.length, before)
 })
+
+test('memory verifies observed source beyond the default file-read window and preserves project selectors', async t => {
+  const value = { ...candidate(), stages: ['debugging'], technologies: ['node'], evidence: [{ source: 'source_1' }] }
+  const f = await fixture(t, [value])
+  await writeFile(join(f.session.root, 'retry.mjs'), '\n'.repeat(300) + 'export const retryBudget = 3\n')
+  f.config.memoryContext = { project: 'stable-project' }
+  await enqueueLearning(f.home, f.session, f.config)
+  const worker = new LearningWorker(f.home, f.config)
+  await worker.wake(); await worker.close()
+  const proposal = (await f.calls()).find(call => call.name === 'wiki_create')
+  assert.deepEqual(proposal.arguments.applicability, { core: false, projects: ['stable-project'], technologies: ['node'], stages: ['debugging'] })
+})

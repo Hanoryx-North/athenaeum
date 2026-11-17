@@ -5,6 +5,7 @@
 //! Persistence lives in [`crate::store`].
 
 pub mod anchor;
+pub mod applicability;
 pub mod edge;
 pub mod enums;
 pub mod evidence;
@@ -12,6 +13,7 @@ pub mod node;
 pub mod version;
 
 pub use anchor::{hash, AnchorResolution, SourceAnchor};
+pub use applicability::{Applicability, RecallSelection};
 pub use edge::{KnowledgeEdge, Neighbor};
 pub use enums::{
     Authority, EdgeType, EvidenceKind, NodeStatus, NodeType, ProvenanceSource, Scope, UnknownValue,

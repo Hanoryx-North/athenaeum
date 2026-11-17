@@ -114,6 +114,8 @@ pub enum BridgeRequest {
         depth: Option<u8>,
         #[serde(default)]
         max_nodes: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<RecallSelection>,
     },
     Create {
         input: NodeCreate,
@@ -237,6 +239,30 @@ pub struct Caller {
     pub session: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Applicability {
+    #[serde(default)]
+    pub core: bool,
+    #[serde(default)]
+    pub projects: Vec<String>,
+    #[serde(default)]
+    pub technologies: Vec<String>,
+    #[serde(default)]
+    pub stages: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RecallSelection {
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub technologies: Vec<String>,
+    #[serde(default)]
+    pub stage: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeCreate {
@@ -249,6 +275,8 @@ pub struct NodeCreate {
     pub content: String,
     #[serde(default)]
     pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Applicability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

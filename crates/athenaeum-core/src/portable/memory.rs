@@ -504,6 +504,12 @@ fn render_page(
     }
     fields.push(("authority", Scalar(node.authority.as_str().into())));
     fields.push(("scope", Scalar(node.scope.as_str().into())));
+    if let Some(applicability) = &node.applicability {
+        fields.push((
+            "applicability",
+            Scalar(serde_json::to_string(applicability).expect("serializable applicability")),
+        ));
+    }
     fields.push(("origin", Scalar(origin.into())));
     if let Some(detail) = node
         .provenance
@@ -676,6 +682,7 @@ pub fn draft_from_source(store: &mut KnowledgeStore, source: &str, title: &str) 
                 excerpt.chars().take(500).collect::<String>()
             ),
             scope: Scope::default(),
+            applicability: None,
         },
         caller.clone(),
     )?;
@@ -823,6 +830,7 @@ pub fn import_legacy_core(store: &mut KnowledgeStore, apply: bool) -> Result<Leg
                 summary: text(node, "summary"),
                 content: text(node, "content"),
                 scope,
+                applicability: None,
             },
             WikiCaller {
                 model: proposer.clone(),

@@ -5,7 +5,7 @@
 //! claims to be, what it links to, what it rests on — is testable without
 //! touching a filesystem.
 
-use crate::model::{hash, Authority, EdgeType, EvidenceKind, Scope};
+use crate::model::{hash, Applicability, Authority, EdgeType, EvidenceKind, Scope};
 
 use super::frontmatter::{self, Frontmatter};
 use super::wikilink;
@@ -58,6 +58,7 @@ pub struct VaultPage {
     /// A `scope:` the page declared, when it declared a valid one. Pages that say nothing are
     /// project scope, as they always were.
     pub scope: Option<Scope>,
+    pub applicability: Option<Applicability>,
     /// Typed relationships the page states: `relations: ["depends_on [[retry-policy]]"]`. A
     /// `related:` entry says two pages are related; this says how.
     pub relations: Vec<(EdgeType, String)>,
@@ -126,6 +127,12 @@ impl VaultPage {
                     .filter(|value| !value.is_empty()),
             ),
             scope: fm.text("scope").and_then(|raw| raw.trim().parse().ok()),
+            applicability: fm.text("applicability").map(|raw| {
+                serde_json::from_str(raw).unwrap_or_else(|_| Applicability {
+                    stages: vec!["invalid applicability".into()],
+                    ..Default::default()
+                })
+            }),
             relations: relations_of(&fm),
             evidence: fm
                 .list("evidence")

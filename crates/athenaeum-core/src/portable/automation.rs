@@ -39,19 +39,22 @@ pub struct AcceptanceBatch {
 }
 
 /// Keep the queue intact on individual failures, and reconcile just once per batch.
-pub fn accept_pending(store: &mut KnowledgeStore, settled_only: bool) -> Result<AcceptanceBatch> {
+pub fn accept_pending(store: &mut KnowledgeStore, automatic: bool) -> Result<AcceptanceBatch> {
     let mut batch = AcceptanceBatch::default();
     for node in memory::proposals(store, None)? {
+        if automatic && node.applicability.as_ref().is_some_and(|value| value.core) {
+            continue;
+        }
         // A background extraction can fail between creating its proposal and
         // attaching checked evidence. Such drafts need review, not automatic saving.
-        if settled_only
+        if automatic
             && node.provenance.detail.as_deref() == Some("athenaeum-background-memory")
             && store.evidence_for(&node.id)?.is_empty()
         {
             continue;
         }
         // Leave time for a capturing agent to attach evidence and relationships.
-        if settled_only && (chrono::Utc::now() - node.updated_at).num_seconds() < 15 {
+        if automatic && (chrono::Utc::now() - node.updated_at).num_seconds() < 15 {
             continue;
         }
         match memory::accept_deferred(store, &node.id, "user-automation") {

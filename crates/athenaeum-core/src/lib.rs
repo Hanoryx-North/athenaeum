@@ -1,34 +1,4 @@
-//! # Athenaeum core — the knowledge library
-//!
-//! A local, persistent, navigable network of project knowledge: typed nodes,
-//! typed relationships, evidence, provenance and history, stored in one
-//! SQLite file the user owns.
-//!
-//! This crate is the product. The desktop shell and the CLI in this workspace
-//! are consumers of it, and it depends on neither — no UI, no HTTP client, no
-//! model provider. That separation is deliberate:
-//!
-//! * **It is the same everywhere.** Windows x86_64, macOS arm64 and Linux run
-//!   byte-identical logic over a statically linked SQLite, so a knowledge base
-//!   created on one opens unchanged on another.
-//! * **It outlives the model.** Switching from one provider to another does
-//!   not touch anything in here (§62).
-//! * **It is testable without a network.** Every behaviour below is exercised
-//!   by tests that never make an API call.
-//!
-//! ## The shape of it
-//!
-//! ```text
-//! KnowledgeNode  ──edges──▶  KnowledgeNode
-//!      │                          │
-//!   Evidence                   Evidence
-//!      │                          │
-//!  SourceAnchor               SourceAnchor
-//!      │
-//!  the actual file, which remains the source of truth
-//! ```
-//!
-//! Nodes hold *meaning*; source files keep holding the implementation (§9).
+//! Local knowledge graph, evidence and revision history behind the versioned bridge.
 //!
 //! ## Example
 //!
@@ -77,6 +47,7 @@ pub mod id;
 pub mod journal;
 pub mod model;
 pub mod portable;
+pub mod principles;
 pub mod repository;
 pub mod review;
 pub mod status;

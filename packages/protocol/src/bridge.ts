@@ -29,7 +29,9 @@ export type BridgeIndexScope = typeof BRIDGE_INDEX_SCOPES[number]
 
 /** Closed knowledge vocabularies come from `capabilities`, never from this package. */
 export interface BridgeCaller { model: string; session?: string }
-export interface BridgeNodeCreate { type: string; title: string; summary?: string; content?: string; scope?: string }
+export interface BridgeApplicability { core?: boolean; projects?: string[]; technologies?: string[]; stages?: string[] }
+export interface BridgeRecallSelection { project?: string; technologies?: string[]; stage?: string }
+export interface BridgeNodeCreate { type: string; title: string; summary?: string; content?: string; scope?: string; applicability?: BridgeApplicability }
 export interface BridgeNodeUpdate { node: string; title?: string | null; summary?: string | null; content?: string | null; reason?: string | null }
 export interface BridgeLinkCreate { from: string; type: string; to: string; note?: string | null; confidence?: number | null }
 export interface BridgeSourceAnchor { file: string; symbol?: string; lineStart?: number; lineEnd?: number; regionHash?: string; contentHash?: string; commit?: string }
@@ -43,7 +45,7 @@ export type BridgeRequest =
   | { method: 'related'; node: string; includeProposed?: boolean }
   | { method: 'evidence'; node: string }
   | { method: 'history'; node: string }
-  | { method: 'context'; task: string; seeds?: string[]; depth?: number; maxNodes?: number }
+  | { method: 'context'; task: string; seeds?: string[]; depth?: number; maxNodes?: number; selection?: BridgeRecallSelection }
   | { method: 'create'; input: BridgeNodeCreate; caller: BridgeCaller }
   | { method: 'update'; input: BridgeNodeUpdate; caller: BridgeCaller }
   | { method: 'link'; input: BridgeLinkCreate; caller: BridgeCaller }
@@ -80,6 +82,7 @@ export interface BridgeCapabilities {
 export interface BridgeProvenance { source: string; detail?: string; session?: string }
 export interface BridgeNode {
   id: string; type: string; title: string; summary: string; content: string
+  applicability?: BridgeApplicability
   scope: string; authority: string; status: string; provenance: BridgeProvenance
   lastVerifiedAt?: string; createdAt: string; updatedAt: string; version: number
 }
@@ -93,7 +96,7 @@ export interface BridgeEvidence {
 }
 export interface BridgeNodeVersion {
   node: string; version: number; title: string; summary: string; content: string
-  authority: string; status: string; reason?: string; recordedAt: string
+  authority: string; status: string; reason?: string; recordedAt: string; applicability?: BridgeApplicability
 }
 export interface BridgeNodeUtility { retrievals: number; uses: number; citations: number; verifications: number; rejections: number }
 /**

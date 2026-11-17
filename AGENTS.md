@@ -81,3 +81,15 @@ lives in `.athenaeum/`. Files end with exactly one newline.
 Before editing, recall task context through the Athenaeum MCP server. Before
 finishing, propose only durable, useful new knowledge; never write accepted wiki
 pages directly or accept your own proposals. Keep secrets out of logs and memory.
+
+## Coding principles
+
+Prefer clear architecture, narrow APIs, types and deterministic checks for recurring mistakes.
+Fix the cause and remove obsolete patterns. Verify the changed user flow and failure paths.
+Keep comments only for useful, non-obvious reasons or constraints; omit code narration and workaround justifications.
+Keep documentation brief, current and actionable. Do not add audit reports to justify routine code changes.
+Design agent tools with useful limits, ranges and compact output. Preserve failure status and recovery details.
+Use repeated workarounds as investigation leads; verify the defect and measure task outcomes before automating.
+
+Run `npm run check:boundaries` for source dependency rules. Core guidance lives in
+the existing wiki with project, technology and task-stage selectors; keep it reviewable.

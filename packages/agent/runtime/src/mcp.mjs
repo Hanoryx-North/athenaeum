@@ -112,7 +112,7 @@ export async function recallContext(connection, task, signal, options = {}) {
   signal.throwIfAborted()
   // Only cache absence/errors, never knowledge bodies. Persisting a brief would
   // create another stale knowledge store. Different tasks are always searched.
-  const key = createHash('sha256').update(JSON.stringify([options.identity || '', task.trim().slice(0, 4000)])).digest('hex')
+  const key = createHash('sha256').update(JSON.stringify([options.identity || '', options.selection || null, task.trim().slice(0, 4000)])).digest('hex')
   const previous = options.previous
   const ttl = previous?.status === 'empty' ? 60000 : previous?.status === 'unavailable' ? 15000 : 0
   if (previous?.key === key && Date.now() - Date.parse(previous.checkedAt) < ttl) {
@@ -124,6 +124,8 @@ export async function recallContext(connection, task, signal, options = {}) {
   if (!task.trim()) return status('no_text')
   if (/^(?:ok(?:ay)?|yes|no|thanks|thank you|continue|go ahead|looks good)[.!\s]*$/i.test(task.trim())) return status('no_task')
   const args = { task: task.trim().slice(0, 4000), depth: 1, maxNodes: 5 }
+  const schema = connection.tools?.find(tool => tool.name === 'wiki_context')?.parameters
+  if (options.selection && schema?.properties?.selection) args.selection = options.selection
   try {
     const result = await handler.client.request('tools/call', { name: handler.tool, arguments: args }, signal)
     signal.throwIfAborted()

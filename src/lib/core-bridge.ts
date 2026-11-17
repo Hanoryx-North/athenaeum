@@ -1,16 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
-import type { BridgeRequest, BridgeResponseMap } from "@athenaeum/protocol/bridge"
+import type { BridgeRequest, BridgeResponseMap, BridgeRecallSelection } from "@athenaeum/protocol/bridge"
 
-/**
- * The desktop's one door to the local knowledge engine.
- *
- * It sends the same versioned bridge request an agent sends over `athenaeum bridge`; the Tauri
- * command answers it in-process from the same engine (`athenaeum_core::bridge`), so the app needs
- * no second executable and keeps no second index.
- *
- * Generic over the request itself rather than over a method name, so the `method` in the object a
- * caller writes is what fixes the response type; inferring it through `Extract` does not work.
- */
 export async function coreBridge<R extends BridgeRequest>(
   workspace: string,
   request: R,
@@ -18,8 +8,8 @@ export async function coreBridge<R extends BridgeRequest>(
   return invoke<BridgeResponseMap[R["method"]]>("core_bridge", { workspace, request })
 }
 
-export async function memoryBrief(workspace: string, task: string) {
-  const response = await coreBridge(workspace, { method: "context", task, depth: 2, maxNodes: 8 })
+export async function memoryBrief(workspace: string, task: string, selection?: BridgeRecallSelection) {
+  const response = await coreBridge(workspace, { method: "context", task, depth: 2, maxNodes: 8, selection })
   return response.context
 }
 

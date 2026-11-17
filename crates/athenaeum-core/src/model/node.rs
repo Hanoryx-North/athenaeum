@@ -4,13 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{Authority, NodeStatus, NodeType, ProvenanceSource, Scope};
+use super::Applicability;
 use crate::id::{NodeId, SessionId};
 
 /// Where a claim came from, carried alongside the claim itself.
-///
-/// Buildplan §20: an edge a model guessed and an edge derived from an
-/// `import` statement must never become indistinguishable once they are in
-/// the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
     pub source: ProvenanceSource,
@@ -66,10 +63,6 @@ impl Default for Provenance {
 }
 
 /// A single meaningful piece of knowledge.
-///
-/// Not a chunk of text (buildplan §9). `AuthService` is a node; "bytes
-/// 4000–4500 of AuthService.ts" is not. The source file stays the source of
-/// truth for implementation detail — this stores the *meaning*.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeNode {
@@ -85,6 +78,8 @@ pub struct KnowledgeNode {
     /// The full body. Markdown by convention; the store does not parse it.
     pub content: String,
     pub scope: Scope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Applicability>,
     pub authority: Authority,
     pub status: NodeStatus,
     pub provenance: Provenance,
@@ -111,6 +106,7 @@ impl KnowledgeNode {
             summary: String::new(),
             content: String::new(),
             scope: Scope::default(),
+            applicability: None,
             authority: Authority::default(),
             status: NodeStatus::default(),
             provenance: Provenance::default(),
@@ -133,6 +129,11 @@ impl KnowledgeNode {
 
     pub fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = content.into();
+        self
+    }
+
+    pub fn with_applicability(mut self, applicability: Option<Applicability>) -> Self {
+        self.applicability = applicability;
         self
     }
 

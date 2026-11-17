@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::{Authority, NodeStatus};
 use super::node::KnowledgeNode;
+use super::Applicability;
 use crate::id::NodeId;
 
 /// An immutable snapshot of a node as it was before an edit.
@@ -20,6 +21,8 @@ pub struct NodeVersion {
     pub title: String,
     pub summary: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Applicability>,
     pub authority: Authority,
     pub status: NodeStatus,
     /// Why the change was made, when the caller supplied a reason.
@@ -37,6 +40,7 @@ impl NodeVersion {
             title: node.title.clone(),
             summary: node.summary.clone(),
             content: node.content.clone(),
+            applicability: node.applicability.clone(),
             authority: node.authority,
             status: node.status,
             reason,

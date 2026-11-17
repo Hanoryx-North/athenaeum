@@ -1,6 +1,9 @@
 import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { StringDecoder } from 'node:string_decoder'
 
 const MAX_FILE = 1024 * 1024
 export const MAX_OUTPUT = 64 * 1024
@@ -8,12 +11,12 @@ const skipped = new Set(['.git', '.athenaeum', 'node_modules', 'target', 'dist']
 const schema = (properties, required) => ({ type: 'object', properties, required, additionalProperties: false })
 const text = { type: 'string' }
 export const localTools = [
-  ['read_file', 'Read a UTF-8 file inside the workspace (up to 1 MiB).', schema({ path: text }, ['path'])],
+  ['read_file', 'Read a UTF-8 file by zero-based line offset and limit (default 200, maximum 2000). Use nextOffset to continue.', schema({ path: text, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 2000 } }, ['path'])],
   ['list_files', 'List files inside a workspace directory (bounded, excludes build and private state directories).', schema({ path: text }, [])],
   ['search', 'Find literal text in workspace files. Returns file, line and matching text.', schema({ query: text, path: text }, ['query'])],
   ['write_file', 'Create or replace a workspace UTF-8 file after approval.', schema({ path: text, content: text }, ['path', 'content'])],
   ['apply_patch', 'Apply *** Begin Patch / Add File / Update File / Delete File / End Patch text. Update hunks use space context, -removed and +added lines.', schema({ patch: text }, ['patch'])],
-  ['exec_command', 'Run a shell command with user privileges after explicit approval. No OS sandbox. Execution is bounded by timeout_ms (default 120000, maximum 600000).', schema({ cmd: text, workdir: text, timeout_ms: { type: 'integer', minimum: 1, maximum: 600000 } }, ['cmd'])],
+  ['exec_command', 'Run a shell command with user privileges after explicit approval. No OS sandbox. Unix pipelines propagate failures. Output keeps the beginning and end; logPath contains the full log when available. Execution is bounded by timeout_ms (default 120000, maximum 600000).', schema({ cmd: text, workdir: text, timeout_ms: { type: 'integer', minimum: 1, maximum: 600000 } }, ['cmd'])],
   ['view_image', 'Read a workspace PNG, JPEG, GIF or WebP image for the model.', schema({ path: text }, ['path'])],
 ].map(([name, description, parameters]) => ({ type: 'function', name, description, parameters }))
 
@@ -51,6 +54,9 @@ async function readText(path) {
   if ((await stat(path)).size > MAX_FILE) throw new Error('File exceeds the 1 MiB read limit.')
   return readFile(path, 'utf8')
 }
+export async function readWorkspaceText(root, path) {
+  return readText(await workspacePath(root, path))
+}
 async function files(root, directory, signal) {
   const result = [], stack = [directory]
   let visited = 0
@@ -70,14 +76,31 @@ async function files(root, directory, signal) {
 export function cleanEnvironment() {
   return Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|ATHENAEUM_AGENT|ATHENAEUM_LLM/i.test(key)))
 }
-export function command(cmd, cwd, timeoutMs, signal) {
+export function command(cmd, cwd, timeoutMs, signal, logDirectory) {
   return new Promise((resolveResult, reject) => {
     signal.throwIfAborted()
     const windows = process.platform === 'win32'
-    const child = spawn(windows ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', windows ? ['/d', '/s', '/c', `"${cmd}"`] : ['-c', cmd],
+    let logPath, logFile, logBytes = 0, logTruncated = false
+    if (logDirectory) {
+      mkdirSync(logDirectory, { recursive: true, mode: 0o700 })
+      logPath = resolve(logDirectory, `${randomUUID()}.log`)
+      logFile = openSync(logPath, 'wx', 0o600)
+    }
+    const child = spawn(windows ? (process.env.ComSpec || 'cmd.exe') : '/bin/bash', windows ? ['/d', '/s', '/c', `"${cmd}"`] : ['-o', 'pipefail', '-c', cmd],
       { cwd, env: cleanEnvironment(), detached: !windows, windowsHide: true, windowsVerbatimArguments: windows, stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = '', truncated = false, timedOut = false
-    const collect = (chunk) => { const remaining = MAX_OUTPUT - Buffer.byteLength(output); if (remaining > 0) output += chunk.subarray(0, remaining).toString(); if (chunk.length > remaining) truncated = true }
+    let head = Buffer.alloc(0), tail = Buffer.alloc(0), totalBytes = 0, timedOut = false
+    const collect = (chunk) => {
+      totalBytes += chunk.length
+      const available = (MAX_OUTPUT - 128) / 2 - head.length
+      if (available > 0) head = Buffer.concat([head, chunk.subarray(0, available)])
+      tail = Buffer.concat([tail, chunk]).subarray(-(MAX_OUTPUT - 128) / 2)
+      if (logFile !== undefined) {
+        const allowed = Math.min(chunk.length, 64 * 1024 * 1024 - logBytes)
+        try { if (allowed > 0) { writeSync(logFile, chunk.subarray(0, allowed)); logBytes += allowed } }
+        catch { closeSync(logFile); logFile = undefined; logPath = undefined }
+        if (allowed < chunk.length) logTruncated = true
+      }
+    }
     child.stdout.on('data', collect); child.stderr.on('data', collect)
     const kill = () => {
       if (windows) {
@@ -87,9 +110,16 @@ export function command(cmd, cwd, timeoutMs, signal) {
     }
     const timer = setTimeout(() => { timedOut = true; kill() }, timeoutMs)
     signal.addEventListener('abort', kill, { once: true })
-    const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', kill) }
+    const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', kill); if (logFile !== undefined) { closeSync(logFile); logFile = undefined } }
     child.on('error', (error) => { cleanup(); reject(error) })
-    child.on('close', (code) => { cleanup(); resolveResult({ output, exitCode: code, timedOut, truncated }) })
+    child.on('close', (code) => {
+      cleanup()
+      const truncated = totalBytes > MAX_OUTPUT - 128
+      const bytes = totalBytes <= head.length ? head : Buffer.concat([head, tail.subarray(Math.max(0, head.length + tail.length - totalBytes))])
+      const output = truncated ? new StringDecoder('utf8').write(head) + '\n[… output omitted …]\n' + tail.toString('utf8').replace(/^\uFFFD+/, '') : bytes.toString('utf8')
+      const summary = timedOut ? 'Command timed out.' : code === 0 ? 'Command succeeded.' : `Command exited with code ${code ?? 'unknown'}.`
+      resolveResult({ output, exitCode: code, timedOut, truncated, ...(logPath ? { logPath, logTruncated } : {}), summary })
+    })
   })
 }
 
@@ -195,7 +225,7 @@ export async function runLocal(name, args, context) {
     const timeout = args.timeout_ms ?? 120000
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > 600000) throw new Error('timeout_ms must be between 1 and 600000.')
     await approve('commandExecution', cmd); signal.throwIfAborted()
-    return command(cmd, cwd, timeout, signal)
+    return command(cmd, cwd, timeout, signal, context.home ? resolve(context.home, 'tool-logs') : undefined)
   }
   if (name === 'apply_patch' || name === 'write_file') {
     let edits
@@ -213,7 +243,14 @@ export async function runLocal(name, args, context) {
     return commitEdits(root, edits)
   }
   const path = await workspacePath(root, args.path || '.')
-  if (name === 'read_file') return { text: await readText(path) }
+  if (name === 'read_file') {
+    const offset = args.offset ?? 0, limit = args.limit ?? 200
+    if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 2000) throw new Error('Use a nonnegative line offset and a limit from 1 to 2000.')
+    const content = await readText(path)
+    const lines = content.match(/[^\n]*\n|[^\n]+$/g) || []
+    const end = Math.min(lines.length, offset + limit)
+    return { text: lines.slice(offset, end).join(''), offset, totalLines: lines.length, truncated: end < lines.length, ...(end < lines.length ? { nextOffset: end } : {}) }
+  }
   if (name === 'view_image') {
     if ((await stat(path)).size > 5 * MAX_FILE) throw new Error('Image exceeds 5 MiB.')
     const data = await readFile(path)
@@ -244,4 +281,21 @@ export async function runLocal(name, args, context) {
     return { matches, truncated: listing.truncated }
   }
   throw new Error(`Unknown local tool: ${name}`)
+}
+
+export function serializeToolOutput(value) {
+  let result = value
+  let serialized = JSON.stringify(result) ?? 'null'
+  if (Buffer.byteLength(serialized) <= MAX_OUTPUT) return serialized
+  if (typeof value?.output === 'string') {
+    const characters = Array.from(value.output)
+    let budget = Math.floor(characters.length / 2)
+    do {
+      result = { ...value, output: characters.slice(0, budget).join('') + '\n[… output omitted …]\n' + characters.slice(-budget).join(''), truncated: true }
+      serialized = JSON.stringify(result)
+      budget = Math.floor(budget / 2)
+    } while (Buffer.byteLength(serialized) > MAX_OUTPUT && budget > 0)
+    if (Buffer.byteLength(serialized) <= MAX_OUTPUT) return serialized
+  }
+  return JSON.stringify({ error: 'Tool result exceeds the output budget. Request a smaller range or limit.', truncated: true })
 }

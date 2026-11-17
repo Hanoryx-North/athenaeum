@@ -71,4 +71,4 @@ Use **Review → Extract knowledge from text** to submit a talk or explanation t
 the same configured model. Inputs up to 64 KiB are analyzed in bounded sections;
 findings use the existing review queue and automatic saving policy. Progress is
 shown under Background memory. See [engineering memory](engineering-memory.md)
-for CLI intake, architecture decisions, verification and remaining limitations.
+for core guidance, task-stage selection and CLI intake.

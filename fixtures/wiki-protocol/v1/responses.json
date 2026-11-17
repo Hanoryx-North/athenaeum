@@ -150,6 +150,7 @@
         ],
         "features": [
           "page_pointers",
+          "applicability",
           "vault_sync",
           "memory_lifecycle",
           "engine_status",

@@ -565,6 +565,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "athenaeum-core",
+ "athenaeum-protocol",
  "base64 0.22.1",
  "calamine 0.34.0",
  "chrono",

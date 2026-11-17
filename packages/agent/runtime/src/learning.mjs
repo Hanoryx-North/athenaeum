@@ -3,10 +3,11 @@ import { createServer } from 'node:net'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative } from 'node:path'
 import { atomicJson, sessionFile } from './config.mjs'
+import { stages } from './project-context.mjs'
 import { ENGINEERING_EXTRACT, MAX_CANDIDATES, sensitive, privatePath, lessonContent, textChunks, commandObservations, frictionSignals } from './engineering-memory.mjs'
 import { modelTurn } from './provider.mjs'
 import { connectTools } from './mcp.mjs'
-import { runLocal } from './tools.mjs'
+import { readWorkspaceText } from './tools.mjs'
 import { CodexConnection, codexCommand } from './codex.mjs'
 
 const MAX_JOB = 128 * 1024
@@ -71,7 +72,7 @@ export async function enqueueLearning(home, session, config) {
     if (!Array.isArray(item.content)) return item
     return { ...item, content: item.content.filter((part) => part.type === 'input_text') }
   })
-  const id = randomUUID(), job = { id, sessionId: session.id, root: session.root, history,
+  const id = randomUUID(), job = { id, sessionId: session.id, root: session.root, projectId: config.memoryContext?.project, history,
     wikiRoot: config.backgroundMemory.wikiRoot, source: session.source || 'athenaeum',
     model: config.backgroundMemory.model, createdAt: new Date().toISOString(), status: 'pending' }
   if (Buffer.byteLength(JSON.stringify(job)) > MAX_JOB - 4096) return { status: 'over_budget' }
@@ -99,7 +100,7 @@ async function verifiedCandidate(candidate, root, observed, commands, signal) {
         isAbsolute(item.path) || item.path.split('/').includes('..') || privatePath(item.path)) return null
     if (!observed.has(item.path) && !commands.some(({ command, output }) => command.includes(item.path) && output.includes(item.excerpt))) return null
     try {
-      const { text } = await runLocal('read_file', { path: item.path }, { root, signal })
+      const text = await readWorkspaceText(root, item.path)
       if (!text.includes(item.excerpt)) return null
       evidence.push({ path: relative(root, join(root, item.path)).replaceAll('\\', '/'), excerpt: item.excerpt })
     } catch (error) { if (signal.aborted) throw error; return null }
@@ -126,6 +127,8 @@ function validCandidate(candidate) {
     typeof candidate.summary === 'string' && candidate.summary.trim().length >= 24 && candidate.summary.length <= 600 &&
     typeof candidate.content === 'string' && !!candidate.content && candidate.content.length <= 4000 &&
     Array.isArray(candidate.evidence) && candidate.evidence.length >= 1 && candidate.evidence.length <= 3 &&
+    (candidate.stages === undefined || (Array.isArray(candidate.stages) && candidate.stages.length <= 6 && candidate.stages.every(stage => stages.includes(stage)))) &&
+    (candidate.technologies === undefined || (Array.isArray(candidate.technologies) && candidate.technologies.length <= 32 && candidate.technologies.every(value => typeof value === 'string' && value.trim() && Buffer.byteLength(value) <= 300 && !value.includes('\0')))) &&
     !sensitive(JSON.stringify(candidate))
 }
 
@@ -146,7 +149,9 @@ async function extractKnowledge(job, config, input, signal) {
 
 async function proposeCandidate(candidate, job, connection, signal) {
   const created = await call(connection, 'wiki_create', { type: candidate.type, title: candidate.title.trim(),
-    summary: candidate.summary.trim(), content: candidate.content, scope: job.document?.scope || 'project' }, signal)
+    summary: candidate.summary.trim(), content: candidate.content, scope: job.document?.scope || 'project',
+    applicability: { core: job.document?.core === true, projects: job.document?.scope === 'universal' ? [] : [(job.projectId || job.root).replaceAll('\\', '/')],
+      technologies: candidate.technologies || [], stages: candidate.stages || [] } }, signal)
   if (!created.pendingReview || created.durable !== false || typeof created.node?.id !== 'string') throw new Error('Knowledge server did not confirm a reviewable proposal.')
   return created
 }
@@ -156,13 +161,13 @@ export async function enqueueText(home, document, config) {
   // enabling collection of coding sessions or changing the capture setting.
   if (!memoryModelConfigured(config)) throw new Error('Configure a separate memory model in Coding agents first.')
   if (!document || typeof document.title !== 'string' || !document.title.trim() || document.title.length > 200 ||
-      !['project', 'universal'].includes(document.scope)) throw new Error('Provide a title and choose project or universal applicability.')
+      !['project', 'universal'].includes(document.scope) || (document.core !== undefined && typeof document.core !== 'boolean')) throw new Error('Provide a title and choose project or universal applicability.')
   textChunks(document.text) // Validate the entire input before queueing or model usage.
   if (sensitive(document.text) || sensitive(document.title)) throw new Error('The text may contain credentials. Remove them before submitting.')
   const root = config.backgroundMemory.wikiRoot
   if (!root) throw new Error('Select a memory wiki before submitting text.')
   if (typeof document.wikiRoot !== 'string' || await realpath(document.wikiRoot) !== await realpath(root)) throw new Error('Background memory is connected to another wiki. Select this project in Coding agents before submitting.')
-  const inputHash = createHash('sha256').update(JSON.stringify([root, document.scope, document.title.trim(), document.text])).digest('hex')
+  const inputHash = createHash('sha256').update(JSON.stringify([root, document.scope, document.core === true, document.title.trim(), document.text])).digest('hex')
   const jobs = (await learningStatus(home)).jobs
   for (const name of await files(home)) {
     const job = await readJob(home, name)
@@ -170,7 +175,7 @@ export async function enqueueText(home, document, config) {
   }
   if (jobs.filter((job) => job.status === 'pending').length >= 8) throw new Error('The memory queue is full. Process pending work first.')
   const id = randomUUID(), sessionId = `intake-${id}`
-  const job = { id, sessionId, root, wikiRoot: root, document: { title: document.title.trim(), text: document.text, scope: document.scope }, inputHash,
+  const job = { id, sessionId, root, wikiRoot: root, document: { title: document.title.trim(), text: document.text, scope: document.scope, core: document.core === true }, inputHash,
     source: 'text', model: config.backgroundMemory.model, createdAt: new Date().toISOString(), status: 'pending' }
   // Leave room for checkpoint titles/proposal ids even when JSON escaping
   // expands otherwise small source text.
@@ -275,7 +280,7 @@ export async function capture(job, config, connection, signal) {
   for (const [path, output] of observations) {
     if (privatePath(path)) continue
     try {
-      const { text } = await runLocal('read_file', { path }, { root: job.root, signal })
+      const text = await readWorkspaceText(job.root, path)
       const blocks = []
       let block = ''
       const flush = () => { if (block.trim().length >= 12 && !sensitive(block)) blocks.push(block.trimEnd()); block = '' }

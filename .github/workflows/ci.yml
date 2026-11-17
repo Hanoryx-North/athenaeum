@@ -71,6 +71,9 @@ jobs:
 
       - run: npm ci
       - run: npm run build:packages
+      - run: npm run check:boundaries
+      - run: npm run native:verify-source -w athenaeum-agent
+      - run: npm run native:test -w athenaeum-agent
       - run: npm run check:packages
       - run: npm run build
       - run: npm test

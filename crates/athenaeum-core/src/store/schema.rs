@@ -9,12 +9,12 @@ use rusqlite::Connection;
 use crate::error::{Error, Result};
 
 /// The schema version this build writes and understands.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Migrations, applied in order. Index `n` migrates from version `n` to
 /// `n + 1`, so appending to this array is the only way to change the schema.
 /// Never edit an entry that has shipped.
-const MIGRATIONS: &[&str] = &[V1, V2, V3];
+const MIGRATIONS: &[&str] = &[V1, V2, V3, V4];
 
 /// Connection-level settings applied every time the database is opened.
 ///
@@ -214,6 +214,9 @@ CREATE TABLE source_files (
 
 CREATE INDEX idx_source_files_path ON source_files(path);
 "#;
+
+const V4: &str = "ALTER TABLE nodes ADD COLUMN applicability TEXT;
+ALTER TABLE node_versions ADD COLUMN applicability TEXT;";
 
 #[cfg(test)]
 mod tests {

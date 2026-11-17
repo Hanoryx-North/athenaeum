@@ -1,32 +1,4 @@
-//! Typed commands for the knowledge surfaces the desktop shows.
-//!
-//! Everything here goes through the same door as the rest of the app — the
-//! versioned bridge in [`crate::core_bridge`], served in-process by
-//! `athenaeum_core::bridge`. What this module adds is a *typed* boundary:
-//!
-//! * [`EngineRequest`] is a closed set of the bridge methods the knowledge UI
-//!   may ask for. The frontend builds exactly the bridge envelope
-//!   (`src/lib/engine-client.ts` does it with pure functions a test can call),
-//!   serde validates it here, and the validated value is what crosses to the
-//!   engine — so the request has one definition, not two.
-//! * [`EngineResponse`] is the answer, deserialized into DTOs that mirror the
-//!   wire shape. A malformed or unexpected answer fails with an explicit
-//!   protocol error naming the field, instead of reaching the interface as an
-//!   unchecked `Value`.
-//!
-//! The DTOs are deliberately their own types, not `athenaeum_core`'s domain
-//! models. The wire is a contract other clients also speak; if the engine's
-//! internals change, this file is the one place that has to be told.
-//!
-//! Accepting and rejecting are commands rather than free-form requests,
-//! because they are the app's decisions, not the engine's: they carry the
-//! desktop's caller identity, and accepting an edited proposal is two engine
-//! calls that have to happen in order.
-//!
-//! Nothing here invents knowledge. `library_link` is the only reader of the
-//! sync link state and it reads files, never the network: publishing is the
-//! CLI's job (see `AGENTS.md`), so the desktop reports what the repository is
-//! linked to and says plainly that it cannot verify reachability itself.
+//! Typed desktop requests and responses for the versioned knowledge bridge.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -248,6 +220,8 @@ pub struct EngineNode {
     pub content: String,
     #[serde(default)]
     pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<athenaeum_protocol::bridge::Applicability>,
     pub authority: String,
     pub status: String,
     #[serde(default)]
@@ -312,6 +286,12 @@ pub struct EngineVersion {
     pub summary: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<athenaeum_protocol::bridge::Applicability>,
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub status: String,
     #[serde(default)]
     pub reason: Option<String>,
     #[serde(default)]
@@ -729,4 +709,27 @@ pub fn library_link(workspace: String) -> Result<LibraryLink, String> {
             conflicts: state.map(|s| s.conflicts).unwrap_or_default(),
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_scope_and_history_survive_desktop_response_validation() {
+        let applicability = json!({"core": true, "projects": ["app"], "technologies": ["react"], "stages": ["initialize"]});
+        let raw = json!({"method": "proposals", "proposals": [{"node": {
+            "id": "example", "type": "procedure", "title": "Start small", "authority": "unverified_observation", "status": "valid", "applicability": applicability
+        }, "relationships": [], "evidence": []}]});
+        let parsed: EngineResponse = parse_response("proposals", &raw).unwrap();
+        assert_eq!(
+            serde_json::to_value(parsed).unwrap()["proposals"][0]["node"]["applicability"],
+            applicability
+        );
+        let history = json!({"method": "history", "versions": [{"node": "example", "version": 1, "authority": "unverified_observation", "status": "valid", "applicability": applicability}]});
+        let parsed: EngineResponse = parse_response("history", &history).unwrap();
+        let shown = serde_json::to_value(parsed).unwrap();
+        assert_eq!(shown["versions"][0]["applicability"], applicability);
+        assert_eq!(shown["versions"][0]["authority"], "unverified_observation");
+    }
 }

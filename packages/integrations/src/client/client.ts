@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { bridgeRequest, type BridgeRequest } from '@athenaeum/protocol/bridge';
+import { bridgeRequest, type BridgeRequest, type BridgeRecallSelection } from '@athenaeum/protocol/bridge';
 import { AthenaeumError, KnowledgeStateError, OFFLINE_PATTERN, knowledgeStateError, redact } from './errors.ts';
 import { resolveCommand, type RemoteConfig } from './config.ts';
 import { run } from './process.ts';
 import {
   bounds as boundsSchema,
+  recallSelection,
   callerIdentity,
   evidenceCreate,
   indexRequest as indexRequestSchema,
@@ -315,7 +316,7 @@ export class AthenaeumClient {
     return this.page(relationships, { ...asked, requested: relationships.length + 1 });
   }
 
-  async context(request: { task: string; seeds?: string[]; depth?: number; maxNodes?: number }): Promise<Context> {
+  async context(request: { task: string; seeds?: string[]; depth?: number; maxNodes?: number; selection?: BridgeRecallSelection }): Promise<Context> {
     const task = input(taskText, request.task, 'task');
     const seeds = request.seeds?.map((seed, index) => inputNode(seed, `seeds.${index}`));
     const walk = boundedWalk({ depth: request.depth, maxNodes: request.maxNodes, maxDepth: 10, maxNodesCap: 1_000 });
@@ -323,6 +324,7 @@ export class AthenaeumClient {
       await this.call<{ context: Context }>({
         method: 'context',
         task,
+        ...(request.selection ? { selection: input(recallSelection, request.selection, 'selection') } : {}),
         ...(seeds?.length ? { seeds } : {}),
         ...walk,
       })

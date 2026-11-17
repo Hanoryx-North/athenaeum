@@ -92,6 +92,11 @@ export const pathRequest = z
   .strict();
 
 /** Proposal inputs. Each is strict: an unknown field is a caller that believes something false. */
+const selectors = z.array(z.string().min(1).max(300).refine(value => value.trim().length > 0 && !value.includes('\0'))).max(32);
+export const stage = z.enum(['initialize', 'design', 'coding', 'debugging', 'verification', 'tools']);
+export const applicability = z.object({ core: z.boolean().optional(), projects: selectors.optional(), technologies: selectors.optional(), stages: z.array(stage).max(32).optional() }).strict();
+export const recallSelection = z.object({ project: selectors.element.optional(), technologies: selectors.optional(), stage: stage.optional() }).strict();
+
 export const nodeCreate: z.ZodType<NewNode> = z
   .object({
     type: typeText,
@@ -99,6 +104,7 @@ export const nodeCreate: z.ZodType<NewNode> = z
     summary: summaryText.optional(),
     content: contentText.optional(),
     scope: typeText.optional(),
+    applicability: applicability.optional(),
   })
   .strict();
 

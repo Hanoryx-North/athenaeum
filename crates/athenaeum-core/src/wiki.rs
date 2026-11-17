@@ -15,8 +15,8 @@ use crate::graph::{self, NavigationOptions, Reached, Step};
 use crate::id::{EdgeId, NodeId, SessionId};
 use crate::journal::NodeUtility;
 use crate::model::{
-    Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode, Neighbor, NodeType,
-    NodeVersion, Provenance, Scope, SourceAnchor,
+    Applicability, Authority, EdgeType, Evidence, EvidenceKind, KnowledgeEdge, KnowledgeNode,
+    Neighbor, NodeType, NodeVersion, Provenance, RecallSelection, Scope, SourceAnchor,
 };
 use crate::portable::memory::{self, Accepted};
 use crate::status::{self, IndexOutcome, IndexScope, SourceSummary, WorkspaceStatus};
@@ -43,6 +43,7 @@ pub const WIKI_PROTOCOL_VERSION: u32 = 1;
 ///   It keeps an index that was built; it does not build the first one.
 const FEATURES: &[&str] = &[
     "page_pointers",
+    "applicability",
     "vault_sync",
     "memory_lifecycle",
     // `status`, `sources` and `index` report on the engine's own state: how
@@ -121,6 +122,8 @@ pub enum WikiRequest {
         depth: Option<u8>,
         #[serde(default)]
         max_nodes: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<RecallSelection>,
     },
     Create {
         input: WikiNodeCreate,
@@ -214,7 +217,7 @@ impl WikiRequest {
             "open" | "evidence" | "history" => &["method", "node"],
             "navigate" => &["method", "node", "depth", "maxNodes"],
             "related" => &["method", "node", "includeProposed"],
-            "context" => &["method", "task", "seeds", "depth", "maxNodes"],
+            "context" => &["method", "task", "seeds", "depth", "maxNodes", "selection"],
             "create" | "update" | "link" | "attach_evidence" => &["method", "input", "caller"],
             "record_use" => &["method", "nodes", "session"],
             "proposals" | "review" | "sources" => &["method", "limit"],
@@ -272,6 +275,8 @@ pub struct WikiNodeCreate {
     pub content: String,
     #[serde(default)]
     pub scope: Scope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<Applicability>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -566,8 +571,15 @@ impl<'a> WikiService<'a> {
                 seeds,
                 depth,
                 max_nodes,
+                selection,
             } => Ok(WikiResponse::Context {
-                context: self.context(&task, &seeds, depth, max_nodes)?,
+                context: self.context_selected(
+                    &task,
+                    &seeds,
+                    depth,
+                    max_nodes,
+                    selection.unwrap_or_default(),
+                )?,
             }),
             WikiRequest::Create { input, caller } => Ok(WikiResponse::Create {
                 node: self.create(input, caller)?,
@@ -723,12 +735,36 @@ impl<'a> WikiService<'a> {
         depth: Option<u8>,
         max_nodes: Option<usize>,
     ) -> Result<WikiContext> {
-        let seeds = if seed_references.is_empty() {
-            self.store
-                .search_context(task, DEFAULT_CONTEXT_SEEDS)?
+        self.context_selected(
+            task,
+            seed_references,
+            depth,
+            max_nodes,
+            RecallSelection::default(),
+        )
+    }
+
+    pub fn context_selected(
+        &mut self,
+        task: &str,
+        seed_references: &[String],
+        depth: Option<u8>,
+        max_nodes: Option<usize>,
+        selection: RecallSelection,
+    ) -> Result<WikiContext> {
+        selection.validate()?;
+        let mut seeds = if seed_references.is_empty() {
+            let mut seeds = self
+                .store
+                .search_context_selected(task, DEFAULT_CONTEXT_SEEDS, &selection)?
                 .into_iter()
                 .map(|hit| hit.node.id)
-                .collect()
+                .collect::<Vec<_>>();
+            seeds.extend(
+                self.store
+                    .core_context_seeds(&selection, DEFAULT_CONTEXT_SEEDS)?,
+            );
+            seeds
         } else {
             seed_references
                 .iter()
@@ -736,12 +772,11 @@ impl<'a> WikiService<'a> {
                 .map(|reference| self.resolve(reference).map(|node| node.id))
                 .collect::<Result<Vec<_>>>()?
         };
-        let brief = KnowledgeBrief::assemble(
-            self.store,
-            task,
-            &seeds,
-            &bounded_navigation(depth, max_nodes),
-        )?;
+        let mut seen = std::collections::HashSet::new();
+        seeds.retain(|id| seen.insert(id.clone()));
+        let mut options = bounded_navigation(depth, max_nodes);
+        options.selection = Some(selection);
+        let brief = KnowledgeBrief::assemble(self.store, task, &seeds, &options)?;
         let prompt = brief.to_prompt();
         Ok(WikiContext { brief, prompt })
     }
@@ -755,6 +790,7 @@ impl<'a> WikiService<'a> {
                 .with_summary(input.summary)
                 .with_content(input.content)
                 .with_scope(input.scope)
+                .with_applicability(input.applicability)
                 .with_provenance(provenance),
         )
     }
@@ -1167,6 +1203,7 @@ mod tests {
                     summary: "Validates tokens".into(),
                     content: String::new(),
                     scope: Scope::Project,
+                    applicability: None,
                 },
                 caller(),
             )
@@ -1179,6 +1216,7 @@ mod tests {
                     summary: String::new(),
                     content: String::new(),
                     scope: Scope::Project,
+                    applicability: None,
                 },
                 caller(),
             )
@@ -1218,6 +1256,7 @@ mod tests {
                     summary: String::new(),
                     content: String::new(),
                     scope: Scope::Project,
+                    applicability: None,
                 },
                 caller(),
             )
@@ -1241,6 +1280,7 @@ mod tests {
                     summary: "New evidence from this session".into(),
                     content: String::new(),
                     scope: Scope::Project,
+                    applicability: None,
                 },
                 caller(),
             )

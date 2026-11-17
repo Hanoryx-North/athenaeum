@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { AthenaeumClient } from '../client/client.ts';
 import type { IntegrationConfig } from '../client/config.ts';
 import { AthenaeumError, KnowledgeStateError } from '../client/errors.ts';
-import { callerIdentity, contentText, nodeRef, pathText, queryText, reasonText, summaryText, taskText, typeText } from '../client/validate.ts';
+import { applicability, recallSelection, callerIdentity, contentText, nodeRef, pathText, queryText, reasonText, summaryText, taskText, typeText } from '../client/validate.ts';
 import { INDEX_SCOPES, KEEP_CHOICES, REVIEW_KINDS, SYNC_ACTIONS, type IndexScope, type SyncResult } from '../client/types.ts';
 import { TRUST, knowledge, page, safely, wrapped } from './content.ts';
 import { MCP_INSTRUCTIONS } from '../connect/instructions.ts';
@@ -243,15 +243,16 @@ export function createMcpServer(config: IntegrationConfig): McpServer {
       inputSchema: {
         repository,
         task: taskText.describe('What you are about to do, in a sentence.'),
+        selection: recallSelection.optional().describe('Match core and task memories by exact project identity, technology and stage. Unknown selectors exclude restricted memories.'),
         seeds: z.array(nodeRef).min(1).max(10).optional().describe('Node ids or exact titles to start from; omit to let the engine search for seeds.'),
         depth: z.number().int().min(0).max(4).optional().describe('How far to walk from the seeds (0-4, engine default 2).'),
         maxNodes: z.number().int().min(1).max(100).optional().describe('Cap the brief at this many nodes (1-100).'),
       },
       annotations: READ_ONLY,
     },
-    async ({ repository: name, task, seeds, depth, maxNodes }) =>
+    async ({ repository: name, task, seeds, depth, maxNodes, selection }) =>
       safely(async () => {
-        const context = await get(name).context({ task, seeds, depth, maxNodes });
+        const context = await get(name).context({ task, seeds, depth, maxNodes, selection });
         return wrapped({ repository: name, trust: TRUST, task, brief: context.brief }, context.prompt);
       }),
   );
@@ -379,12 +380,13 @@ export function createMcpServer(config: IntegrationConfig): McpServer {
           summary: summaryText.describe('A short statement of the claim.'),
           content: contentText.optional().describe('The reasoning or detail behind it.'),
           scope: typeText.optional().describe('How widely the claim applies, e.g. project, repository, technology.'),
+          applicability: applicability.optional().describe('Optional core memory and project/technology/stage selectors. Core recall starts after human review.'),
         },
         annotations: PROPOSAL,
       },
       async ({ repository: name, ...draft }) =>
         safely(async () => {
-          const node = await get(name).create({ type: draft.type, title: draft.title, summary: draft.summary, content: draft.content, scope: draft.scope }, caller);
+          const node = await get(name).create({ type: draft.type, title: draft.title, summary: draft.summary, content: draft.content, scope: draft.scope, applicability: draft.applicability }, caller);
           return knowledge({ repository: name, trust: TRUST, node, ...proposal });
         }),
     );

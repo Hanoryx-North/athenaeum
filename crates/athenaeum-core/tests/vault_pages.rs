@@ -97,6 +97,7 @@ fn a_node_that_is_not_a_page_has_no_pointer() {
                 summary: "A model's guess.".to_string(),
                 content: String::new(),
                 scope: Scope::Project,
+                applicability: None,
             },
             caller(),
         )
@@ -253,6 +254,7 @@ fn a_node_that_is_not_a_page_can_still_be_updated() {
                 summary: "A guess.".to_string(),
                 content: String::new(),
                 scope: Scope::Project,
+                applicability: None,
             },
             caller(),
         )
