@@ -27,8 +27,8 @@ export function useDesktopControl(ready: boolean, onOpen: (project: WikiProject)
         await openRef.current(project)
         return project
       }),
-      registerDesktopAction("project.create", "(name: string, path: string): Promise<WikiProject>", async (name, path) => {
-        const project = await createProject(text(name, "name"), text(path, "path"))
+      registerDesktopAction("project.create", "(name: string, path?: string): Promise<WikiProject>", async (name, path) => {
+        const project = await createProject(text(name, "name"), path === undefined ? undefined : text(path, "path"))
         await openRef.current(project)
         return project
       }),

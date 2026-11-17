@@ -323,6 +323,12 @@ switch to the graph, wait for `graph.snapshot` to appear, then inspect the actua
 Sigma graph and rendered attributes. State inspection is not a screenshot review.
 
 `project.open` and `project.create` run the full desktop project lifecycle.
+`project.create` accepts `["Wiki name"]` to use the default parent folder, or
+`["Wiki name", "/custom/parent"]` to choose one. New and cloned desktop wikis
+default to `~/Library/Application Support/Athenaeum/Wikis` on macOS,
+`%LOCALAPPDATA%\Athenaeum\Wikis` on Windows, and
+`${XDG_DATA_HOME:-~/.local/share}/Athenaeum/Wikis` on Linux. Existing wikis keep
+their saved locations. `fs.defaultWikiDirectory` returns the resolved default.
 `fs.openProject` only returns project metadata. Queue services run in the desktop
 and use its existing processors; they are CLI-accessible while the app is running,
 not new headless model runtimes. Long chat turns return a start acknowledgement;

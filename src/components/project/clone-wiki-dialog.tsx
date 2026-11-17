@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import { Button } from "@/components/ui/button"
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cliStatus, onCliProgress, type JobResult } from "@/lib/cli-tools"
 import { useSetupStore } from "@/stores/setup-store"
-import { openProject } from "@/commands/fs"
+import { createDirectory, defaultWikiDirectory, openProject } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import type { WikiProject } from "@/types/wiki"
 
@@ -22,6 +22,17 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
   const [progress, setProgress] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [device, setDevice] = useState<{ url: string; code: string } | null>(null)
+
+  useEffect(() => {
+    if (!visible) return
+    let active = true
+    defaultWikiDirectory().then(directory => {
+      if (active) setParent(current => current || directory)
+    }).catch(cause => {
+      if (active) setError(String(cause))
+    })
+    return () => { active = false }
+  }, [visible])
 
   async function clone() {
     setError(null)
@@ -39,6 +50,7 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
       }
     }
     try {
+      await createDirectory(parent)
       stop = await onCliProgress((p) => {
         setProgress(p.line)
         if (p.event?.event === "device_code" && typeof p.event.url === "string" && typeof p.event.code === "string") {
@@ -76,7 +88,7 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
         <label className="block text-xs">Library address<Input value={server} onChange={(e) => setServer(e.target.value)} /></label>
         <label className="block text-xs">Hosted wiki (owner/wiki or repository ID)<Input value={remote} onChange={(e) => setRemote(e.target.value)} /></label>
         <label className="block text-xs">New folder name<Input value={folder} onChange={(e) => setFolder(e.target.value)} /></label>
-        <div className="space-y-1"><span className="text-xs">Save inside</span><Button variant="outline" className="w-full justify-start overflow-hidden" onClick={() => void (async () => { const selected = await open({ directory: true, multiple: false, title: "Choose where to clone this wiki" }); if (selected) setParent(selected) })()}>{parent || "Choose a parent folder…"}</Button></div>
+        <div className="space-y-1"><span className="text-xs">Save inside</span><Button variant="outline" className="w-full justify-start overflow-hidden" onClick={() => void (async () => { const selected = await open({ directory: true, multiple: false, defaultPath: parent || undefined, title: "Choose where to clone this wiki" }); if (selected) setParent(selected) })()}>{parent || "Choose a parent folder…"}</Button></div>
         <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={signIn} onChange={(e) => setSignIn(e.target.checked)} />Sign in through my browser (required for private wikis)</label>
       </fieldset>
       {device && <div role="status" className="space-y-2 rounded border p-3"><p className="text-xs">Confirm this code in Library: <strong>{device.code}</strong></p><Button variant="outline" onClick={() => void openUrl(device.url)}>Open Library sign-in</Button></div>}

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { open } from "@tauri-apps/plugin-dialog"
 import {
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FolderOpen } from "lucide-react"
-import { createProject, writeFile, createDirectory } from "@/commands/fs"
+import { createProject, defaultWikiDirectory, writeFile, createDirectory } from "@/commands/fs"
 import { getTemplate } from "@/lib/templates"
 import { TemplatePicker } from "@/components/project/template-picker"
 import type { WikiProject } from "@/types/wiki"
@@ -63,6 +63,17 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
   const setOutputLanguage = useWikiStore((s) => s.setOutputLanguage)
   const formStatus = getCreateProjectFormStatus(name, path, language, error, hasInteracted)
 
+  useEffect(() => {
+    if (!isOpen) return
+    let active = true
+    defaultWikiDirectory().then(directory => {
+      if (active) setPath(current => current || directory)
+    }).catch(cause => {
+      if (active) setError(String(cause))
+    })
+    return () => { active = false }
+  }, [isOpen])
+
   function markEdited() {
     setHasInteracted(true)
     setError("")
@@ -88,6 +99,7 @@ export function CreateProjectDialog({ open: isOpen, onOpenChange, onCreated }: C
     const selected = await open({
       directory: true,
       multiple: false,
+      defaultPath: path || undefined,
       title: t("project.browse"),
     })
     if (selected) {

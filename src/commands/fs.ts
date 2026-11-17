@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core"
+import { localDataDir } from "@tauri-apps/api/path"
 import type { FileNode, WikiProject } from "@/types/wiki"
 import { ensureProjectId, upsertProjectInfo } from "@/lib/project-identity"
-import { isHostAbsolutePath } from "@/lib/path-utils"
+import { isHostAbsolutePath, normalizePath } from "@/lib/path-utils"
 
 /** Raw shape returned by the Rust commands — id is attached client-side. */
 interface RawProject {
@@ -251,11 +252,19 @@ export async function readFileAsBase64(path: string): Promise<FileBase64> {
   return invoke<FileBase64>("read_file_as_base64", { path })
 }
 
+export async function defaultWikiDirectory(): Promise<string> {
+  const base = normalizePath(await localDataDir()).replace(/\/$/, "")
+  assertAbsoluteFsPath("defaultWikiDirectory", base)
+  return `${base}/Athenaeum/Wikis`
+}
+
 export async function createProject(
   name: string,
-  path: string,
+  path?: string,
 ): Promise<WikiProject> {
-  const raw = await invoke<RawProject>("create_project", { name, path })
+  const parent = path === undefined ? await defaultWikiDirectory() : path
+  assertAbsoluteFsPath("createProject", parent)
+  const raw = await invoke<RawProject>("create_project", { name, path: parent })
   const id = await ensureProjectId(raw.path)
   await upsertProjectInfo(id, raw.path, raw.name)
   return { id, name: raw.name, path: raw.path }
