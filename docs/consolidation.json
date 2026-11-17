@@ -17,56 +17,5 @@
       "commit": "e48b48766c71d8fa34c4853f876329367e4dec6f",
       "destination": "validation"
     }
-  },
-  "restoredTests": {
-    "app": {
-      "files": 295,
-      "inlineSources": 47,
-      "warnings": [
-        "crates/athenaeum-cli/src/library.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-cli/src/render.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/brief.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/portable/manifest.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/portable/memory.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/portable/sync.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/portable/syncset.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/repository/index.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/repository/parse.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/repository/scan.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/store/edges.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/store/mod.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/store/nodes.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/store/schema.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/vault/mod.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/vault/wikilink.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/wiki.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "crates/athenaeum-core/src/workspace.rs: changed since the tests were cut out; tests re-attached to the current file",
-        "src-tauri/src/knowledge.rs: changed since the tests were cut out; tests re-attached to the current file"
-      ]
-    }
-  },
-  "excluded": [
-    "athenaeum_agent/crates (retired runtime)",
-    "historical source snapshots and duplicate agent fixtures",
-    "generated build artifacts and nested Git metadata"
-  ],
-  "externalBackup": "athenaeum-consolidation-backup-2026-11-06",
-  "preservedSibling": "athenaeum_core",
-  "removedFromActiveWorkspace": [
-    "athenaeum_agent",
-    "athenaeum_protocol",
-    "athenaeum_validation",
-    "athenaeum_integrations",
-    "athenaeum_api",
-    "athenaeum_library",
-    "athenaeum_admin",
-    "deepseek-harness",
-    "external coding application checkout"
-  ],
-  "runtimeReplacement": {
-    "date": "2026-11-06",
-    "source": "packages/agent/runtime/src",
-    "launcher": "packages/agent/runtime/native-cli",
-    "reason": "Owner requested a focused original coding feature rather than a copied coding application"
   }
 }

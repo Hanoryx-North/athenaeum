@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { SERVICES } from './desktop-catalog.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const layers = ['src', 'packages/protocol/src', 'packages/integrations/src', 'packages/agent/src', 'packages/agent/runtime/src']
@@ -27,7 +28,8 @@ export function importSpecifiers(file, source) {
   const imports = []
   const visit = node => {
     const specifier = (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) ? node.moduleSpecifier
-      : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || node.expression.getText(tree) === 'require') ? node.arguments[0] : null
+      : ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || node.expression.getText(tree) === 'require') ? node.arguments[0]
+      : ts.isNewExpression(node) && node.expression.getText(tree) === 'URL' && node.arguments?.[1]?.getText(tree) === 'import.meta.url' ? node.arguments[0] : null
     if (specifier && ts.isStringLiteralLike(specifier)) imports.push({ specifier: specifier.text, line: tree.getLineAndCharacterOfPosition(specifier.getStart(tree)).line + 1 })
     ts.forEachChild(node, visit)
   }
@@ -41,8 +43,34 @@ async function files(directory) {
   return nested.flat()
 }
 
+export async function unusedFrontendFiles(directory = root, services = SERVICES) {
+  const config = ts.readConfigFile(resolve(directory, 'tsconfig.app.json'), ts.sys.readFile)
+  if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'))
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, directory)
+  if (parsed.errors.length) throw new Error(parsed.errors.map(error => ts.flattenDiagnosticMessageText(error.messageText, '\n')).join('\n'))
+  const production = parsed.fileNames.filter(file => !/\.d\.ts$|\.test\.[jt]sx?$|[/\\](?:test-helpers|__tests__)[/\\]/.test(file))
+  const graph = new Map(await Promise.all(production.map(async file => [file,
+    importSpecifiers(file, await readFile(file, 'utf8')).flatMap(({ specifier }) => {
+      const target = ts.resolveModuleName(specifier, file, parsed.options, ts.sys).resolvedModule
+      return target ? [target.resolvedFileName] : []
+    }),
+  ])))
+  const visited = new Set()
+  const visit = file => {
+    if (visited.has(file)) return
+    visited.add(file)
+    for (const dependency of graph.get(file) ?? []) visit(dependency)
+  }
+  // The live command catalog exposes services independently of mounted UI.
+  visit(resolve(directory, 'src/main.tsx'))
+  for (const service of services) visit(resolve(directory, `src/${service}.ts`))
+  for (const file of production) if (inside(normalized(relative(directory, file)), 'src/stores')) visit(file)
+  return production.filter(file => !visited.has(file)).map(file => normalized(relative(directory, file))).sort()
+}
+
 export async function checkBoundaries() {
   const problems = []
+  for (const file of await unusedFrontendFiles()) problems.push(`${file}: No application, worker or desktop-service entry point reaches this module. Remove it or connect it to its intended flow.`)
   for (const file of (await Promise.all(layers.map(files))).flat()) {
     for (const { specifier, line } of importSpecifiers(file, await readFile(resolve(root, file), 'utf8'))) {
       const error = boundaryError(file, specifier)

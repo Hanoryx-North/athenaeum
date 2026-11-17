@@ -31,5 +31,4 @@ separate prerequisites; ordinary product tests do not establish those results.
 
 Use `npm start` or `wiki start` for live development. Native edits need incremental
 compilation. `wiki start --standalone` deliberately opens the frozen snapshot.
-See [the cleanup ledger](cleanup-ledger.md) for the runtime replacement, verification
-and remaining platform limits.
+See [runtime capabilities and verification](../packages/agent/runtime/README.md).

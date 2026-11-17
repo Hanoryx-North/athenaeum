@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 
-const SERVICES = [
+export const SERVICES = [
   'commands/fs', 'commands/file-sync', 'lib/knowledge-api', 'lib/knowledge-index',
   'lib/engine', 'lib/cli-tools', 'lib/project-store', 'lib/persist', 'lib/ingest',
   'lib/deep-research', 'lib/ingest-queue', 'lib/dedup-queue', 'lib/dedup-runner',

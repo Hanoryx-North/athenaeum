@@ -95,9 +95,11 @@ wiki proposals --json
 wiki lint
 ```
 
-Markdown under `wiki/` is the durable source of truth. `.athenaeum/knowledge.db`
-is a rebuildable index; unaccepted proposals live there until review, so include
-it in backups if proposals matter. Raw sources, credentials, indexes and agent
+Desktop wikis default to `Athenaeum/Wikis` under the platform data directory,
+outside this source checkout. Within a wiki project, Markdown under `wiki/` is the
+durable source of truth. `.athenaeum/knowledge.db` is a rebuildable index;
+unaccepted proposals live there until review, so include it in backups if
+proposals matter. Raw sources, credentials, indexes and agent
 sessions are excluded from Library sync. The agent's private state lives separately
 under `~/.athenaeum-agent`.
 

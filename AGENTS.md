@@ -79,8 +79,10 @@ and its incremental cache; do not run `cargo clean` for routine changes.
 
 The frontend uses React 19, Tailwind 4 and zustand; `@/` resolves to `src/`. Keep
 `athenaeum-core` free of UI, Tauri and network dependencies. Compile SQLite
-statically and use rustls. Normalize vault paths to forward slashes. Project state
-lives in `.athenaeum/`. Files end with exactly one newline.
+statically and use rustls. Normalize vault paths to forward slashes. Wiki project
+state lives in its `.athenaeum/` directory. Keep wiki data outside this source checkout;
+the desktop and configured agent connections select the external wiki explicitly.
+Files end with exactly one newline.
 
 Before editing, recall task context through the Athenaeum MCP server. Before
 finishing, propose only durable, useful new knowledge; never write accepted wiki

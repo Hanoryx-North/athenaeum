@@ -20,8 +20,10 @@ node_modules/
 /dist-relay/
 /src-tauri/tauri.relay.conf.json
 
-# A knowledge base created while testing in the repo itself
+# Wiki data belongs in the platform data directory, outside this source checkout
 .athenaeum/
+/wiki/
+/athenaeum.json
 
 # Editors and OS
 .DS_Store
