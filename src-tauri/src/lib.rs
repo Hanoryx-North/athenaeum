@@ -129,6 +129,7 @@ pub fn run() {
             app.manage(commands::file_sync::FileSyncState::default());
             app.manage(harness::HarnessChatState::default());
             app.manage(harness::BackgroundMemoryState::default());
+            app.manage(harness::ChatgptAccountState::default());
             app.manage(cli_tools::CliRun::default());
             app.manage(knowledge::AppState::default());
             app.manage(desktop_control::DesktopControl::default());
@@ -312,6 +313,9 @@ pub fn run() {
                     state.shutdown();
                 }
                 if let Some(state) = app.try_state::<harness::BackgroundMemoryState>() {
+                    state.shutdown();
+                }
+                if let Some(state) = app.try_state::<harness::ChatgptAccountState>() {
                     state.shutdown();
                 }
             }

@@ -26,7 +26,7 @@ export function KnowledgeIntake({ workspace }: { workspace: string }) {
   return <details className="border-b px-4 py-3">
     <summary className="cursor-pointer text-sm font-medium">Extract knowledge from text</summary>
     <div className="mt-3 space-y-3">
-      <p className="text-xs text-muted-foreground">Paste lessons to review. Text is sent to the memory model selected in Coding agents.</p>
+      <p className="text-xs text-muted-foreground">Extract lessons with your configured memory model.</p>
       <div className="space-y-1"><Label htmlFor="intake-title">Source title</Label><Input id="intake-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} disabled={busy} /></div>
       <div className="space-y-1"><Label htmlFor="intake-text">Source text</Label><textarea id="intake-text" className="min-h-40 w-full rounded-md border bg-background p-2 text-sm" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} /></div>
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -40,7 +40,7 @@ export function KnowledgeIntake({ workspace }: { workspace: string }) {
       <label className="flex items-center gap-2 text-sm" htmlFor="intake-core">
         <input id="intake-core" type="checkbox" checked={core} onChange={event => setCore(event.target.checked)} disabled={busy} className="accent-primary focus-visible:outline-2 focus-visible:outline-ring" />
         Core guidance
-        <span className="text-xs text-muted-foreground">Recall for matching tasks after review</span>
+        <span className="text-xs text-muted-foreground">Include in matching task summaries</span>
       </label>
       {message && <p role="status" className="text-sm">{message}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

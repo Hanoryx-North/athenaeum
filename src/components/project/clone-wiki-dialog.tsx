@@ -4,7 +4,8 @@ import { openUrl } from "@tauri-apps/plugin-opener"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { cliStatus, installTools, onCliProgress, runCli, cancelCli, type JobResult } from "@/lib/cli-tools"
+import { cliStatus, onCliProgress, type JobResult } from "@/lib/cli-tools"
+import { useSetupStore } from "@/stores/setup-store"
 import { openProject } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import type { WikiProject } from "@/types/wiki"
@@ -30,7 +31,8 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
     }
     setBusy(true)
     let stop: (() => void) | undefined
-    const requireSuccess = (result: JobResult) => {
+    const requireSuccess = (result: JobResult | null) => {
+      if (!result) throw new Error(useSetupStore.getState().error || "The operation was cancelled.")
       if (result.exitCode !== 0) {
         const out = result.output as { error?: { message?: string }; message?: string } | null
         throw new Error(out?.error?.message ?? out?.message ?? result.stderr[result.stderr.length - 1] ?? "The operation stopped. Retry after checking the Library connection.")
@@ -45,16 +47,16 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
       })
       if (!(await cliStatus()).found) {
         setProgress("Installing the packaged local tools…")
-        requireSuccess(await installTools(false))
+        if (!(await useSetupStore.getState().install(null))) throw new Error(useSetupStore.getState().error || "Could not prepare the local tools. Try again.")
       }
       if (signIn) {
         setProgress("Waiting for Library sign-in…")
-        requireSuccess(await runCli(parent, { job: "library_login", server }))
+        requireSuccess(await useSetupStore.getState().operate(parent, { job: "library_login", server }))
         setDevice(null)
       }
       const destination = `${normalizePath(parent).replace(/\/$/, "")}/${folder}`
       setProgress("Downloading accepted pages and rebuilding the local index…")
-      requireSuccess(await runCli(parent, { job: "sync_clone", server, remote: remote.trim(), destination }))
+      requireSuccess(await useSetupStore.getState().operate(parent, { job: "sync_clone", server, remote: remote.trim(), destination }))
       const project = await openProject(destination)
       onOpenChange(false)
       onCloned(project)
@@ -80,7 +82,7 @@ export function CloneWikiDialog({ open: visible, onOpenChange, onCloned }: {
       {device && <div role="status" className="space-y-2 rounded border p-3"><p className="text-xs">Confirm this code in Library: <strong>{device.code}</strong></p><Button variant="outline" onClick={() => void openUrl(device.url)}>Open Library sign-in</Button></div>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       {busy && <p role="status" className="break-all text-xs text-muted-foreground">{progress}</p>}
-      <div className="flex justify-end gap-2">{busy ? <Button variant="outline" onClick={() => void cancelCli()}>Cancel clone</Button> : <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}<Button disabled={busy || !parent || !folder || !remote.trim()} onClick={() => void clone()}>{busy ? "Cloning…" : "Clone wiki"}</Button></div>
+      <div className="flex justify-end gap-2">{busy ? <Button variant="outline" onClick={() => void useSetupStore.getState().cancel()}>Cancel clone</Button> : <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}<Button disabled={busy || !parent || !folder || !remote.trim()} onClick={() => void clone()}>{busy ? "Cloning…" : "Clone wiki"}</Button></div>
     </DialogContent>
   </Dialog>
 }

@@ -12,7 +12,7 @@ use super::KnowledgeStore;
 use crate::error::Result;
 use crate::id::NodeId;
 use crate::model::applicability::APPLICABLE_SQL;
-use crate::model::{KnowledgeNode, RecallSelection};
+use crate::model::{KnowledgeNode, NodeType, RecallSelection};
 
 /// A node matched by a search, with its relevance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -221,6 +221,12 @@ impl KnowledgeStore {
         // `rank` sits immediately after the node columns, which is the index
         // `map_node` stops at.
         let rank_column = NODE_COLUMNS.split(',').count();
+        let structural = NodeType::ALL
+            .iter()
+            .filter(|kind| kind.is_structural())
+            .map(|kind| format!("'{}'", kind.as_str()))
+            .collect::<Vec<_>>()
+            .join(",");
         let sql = format!(
             "SELECT {}, bm25(nodes_fts) AS rank
              FROM nodes_fts
@@ -228,7 +234,8 @@ impl KnowledgeStore {
              WHERE nodes_fts MATCH ?1
                AND n.status IN ('valid', 'stale', 'stale_requires_review')
                AND (?3 IS NULL OR {APPLICABLE_SQL})
-             ORDER BY rank, n.id
+             ORDER BY CASE WHEN ?3 IS NOT NULL AND n.type IN ({structural}) THEN 1 ELSE 0 END,
+                      rank, n.id
              LIMIT ?2",
             node_columns_for("n")
         );

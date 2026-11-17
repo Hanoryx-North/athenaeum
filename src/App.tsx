@@ -1,15 +1,14 @@
 import { useState, useEffect } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
-import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart"
-import i18n from "@/i18n"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { useLintStore } from "@/stores/lint-store"
 import { useChatStore } from "@/stores/chat-store"
 import { BASE_FONT_SIZE_PX, useZoomStore } from "@/stores/zoom-store"
 import { openProject } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadLanguage, loadSearchApiConfig, loadEmbeddingConfig, loadMineruConfig, loadMultimodalConfig, loadOutputLanguage, loadProviderConfigs, loadCustomLlmPresets, loadActivePresetId, loadTaskModelRouting, loadProjectLlmOverride, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadApiConfig, loadGeneralConfig, loadZoomLevel } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadOutputLanguage, loadProjectLlmOverride, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig } from "@/lib/project-store"
+import { hydrateApplicationSettings } from "@/lib/app-startup"
 import { loadReviewItems, loadLintItems, loadChatHistory, loadChatPreferences } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
 import { startClipWatcher } from "@/lib/clip-watcher"
@@ -19,7 +18,6 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import { FirstLaunch } from "@/components/project/first-launch"
-import { QuickStartGuide } from "@/components/project/quick-start-guide"
 import { loadOnboardingComplete, saveOnboardingComplete } from "@/lib/project-store"
 import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
@@ -41,14 +39,12 @@ function App() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [loading, setLoading] = useState(true)
   const [firstLaunch, setFirstLaunch] = useState(false)
-  const [showGuide, setShowGuide] = useState(false)
   useDesktopControl(!loading, handleProjectOpened)
   useBackgroundMemory(project?.path, !loading)
 
   async function completeOnboarding() {
     await saveOnboardingComplete()
     setFirstLaunch(false)
-    setShowGuide(true)
   }
 
   function isCurrentProject(proj: WikiProject): boolean {
@@ -174,59 +170,6 @@ function App() {
     applyDocumentZoom(zoomLevel)
   }, [zoomLevel])
 
-  // Dev-only helper for visually testing the update-banner UX.
-  // Open dev tools and run:
-  //   __athenaeum_testUpdateBanner()
-  // to inject a fake "available" result into the update store —
-  // banner appears at the top + red dot lights up the gear icon.
-  // Run again with arg `false` (or call setDismissed via the store)
-  // to clear. Gated on `import.meta.env.DEV` so the helper never
-  // ships in production builds.
-  useEffect(() => {
-    if (!import.meta.env.DEV) return
-    ;(async () => {
-      const storeMod = await import("@/stores/update-store")
-      const { useUpdateStore } = storeMod
-      // Expose the live store getter on window so you can inspect
-      // state from devtools when debugging banner behavior.
-      ;(window as unknown as { __athenaeum_updateStore?: typeof useUpdateStore }).__athenaeum_updateStore = useUpdateStore
-      ;(window as unknown as { __athenaeum_testUpdateBanner?: (clear?: boolean) => void }).__athenaeum_testUpdateBanner = (clear = false) => {
-        if (clear) {
-          useUpdateStore.getState().setResult(
-            { kind: "up-to-date", local: __APP_VERSION__, remote: __APP_VERSION__ },
-            Date.now(),
-          )
-          useUpdateStore.getState().setDismissed(null)
-          console.log("[test] update banner cleared")
-          return
-        }
-        useUpdateStore.getState().setResult(
-          {
-            kind: "available",
-            local: __APP_VERSION__,
-            remote: "v999.0.0",
-            release: {
-              name: "v999.0.0 (test)",
-              tag_name: "v999.0.0",
-              body:
-                "Test release for banner-UX verification.\n\n" +
-                "- Bigger red dot on the Settings icon\n" +
-                "- Top banner with one-click dismiss\n" +
-                "- Once dismissed, won't reappear for this version",
-              html_url: "https://github.com/Hanoryx-North/athenaeum/releases",
-              published_at: new Date().toISOString(),
-            },
-          },
-          Date.now(),
-        )
-        useUpdateStore.getState().setDismissed(null)
-        console.log(
-          "[test] update banner injected. Run __athenaeum_testUpdateBanner(true) to clear.",
-        )
-      }
-    })()
-  }, [])
-
   // Background update check — hydrate persisted user preferences, then
   // hit GitHub at most once every UPDATE_CHECK_CACHE_MS. Runs 1.5 s
   // after mount so it doesn't contend with the heaviest startup work
@@ -340,112 +283,7 @@ function App() {
         setFirstLaunch(true)
       }
       try {
-        const savedZoom = await loadZoomLevel()
-        applyDocumentZoom(savedZoom)
-        useZoomStore.getState().setLevel(savedZoom)
-
-        const savedConfig = await loadLlmConfig()
-        if (savedConfig) {
-          useWikiStore.getState().setLlmConfig(savedConfig)
-          useWikiStore.getState().setGlobalLlmConfig(savedConfig)
-        }
-        const savedProviderConfigs = await loadProviderConfigs()
-        if (savedProviderConfigs) {
-          useWikiStore.getState().setProviderConfigs(savedProviderConfigs)
-        }
-        const savedCustomLlmPresets = await loadCustomLlmPresets()
-        useWikiStore.getState().setCustomLlmPresets(savedCustomLlmPresets)
-        const savedActivePreset = await loadActivePresetId()
-        if (savedActivePreset) {
-          useWikiStore.getState().setActivePresetId(savedActivePreset)
-          // Re-resolve the active preset's LlmConfig from (preset defaults
-          // + saved overrides). Without this, preset default updates
-          // (e.g. a corrected Anthropic model ID shipped in a release)
-          // never reach users who are relying on defaults — their stored
-          // `llmConfig` snapshot from a previous launch would keep the
-          // old value. Overrides still win, so an explicit user choice
-          // is preserved.
-          const { findLlmPreset } = await import("@/components/settings/llm-presets")
-          const { resolveConfig } = await import("@/components/settings/preset-resolver")
-          const preset = findLlmPreset(savedActivePreset, savedCustomLlmPresets)
-          if (preset) {
-            const currentFallback = useWikiStore.getState().llmConfig
-            const override = (savedProviderConfigs ?? {})[savedActivePreset]
-            const resolved = resolveConfig(preset, override, currentFallback)
-            useWikiStore.getState().setLlmConfig(resolved)
-            useWikiStore.getState().setGlobalLlmConfig(resolved)
-            const { saveLlmConfig } = await import("@/lib/project-store")
-            await saveLlmConfig(resolved)
-          }
-        }
-        const savedTaskModelRouting = await loadTaskModelRouting()
-        if (savedTaskModelRouting) {
-          useWikiStore.getState().setTaskModelRouting(savedTaskModelRouting)
-        }
-        const savedSearchConfig = await loadSearchApiConfig()
-        if (savedSearchConfig) {
-          useWikiStore.getState().setSearchApiConfig(savedSearchConfig)
-        }
-        const savedEmbeddingConfig = await loadEmbeddingConfig()
-        if (savedEmbeddingConfig) {
-          useWikiStore.getState().setEmbeddingConfig(savedEmbeddingConfig)
-        }
-        const savedMultimodalConfig = await loadMultimodalConfig()
-        if (savedMultimodalConfig) {
-          useWikiStore.getState().setMultimodalConfig(savedMultimodalConfig)
-        }
-
-        const savedMineruConfig = await loadMineruConfig()
-        if (savedMineruConfig) {
-          useWikiStore.getState().setMineruConfig(savedMineruConfig)
-        }
-        const savedProxy = await loadProxyConfig()
-        if (savedProxy) {
-          useWikiStore.getState().setProxyConfig(savedProxy)
-        }
-        // Local HTTP API server config — global (single token + enable
-        // flag for the whole install, not per-project). The Rust side
-        // reads `apiConfig.{enabled,token,mcpEnabled,allowLanAccess}` from `app-state.json`
-        // directly; this only hydrates the Zustand store so the
-        // Settings UI reflects the persisted values.
-        const savedApi = await loadApiConfig()
-        if (savedApi) {
-          useWikiStore.getState().setApiConfig({
-            enabled: typeof savedApi.enabled === "boolean" ? savedApi.enabled : true,
-            allowUnauthenticated:
-              typeof savedApi.allowUnauthenticated === "boolean"
-                ? savedApi.allowUnauthenticated
-                : false,
-            allowLanAccess:
-              typeof savedApi.allowLanAccess === "boolean" ? savedApi.allowLanAccess : false,
-            mcpEnabled:
-              typeof savedApi.mcpEnabled === "boolean"
-                ? savedApi.mcpEnabled
-                : false,
-            token: typeof savedApi.token === "string" ? savedApi.token : "",
-          })
-        }
-        const savedGeneral = await loadGeneralConfig()
-        useWikiStore.getState().setGeneralConfig(savedGeneral)
-        try {
-          await invoke<string>("set_close_behavior", { value: savedGeneral.closeBehavior })
-        } catch (err) {
-          console.warn("[general] failed to hydrate close behavior:", err)
-        }
-        try {
-          const currentAutostart = await isAutostartEnabled()
-          if (savedGeneral.autostart && !currentAutostart) {
-            await enableAutostart()
-          } else if (!savedGeneral.autostart && currentAutostart) {
-            await disableAutostart()
-          }
-        } catch (err) {
-          console.warn("[general] failed to sync autostart:", err)
-        }
-        const savedLang = await loadLanguage()
-        if (savedLang) {
-          await i18n.changeLanguage(savedLang)
-        }
+        await hydrateApplicationSettings()
         const lastProject = await getLastProject()
         if (lastProject && !replayOnboarding) {
           try {
@@ -455,8 +293,8 @@ function App() {
             // Last project no longer valid
           }
         }
-      } catch {
-        // ignore init errors
+      } catch (cause) {
+        console.warn("Could not restore the last project:", cause)
       } finally {
         setLoading(false)
       }
@@ -672,10 +510,7 @@ function App() {
           onCreateProject={() => setShowCreateDialog(true)}
           onOpenProject={handleOpenProject}
           onSelectProject={handleSelectRecent}
-          onAccount={() => setFirstLaunch(true)}
-          onQuickStart={() => setShowGuide(true)}
         />
-        <QuickStartGuide open={showGuide} onOpenChange={setShowGuide} />
         <CreateProjectDialog
           open={showCreateDialog}
           onOpenChange={setShowCreateDialog}
@@ -687,8 +522,7 @@ function App() {
 
   return (
     <>
-      <AppLayout onSwitchProject={handleSwitchProject} onQuickStart={() => setShowGuide(true)} />
-      <QuickStartGuide open={showGuide} onOpenChange={setShowGuide} />
+      <AppLayout onSwitchProject={handleSwitchProject} />
       <CreateProjectDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}

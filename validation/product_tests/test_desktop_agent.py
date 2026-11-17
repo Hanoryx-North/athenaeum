@@ -89,6 +89,22 @@ class DesktopAgent(unittest.TestCase):
     def test_approval_can_be_allowed_during_a_running_turn(self): self.run_approval("accept")
     def test_approval_can_be_denied_during_a_running_turn(self): self.run_approval("decline")
 
+    def test_shutdown_exits_without_waiting_for_the_parent_to_close_stdin(self):
+        process, messages = self.start()
+        self.send(process, {"type": "check", "requestId": "check", "projectPath": str(self.root)})
+        self.assertEqual(self.until(messages, lambda m: m.get("requestId") == "check")["kind"], "ready")
+        self.send(process, {"type": "shutdown", "requestId": "shutdown"})
+        self.until(messages, lambda m: m.get("kind") == "shutdown")
+        self.assertEqual(process.wait(timeout=4), 0)
+
+    def test_shutdown_terminates_a_runtime_that_ignores_eof_and_sigterm(self):
+        stubborn = self.root / "stubborn.mjs"
+        stubborn.write_text("process.stdin.resume(); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n", encoding="utf-8")
+        process, messages = self.start(stubborn)
+        self.send(process, {"type": "shutdown", "requestId": "shutdown"})
+        self.until(messages, lambda m: m.get("kind") == "shutdown")
+        self.assertEqual(process.wait(timeout=4), 0)
+
     def test_stop_interrupts_a_turn_waiting_for_approval(self):
         process, messages = self.start()
         self.send(process, {"type":"run", "requestId":"run", "runId":"run", "projectPath":str(self.root),

@@ -1,15 +1,17 @@
-import { useEffect } from "react"
-import { CheckCircle2, Loader2, Plus, RefreshCw } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useSetupStore } from "@/stores/setup-store"
 import { normalizePath } from "@/lib/path-utils"
-import { useUiPreference } from "@/hooks/useUiPreference"
-import { saveUiPreference } from "@/lib/ui-preferences"
-import { AGENTS, SetupCard, type Agent } from "./setup-card"
-import { useChatgptStore } from "@/stores/chatgpt-store"
 import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { openConnectors } from "@/stores/connectors-store"
+import { ChatgptConnection } from "./chatgpt-connection"
 import { BackgroundMemory } from "./background-memory"
+
+const EXTERNAL_AGENTS = [
+  { id: "claude", name: "Claude Code" },
+  { id: "cursor", name: "Cursor" },
+] as const
 
 export function CodingAgentsView() {
   const project = useWikiStore((s) => s.project)
@@ -17,56 +19,55 @@ export function CodingAgentsView() {
 }
 
 function ProjectAgents({ workspace }: { workspace: string }) {
-  const { doctor, busy, error, check } = useSetupStore()
-  const account = useChatgptStore((s) => s.workspace === workspace ? s.account : null)
-  const runtime = useAgentRuntimeStore((s) => s.runtime)
-  const [adding, setAdding] = useUiPreference(`agent-setup:${workspace}`, false, (value) => typeof value === "boolean")
-  const connected = AGENTS.filter((agent) => agent.id === "chatgpt"
-    ? account && doctor?.checks.some((c) => c.id === "agent-athenaeum" && c.ok)
-    : doctor?.checks.some((c) => c.id === `agent-${agent.id}` && c.ok))
-  const [agent, setAgent] = useUiPreference<Agent>(`setup-agent:${workspace}`, "athenaeum", (value) => AGENTS.some((a) => a.id === value))
-
+  const { doctor, busy, error, check, install, setup } = useSetupStore()
+  const [connecting, setConnecting] = useState<string | null>(null)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const working = busy !== null || connecting !== null
   useEffect(() => { void check(workspace) }, [workspace, check])
-  useEffect(() => {
-    if (runtime === "chatgpt") void useChatgptStore.getState().check(workspace)
-  }, [workspace, runtime])
 
-  function finish() {
-    saveUiPreference(`setup-step:${workspace}`, 0)
-    setAdding(false)
+  async function connect(agent: "claude" | "cursor") {
+    if (working) return
+    setConnecting(agent)
+    setConnectionError(null)
+    try {
+      const state = useSetupStore.getState()
+      if ((!state.cli?.found || state.doctor?.checks.some((c) => c.id === "integrations" && !c.ok)) && !(await install(null))) return
+      if (normalizePath(useWikiStore.getState().project?.path ?? "") !== workspace) return
+      if (!(await setup(workspace, { job: "setup", agents: [agent], capture: "instruct" }))) {
+        setConnectionError(useSetupStore.getState().error || "Could not connect this agent. Try again.")
+      }
+    } catch (cause) { setConnectionError(String(cause)) }
+    finally { setConnecting(null) }
   }
 
-  if (adding) return <SetupCard initialAgent={agent} onAgentChange={setAgent} onComplete={finish} onCancel={finish} />
-
-  return (
-    <section className="space-y-6" aria-label="Coding agents">
-      <header>
-        <h2 className="text-2xl font-semibold">Coding agents</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Use Athenaeum Agent or sign in with ChatGPT to work inside Athenaeum. You can also connect Claude Code or Cursor to this project's wiki.</p>
-      </header>
-      {busy === "check" && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Checking connections…</p>}
-      {connected.length > 0 ? (
-        <ul className="space-y-3" aria-label="Connected coding agents">
-          {connected.map((item) => (
-            <li key={item.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border p-5">
-              <div className="flex items-center gap-3">
-                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                <div><p className="font-medium">{item.name}</p><p className="mt-1 text-sm text-muted-foreground">Connected to this wiki</p></div>
-              </div>
-              <Button variant="outline" disabled={busy !== null} onClick={() => { setAgent(item.id); saveUiPreference(`setup-step:${workspace}`, 1); setAdding(true) }}>Reconnect {item.name}</Button>
-            </li>
-          ))}
-        </ul>
-      ) : busy !== "check" && (
-        <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">{doctor ? "No coding agents are connected yet. Add your first agent to start using wiki memory while you code." : "Connections have not been verified. Check again or add an agent."}</div>
-      )}
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  return <div className="space-y-8">
+    <ChatgptConnection workspace={workspace} />
+    <section className="space-y-3 border-t pt-6" aria-label="Model API">
+      <h2 className="text-lg font-medium">Model API</h2>
       <div className="flex flex-wrap gap-3">
-        <Button disabled={busy !== null} onClick={() => { saveUiPreference(`setup-step:${workspace}`, 0); setAdding(true) }}><Plus className="h-4 w-4" />Add agent</Button>
-        <Button variant="ghost" disabled={busy !== null} onClick={() => void check(workspace)}><RefreshCw className="h-4 w-4" />Check connections</Button>
+        <Button variant="outline" onClick={() => openConnectors("model")}>Configure model</Button>
+        <Button variant="ghost" onClick={() => {
+          useAgentRuntimeStore.getState().setRuntime("native")
+          useWikiStore.getState().setActiveView("chat")
+        }}>Use configured model</Button>
       </div>
-      <p className="text-xs leading-relaxed text-muted-foreground">Connecting saves wiki tools and memory instructions for your agent. New findings appear in Review for you to approve.</p>
-      <BackgroundMemory workspace={workspace} />
     </section>
-  )
+    <details className="border-t pt-6">
+      <summary className="cursor-pointer text-sm font-medium">External agents</summary>
+      <ul className="mt-4 divide-y">
+        {EXTERNAL_AGENTS.map(({ id, name }) => {
+          const connected = doctor?.checks.some((c) => c.id === `agent-${id}` && c.ok)
+          return <li key={id} className="flex items-center justify-between gap-4 py-3 text-sm">
+            <span>{name}{connected && <span role="status" className="ml-3 text-muted-foreground">Connected</span>}</span>
+            <Button variant="outline" disabled={working} onClick={() => void connect(id)}>{connecting === id ? "Connecting…" : connected ? `Reconnect ${name}` : `Connect ${name}`}</Button>
+          </li>
+        })}
+      </ul>
+      {(connectionError || error) && <p role="alert" className="mt-3 text-sm text-destructive">{connectionError || error}</p>}
+    </details>
+    <details className="border-t pt-6">
+      <summary className="cursor-pointer text-sm font-medium">Background memory</summary>
+      <div className="mt-4"><BackgroundMemory workspace={workspace} /></div>
+    </details>
+  </div>
 }

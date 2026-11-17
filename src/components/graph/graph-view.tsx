@@ -804,7 +804,6 @@ export function GraphView() {
       if (!node) return
       if (!node.path) {
         await useProposalStore.getState().load({ force: true })
-        useProposalStore.getState().beginEdit(node.id)
         useWikiStore.getState().setActiveView("review")
         return
       }

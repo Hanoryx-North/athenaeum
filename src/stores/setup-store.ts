@@ -1,10 +1,4 @@
-/**
- * Setup state: is the command-line tool installed, are the coding agents connected, is the project
- * linked to the Library. One store so the banner, the Library tab and the setup card agree.
- *
- * Callers run checks when projects open, explicit account and setup actions, and
- * scheduled backup after sign-in. The CLI owns credentials and synchronization.
- */
+/** One CLI coordinator for account, connection and backup operations. */
 import { create } from "zustand"
 import {
   cancelCli,
@@ -51,6 +45,7 @@ interface SetupState {
 
 const MAX_PROGRESS = 200
 let setupGeneration = 0
+let operationEpoch = 0
 
 function scopedSet(write: (partial: Partial<SetupState>) => void, generation: number) {
   return (partial: Partial<SetupState>) => { if (generation === setupGeneration) write(partial) }
@@ -196,18 +191,28 @@ export const useSetupStore = create<SetupState>((write, get) => ({
 
   reset: async () => {
     setupGeneration += 1
+    operationEpoch += 1
     if (get().busy) await cancelCli()
     write({ doctor: null, lastSetup: null, syncPosition: null, syncMessage: null, busy: null, progress: [], deviceCode: null, error: null })
   },
 
   cancel: async () => {
+    operationEpoch += 1
     await cancelCli()
   },
 
   operate: async (workspace, job) => {
     const generation = setupGeneration
+    const epoch = operationEpoch
     const set = scopedSet(write, generation)
-    if (get().busy) return null
+    while (get().busy) {
+      await new Promise<void>(resolve => {
+        const stop = useSetupStore.subscribe(state => {
+          if (!state.busy) { stop(); resolve() }
+        })
+      })
+      if (generation !== setupGeneration || epoch !== operationEpoch) return null
+    }
     set({ busy: "sync", syncMessage: null })
     try {
       const result = await withProgress(set, get, () => runCli(workspace, job))

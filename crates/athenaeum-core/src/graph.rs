@@ -19,6 +19,7 @@ pub struct NavigationOptions {
     /// Which edges may be followed.
     pub edges: EdgeFilter,
     pub selection: Option<RecallSelection>,
+    pub claims_only: bool,
 }
 
 impl Default for NavigationOptions {
@@ -30,6 +31,7 @@ impl Default for NavigationOptions {
             max_nodes: 25,
             edges: EdgeFilter::traversable(),
             selection: None,
+            claims_only: false,
         }
     }
 }
@@ -100,9 +102,19 @@ pub fn navigate(
     seeds: &[NodeId],
     options: &NavigationOptions,
 ) -> Result<Vec<Reached>> {
+    navigate_bounded(store, seeds, options).map(|(nodes, _)| nodes)
+}
+
+pub(crate) fn navigate_bounded(
+    store: &KnowledgeStore,
+    seeds: &[NodeId],
+    options: &NavigationOptions,
+) -> Result<(Vec<Reached>, bool)> {
     let mut visited: HashSet<NodeId> = HashSet::new();
     let mut queue: VecDeque<(NodeId, u8, Option<Step>)> = VecDeque::new();
     let mut reached: Vec<Reached> = Vec::new();
+    let mut truncated = false;
+    let visit_limit = options.max_nodes.saturating_mul(20).max(50);
 
     for seed in seeds {
         if visited.insert(seed.clone()) {
@@ -131,13 +143,22 @@ pub fn navigate(
             continue;
         }
 
-        reached.push(Reached { node, depth, via });
+        if !options.claims_only || !node.node_type.is_structural() {
+            reached.push(Reached { node, depth, via });
+        }
 
         if depth >= options.max_depth {
             continue;
         }
 
         for neighbor in store.neighbors(&id, &options.edges)? {
+            if options.claims_only
+                && visited.len() >= visit_limit
+                && !visited.contains(&neighbor.node)
+            {
+                truncated = true;
+                continue;
+            }
             if visited.insert(neighbor.node.clone()) {
                 queue.push_back((
                     neighbor.node,
@@ -148,7 +169,7 @@ pub fn navigate(
         }
     }
 
-    Ok(reached)
+    Ok((reached, truncated))
 }
 
 /// The shortest chain of relationships connecting two nodes, if any.

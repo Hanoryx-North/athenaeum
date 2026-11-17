@@ -775,7 +775,12 @@ fn run(cli: &Cli) -> Result<Outcome> {
             })?;
             let mut settings = athenaeum_core::portable::automation::Automation::load(&project)?;
             if let Some(value) = accept_proposals {
-                settings.accept_proposals = *value;
+                if !value {
+                    return Err(athenaeum_core::portable::portable_error(
+                        "invalid_input",
+                        "Wiki proposals save automatically; automatic saving cannot be disabled.",
+                    ));
+                }
             }
             if let Some(value) = auto_sync {
                 settings.auto_sync = *value;

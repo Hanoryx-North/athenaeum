@@ -97,6 +97,16 @@ pub struct HarnessChatState {
 #[derive(Default)]
 pub struct BackgroundMemoryState(HarnessChatState);
 
+/// Authentication must survive foreground provider checks and route changes.
+#[derive(Default)]
+pub struct ChatgptAccountState(HarnessChatState);
+
+impl ChatgptAccountState {
+    pub fn shutdown(&self) {
+        self.0.shutdown();
+    }
+}
+
 impl BackgroundMemoryState {
     pub fn shutdown(&self) {
         self.0.shutdown();
@@ -346,6 +356,10 @@ impl HarnessRuntime {
     }
 
     async fn request(&self, request: Value) -> Result<Value, String> {
+        let interactive = matches!(
+            request.get("type").and_then(Value::as_str),
+            Some("run" | "memory")
+        );
         let request_id = request
             .get("requestId")
             .and_then(Value::as_str)
@@ -362,9 +376,23 @@ impl HarnessRuntime {
             }
             return Err(error);
         }
-        receiver
-            .await
-            .map_err(|_| "The Harness runtime stopped before replying.".to_string())?
+        if interactive {
+            return receiver
+                .await
+                .map_err(|_| "The agent stopped before replying.".to_string())?;
+        }
+        match tokio::time::timeout(Duration::from_secs(30), receiver).await {
+            Ok(response) => {
+                response.map_err(|_| "The agent stopped before replying.".to_string())?
+            }
+            Err(_) => {
+                if let Ok(mut pending) = self.pending.lock() {
+                    pending.remove(&request_id);
+                }
+                self.shutdown();
+                Err("The connection timed out. Try connecting again.".to_string())
+            }
+        }
     }
 
     fn send(&self, request: &Value) -> Result<(), String> {
@@ -564,9 +592,7 @@ fn native_command(
     } else {
         native_agent_binary()?
     };
-    let node = private_node_path(&prefix)
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| PathBuf::from("node"));
+    let node = node_binary(&prefix)?;
     if route.is_some_and(|route| route.provider == "athenaeum-memory") {
         let source = binary
             .extension()
@@ -595,15 +621,18 @@ fn native_command(
         }
         return Ok(command);
     }
-    let driver = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|path| plain_path(path.join("native-agent-driver.mjs")))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/native-agent-driver.mjs")
-        });
+    let source_driver =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/native-agent-driver.mjs");
+    let driver = if cfg!(debug_assertions) && source_driver.is_file() {
+        source_driver
+    } else {
+        app.path()
+            .resource_dir()
+            .ok()
+            .map(|path| plain_path(path.join("native-agent-driver.mjs")))
+            .filter(|path| path.is_file())
+            .unwrap_or(source_driver)
+    };
     let mut command = Command::new(&node);
     command
         .arg(driver)
@@ -702,6 +731,15 @@ fn codex_binary() -> Result<PathBuf, String> {
     let mut dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|p| env::split_paths(&p).collect())
         .unwrap_or_default();
+    // Finder launches do not inherit a terminal's PATH.
+    dirs.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
+        let home = PathBuf::from(home);
+        dirs.extend([home.join(".local/bin"), home.join(".npm-global/bin")]);
+    }
     if let Some(appdata) = env::var_os("APPDATA") {
         dirs.push(PathBuf::from(appdata).join("npm"));
     }
@@ -715,7 +753,89 @@ fn codex_binary() -> Result<PathBuf, String> {
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    for app in [
+        PathBuf::from("/Applications/Codex.app"),
+        env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+            .join("Applications/Codex.app"),
+    ] {
+        let candidate = app.join("Contents/Resources/codex");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    if let Some(home) = env::var_os("HOME").or_else(|| env::var_os("USERPROFILE")) {
+        let platform = if cfg!(target_os = "macos") {
+            if cfg!(target_arch = "aarch64") {
+                "macos-aarch64"
+            } else {
+                "macos-x86_64"
+            }
+        } else if cfg!(windows) {
+            if cfg!(target_arch = "aarch64") {
+                "windows-aarch64"
+            } else {
+                "windows-x86_64"
+            }
+        } else if cfg!(target_arch = "aarch64") {
+            "linux-aarch64"
+        } else {
+            "linux-x86_64"
+        };
+        let home = PathBuf::from(home);
+        let mut extensions = Vec::new();
+        for editor in [".vscode", ".vscode-insiders"] {
+            if let Ok(entries) = fs::read_dir(home.join(editor).join("extensions")) {
+                extensions.extend(entries.flatten().filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("openai.chatgpt-")
+                }));
+            }
+        }
+        extensions.sort_by_key(|entry| {
+            std::cmp::Reverse(
+                entry
+                    .metadata()
+                    .and_then(|metadata| metadata.modified())
+                    .ok(),
+            )
+        });
+        for extension in extensions {
+            let candidate = extension
+                .path()
+                .join("bin")
+                .join(platform)
+                .join(if cfg!(windows) { "codex.exe" } else { "codex" });
+            if candidate.is_file() {
+                return Ok(plain_path(candidate));
+            }
+        }
+    }
     Err("ChatGPT needs the official Codex runtime. Install it with npm install -g @openai/codex, then check the connection again.".into())
+}
+
+fn node_binary(prefix: &Path) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("ATHENAEUM_NODE") {
+        candidates.push(PathBuf::from(path));
+    }
+    candidates.extend(private_node_path(prefix));
+    let name = if cfg!(windows) { "node.exe" } else { "node" };
+    if let Some(paths) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&paths).map(|dir| dir.join(name)));
+    }
+    candidates.extend([
+        PathBuf::from("/usr/local/bin/node"),
+        PathBuf::from("/opt/homebrew/bin/node"),
+    ]);
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| "Node.js is missing. Install Node 22.19 or newer, then reconnect.".into())
 }
 
 fn locate_install() -> Result<(PathBuf, PathBuf, InstallManifest), String> {
@@ -909,7 +1029,7 @@ pub async fn background_memory(
 #[tauri::command]
 pub async fn chatgpt_account(
     app: AppHandle,
-    state: State<'_, HarnessChatState>,
+    state: State<'_, ChatgptAccountState>,
     project_path: String,
     action: String,
     login_id: Option<String>,
@@ -924,7 +1044,9 @@ pub async fn chatgpt_account(
         api_key_env: None,
         pi_provider: None,
     };
-    let runtime = state.runtime_for(&app, Path::new(&project_path), Some(&route))?;
+    let runtime = state
+        .0
+        .runtime_for(&app, Path::new(&project_path), Some(&route))?;
     let response = runtime.request(json!({ "type": "account", "requestId": runtime.next_request_id("account"), "action": action, "loginId": login_id })).await?;
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
 }

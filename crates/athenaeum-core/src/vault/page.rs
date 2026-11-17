@@ -13,7 +13,7 @@ use super::wikilink;
 /// Longest summary this will produce, in characters. Long enough to be a
 /// useful one-line answer, short enough that a hundred of them still fit in
 /// a retrieval budget (§28: summaries at L1, full content only on request).
-const SUMMARY_LIMIT: usize = 240;
+const SUMMARY_LIMIT: usize = 1000;
 
 /// A wiki page, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -617,7 +617,7 @@ title: Attention Mechanism
 
     #[test]
     fn summary_is_truncated_on_a_word_boundary() {
-        let long = "word ".repeat(200);
+        let long = "word ".repeat(400);
         let page = VaultPage::parse("wiki/concepts/a.md", &long);
         assert!(page.summary.chars().count() <= SUMMARY_LIMIT + 1);
         assert!(page.summary.ends_with('…'));

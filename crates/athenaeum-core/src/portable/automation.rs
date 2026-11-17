@@ -7,7 +7,7 @@ use super::{memory, write_atomic};
 use crate::error::Result;
 use crate::store::KnowledgeStore;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct Automation {
     pub accept_proposals: bool,
@@ -17,17 +17,34 @@ pub struct Automation {
 impl Automation {
     pub fn load(project: &Path) -> Result<Self> {
         match std::fs::read(project.join(".athenaeum/automation.json")) {
-            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+            Ok(bytes) => {
+                let mut settings: Self = serde_json::from_slice(&bytes)?;
+                settings.accept_proposals = true;
+                Ok(settings)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
     }
 
     pub fn save(&self, project: &Path) -> Result<()> {
+        let settings = Self {
+            accept_proposals: true,
+            auto_sync: self.auto_sync,
+        };
         write_atomic(
             &project.join(".athenaeum/automation.json"),
-            &serde_json::to_vec_pretty(self)?,
+            &serde_json::to_vec_pretty(&settings)?,
         )
+    }
+}
+
+impl Default for Automation {
+    fn default() -> Self {
+        Self {
+            accept_proposals: true,
+            auto_sync: false,
+        }
     }
 }
 
@@ -42,9 +59,6 @@ pub struct AcceptanceBatch {
 pub fn accept_pending(store: &mut KnowledgeStore, automatic: bool) -> Result<AcceptanceBatch> {
     let mut batch = AcceptanceBatch::default();
     for node in memory::proposals(store, None)? {
-        if automatic && node.applicability.as_ref().is_some_and(|value| value.core) {
-            continue;
-        }
         // A background extraction can fail between creating its proposal and
         // attaching checked evidence. Such drafts need review, not automatic saving.
         if automatic
@@ -71,11 +85,10 @@ pub fn accept_pending(store: &mut KnowledgeStore, automatic: bool) -> Result<Acc
 }
 
 pub fn maintain(store: &mut KnowledgeStore) -> Result<AcceptanceBatch> {
-    match store.project_root() {
-        Some(project) if Automation::load(&project)?.accept_proposals => {
-            accept_pending(store, true)
-        }
-        _ => Ok(AcceptanceBatch::default()),
+    if store.project_root().is_some() {
+        accept_pending(store, true)
+    } else {
+        Ok(AcceptanceBatch::default())
     }
 }
 
@@ -83,6 +96,28 @@ pub fn maintain(store: &mut KnowledgeStore) -> Result<AcceptanceBatch> {
 mod tests {
     use super::*;
     use crate::model::{Evidence, EvidenceKind, KnowledgeNode, NodeType, Provenance};
+
+    #[test]
+    fn saving_is_always_enabled_including_legacy_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".athenaeum")).unwrap();
+        assert!(Automation::load(dir.path()).unwrap().accept_proposals);
+        std::fs::write(
+            dir.path().join(".athenaeum/automation.json"),
+            r#"{"acceptProposals":false,"autoSync":true}"#,
+        )
+        .unwrap();
+        let settings = Automation::load(dir.path()).unwrap();
+        assert!(settings.accept_proposals);
+        assert!(settings.auto_sync);
+        Automation {
+            accept_proposals: false,
+            auto_sync: false,
+        }
+        .save(dir.path())
+        .unwrap();
+        assert!(Automation::load(dir.path()).unwrap().accept_proposals);
+    }
 
     #[test]
     fn background_drafts_are_not_automatically_saved_before_evidence_arrives() {

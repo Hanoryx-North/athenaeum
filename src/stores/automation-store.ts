@@ -22,7 +22,7 @@ interface AutomationState {
 
 export const useAutomationStore = create<AutomationState>((set, get) => ({
   workspace: null,
-  settings: { acceptProposals: false, autoSync: false },
+  settings: { acceptProposals: true, autoSync: false },
   busy: false,
   error: null,
   revision: null,
@@ -30,7 +30,7 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     if (get().busy) return
     const previousRevision = get().workspace === workspace ? get().revision : null
     set({ workspace, busy: true, error: null, ...(get().workspace !== workspace ? {
-      settings: { acceptProposals: false, autoSync: false }, revision: null,
+      settings: { acceptProposals: true, autoSync: false }, revision: null,
     } : {}) })
     try {
       const result = await invoke<AutomationResult>("wiki_automation", {

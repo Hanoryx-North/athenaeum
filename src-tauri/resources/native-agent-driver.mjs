@@ -131,7 +131,7 @@ async function initialize() {
 }
 async function handle(request) {
   try {
-    if (request.type === 'shutdown') { runtime.stdin.end(); send({ kind: 'shutdown', requestId: request.requestId }); return }
+    if (request.type === 'shutdown') { send({ kind: 'shutdown', requestId: request.requestId }); input.close(); return }
     if (request.type === 'approval') {
       const id = approvals.get(request.approvalId)
       if (id === undefined) throw new Error('This approval has expired.')
@@ -208,11 +208,11 @@ async function handle(request) {
       send({ kind: 'cancelled', requestId: request.requestId, runId: request.runId })
       return
     }
-    const input = (request.contentBlocks || []).map((block) => block.type === 'image'
+    const turnInput = (request.contentBlocks || []).map((block) => block.type === 'image'
       ? { type: 'image', url: `data:${block.mimeType};base64,${block.data}` }
       : { type: 'text', text: block.text || '', text_elements: [] })
     notify('step/start', {})
-    const started = await rpc('turn/start', { threadId, input })
+    const started = await rpc('turn/start', { threadId, input: turnInput })
     if (active) {
       active.turnId = started.turn.id
       if (active.cancelled) await rpc('turn/interrupt', { threadId, turnId: active.turnId })
@@ -230,8 +230,10 @@ input.on('line', (line) => {
   try { void handle(JSON.parse(line)) } catch { /* Ignore malformed frames. */ }
 })
 input.on('close', () => {
-  // Let the service close its SQLite handles before the driver exits. Killing
-  // the parent immediately can strand native processes and locked state on Windows.
+  process.stdin.destroy()
   runtime.stdin.end()
-  setTimeout(() => { if (!closed) runtime.kill() }, 5_000).unref()
+  // Finish before the native host's four-second deadline, including a stuck child.
+  const terminate = setTimeout(() => { if (!closed) runtime.kill() }, 1000).unref()
+  const kill = setTimeout(() => { if (!closed) runtime.kill('SIGKILL') }, 2500).unref()
+  runtime.once('exit', () => { clearTimeout(terminate); clearTimeout(kill) })
 })

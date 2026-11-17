@@ -3,7 +3,7 @@ import { CheckCircle2, Loader2 } from "lucide-react"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { cliStatus, runCli } from "@/lib/cli-tools"
+import { cliStatus } from "@/lib/cli-tools"
 import { useSetupStore } from "@/stores/setup-store"
 import { LIBRARY, useLibraryAccountStore } from "@/stores/library-account-store"
 import { useEngineStore } from "@/stores/engine-store"
@@ -17,7 +17,7 @@ export function LibraryAccount({
   continuing = false,
   server = LIBRARY,
 }: {
-  onContinue?: () => void
+  onContinue?: () => void | Promise<void>
   continuing?: boolean
   server?: string
 }) {
@@ -49,9 +49,9 @@ export function LibraryAccount({
           return
         }
         if (!(await cliStatus()).found) return
-        const result = await runCli(null, { job: "library_status", server })
-        const rows = result.output
-        if (!cancelled && result.exitCode === 0 && Array.isArray(rows)) {
+        const result = await useSetupStore.getState().operate(null, { job: "library_status", server })
+        const rows = result?.output
+        if (!cancelled && result?.exitCode === 0 && Array.isArray(rows)) {
           const row = rows.find((row) => row && typeof row.username === "string" && !row.detail)
           if (row) setSignedIn(row.username)
         }
@@ -91,6 +91,7 @@ export function LibraryAccount({
       const output = result?.output as { username?: unknown } | null
       if (result?.exitCode === 0 && typeof output?.username === "string") {
         setSignedIn(output.username)
+        await onContinue?.()
       } else {
         setMessage(useSetupStore.getState().error ?? "Sign-in did not finish. Try again.")
       }
@@ -103,12 +104,6 @@ export function LibraryAccount({
 
   return (
     <section className="space-y-6" aria-label="Athenaeum Library account">
-      <div>
-        <h2 className="text-xl font-semibold">Your Library account</h2>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          Sign in to back up your wiki to your server and use it across computers. New backups are private.
-        </p>
-      </div>
       {checking || (server === LIBRARY && account.checking) ? (
         <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -120,7 +115,6 @@ export function LibraryAccount({
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             <div>
               <p className="font-medium">Signed in as {signedIn}</p>
-              <p className="mt-1 text-sm text-muted-foreground">Your account is connected.</p>
               {library?.server === server && library.lastSyncAt && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   This wiki last synced {new Date(library.lastSyncAt).toLocaleString()}.
@@ -145,7 +139,7 @@ export function LibraryAccount({
               Sign out
             </Button>
             {onContinue && (
-              <Button onClick={onContinue} disabled={working}>
+              <Button onClick={() => void Promise.resolve().then(onContinue).catch((cause) => setMessage(String(cause)))} disabled={working}>
                 {continuing ? "Opening…" : "Open Athenaeum"}
               </Button>
             )}

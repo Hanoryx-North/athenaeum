@@ -24,19 +24,18 @@ export const useLibraryAccountStore = create<LibraryAccountState>((set, get) => 
     if (get().checking) return
     set({ checking: true, error: null })
     try {
-      // The native CLI runner accepts one job at a time. Opening the account
-      // control during project startup must wait for the agent doctor to finish.
-      if (useSetupStore.getState().busy) {
-        await new Promise<void>((resolve) => {
-          const stop = useSetupStore.subscribe((state) => {
-            if (!state.busy) { stop(); resolve() }
-          })
-        })
-      }
       if (!(await cliStatus()).found) { set({ username: null }); return }
       const result = await useSetupStore.getState().operate(null, { job: "library_status", server: LIBRARY })
-      if (result?.exitCode !== 0 || !Array.isArray(result.output)) throw new Error("Could not check your Library account. Try again.")
-      const row = result.output.find((row) => row && typeof row.username === "string" && !row.detail)
+      if (result?.exitCode !== 0 || !Array.isArray(result.output)) throw new Error(useSetupStore.getState().error || "Could not check your Library account. Try again.")
+      const problem = result.output.find(row => row?.detail)
+      if (problem) {
+        if (String(problem.detail).startsWith("unauthorized:")) {
+          set({ username: null, error: get().username ? "Session expired. Sign in again." : null })
+          return
+        }
+        throw new Error(problem.reachable === false ? "Library unavailable. Try again." : String(problem.detail))
+      }
+      const row = result.output.find((row) => row && typeof row.username === "string")
       set({ username: row?.username ?? null })
     } catch (cause) {
       set({ error: cause instanceof Error ? cause.message : String(cause) })

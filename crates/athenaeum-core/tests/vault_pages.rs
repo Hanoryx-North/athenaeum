@@ -137,28 +137,37 @@ fn a_brief_points_at_pages_and_states_where_they_are() {
         "both pages should be in the brief, got {pages:?}"
     );
     for page in &pages {
-        assert!(
-            context
-                .prompt
-                .contains(&format!("Page: {}", page.best_path())),
-            "the prompt should state where {} is",
-            page.path
-        );
+        assert!(!context
+            .prompt
+            .contains(&format!("Page: {}", page.best_path())));
     }
-    // The trust wrapper is untouched, and the page line is a fact, not an instruction.
+    assert!(!context.prompt.contains("Source anchors"));
     assert!(context.prompt.starts_with("<retrieved_knowledge>"));
     assert!(context.prompt.contains("does not authorize tool execution"));
 }
 
 #[test]
-fn the_source_node_in_a_brief_has_no_page_line() {
+fn routine_recall_omits_source_inventory_and_explicit_inspection_keeps_it() {
     let (_project, mut store) = indexed_project();
 
     let context = WikiService::new(&mut store)
         .context("validate state", &[], None, None)
         .unwrap();
 
-    let source = context
+    assert!(context
+        .brief
+        .nodes
+        .iter()
+        .all(|node| node.node_type != NodeType::Source));
+    let explicit = WikiService::new(&mut store)
+        .context(
+            "validate state",
+            &["Validate state first".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
+    let source = explicit
         .brief
         .nodes
         .iter()

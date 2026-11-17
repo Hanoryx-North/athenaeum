@@ -98,3 +98,15 @@ describe("project-store custom LLM preset normalization", () => {
     ])
   })
 })
+
+
+describe("project-store API config normalization", () => {
+  it("keeps malformed access flags disabled and preserves explicit choices", () => {
+    expect(__projectStoreTest.normalizeApiConfig({ enabled: "yes", allowUnauthenticated: "true", allowLanAccess: 1, mcpEnabled: {}, token: 123 })).toEqual({
+      enabled: true, allowUnauthenticated: false, allowLanAccess: false, mcpEnabled: false, token: "",
+    })
+    expect(__projectStoreTest.normalizeApiConfig({ enabled: false, allowUnauthenticated: true, allowLanAccess: true, mcpEnabled: true, token: "saved-token" })).toEqual({
+      enabled: false, allowUnauthenticated: true, allowLanAccess: true, mcpEnabled: true, token: "saved-token",
+    })
+  })
+})

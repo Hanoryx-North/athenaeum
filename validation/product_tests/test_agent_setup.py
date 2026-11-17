@@ -56,12 +56,12 @@ class AthenaeumAgentMemorySetup(unittest.TestCase):
         self.setup_wiki()
         installed = self.instructions.read_text(encoding="utf-8")
         self.assertTrue(installed.startswith("Keep my coding conventions.\n"))
-        self.assertIn("if automatic task recall has not already been attempted", installed)
+        self.assertIn("If the host has not already attempted task recall", installed)
         self.assertIn("Skip acknowledgements and repeated checks", installed)
-        self.assertIn("Record before finishing", installed)
-        self.assertIn("Do not start a subagent", installed)
-        self.assertIn("Do not accept your own proposals", installed)
-        self.assertIn("Keep memory quiet", installed)
+        self.assertIn("use wiki_create for durable decisions", installed)
+        self.assertIn("Do not start a separate agent", installed)
+        self.assertIn("Never accept your own proposals", installed)
+        self.assertIn("Keep routine memory activity quiet", installed)
         self.assertNotIn("briefly identify any proposals", installed)
         self.assertNotIn("mention the limitation once", installed)
         self.assertEqual(self.integration("connect")["agents"][0]["status"], "unchanged")
@@ -81,7 +81,7 @@ class AthenaeumAgentMemorySetup(unittest.TestCase):
 
     def test_doctor_detects_missing_and_outdated_memory_instructions(self) -> None:
         self.integration("connect")
-        for text in ("Keep my coding conventions.\n", self.instructions.read_text(encoding="utf-8").replace("Recall before work", "Old recall guidance")):
+        for text in ("Keep my coding conventions.\n", self.instructions.read_text(encoding="utf-8").replace("call wiki_context once", "Old recall guidance")):
             self.instructions.write_text(text, encoding="utf-8")
             report = self.integration("doctor", check=False)
             check = next(c for c in report["checks"] if c["id"] == "agent-athenaeum")
@@ -119,8 +119,8 @@ class AthenaeumAgentMemorySetup(unittest.TestCase):
         try:
             initialized = session.start()
             self.assertIn("call wiki_context once", initialized["instructions"])
-            self.assertIn("Do not narrate routine memory activity", initialized["instructions"])
-            self.assertIn("Report failures that block an explicit memory request", initialized["instructions"])
+            self.assertIn("Keep routine memory activity quiet", initialized["instructions"])
+            self.assertIn("Report failed explicit memory requests", initialized["instructions"])
             tools = {t["name"] for t in session.call("tools/list")["result"]["tools"]}
             self.assertTrue({"wiki_context", "wiki_search", "wiki_create"} <= tools)
             self.assertNotIn("wiki_accept", tools)

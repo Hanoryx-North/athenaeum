@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import {
-  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, CircleHelp, PlugZap,
+  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, PlugZap,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -32,10 +32,9 @@ const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = 
 
 interface IconSidebarProps {
   onSwitchProject: () => void
-  onQuickStart: () => void
 }
 
-export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps) {
+export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
   const { t } = useTranslation()
   const activeView = useWikiStore((s) => s.activeView)
   const setActiveView = useWikiStore((s) => s.setActiveView)
@@ -158,12 +157,6 @@ export function IconSidebar({ onSwitchProject, onQuickStart }: IconSidebarProps)
           <Tooltip>
             <TooltipTrigger aria-label="Connectors" aria-pressed={activeView === "connectors"} onClick={() => setActiveView("connectors")} className={`flex h-10 w-10 items-center justify-center rounded-md ${activeView === "connectors" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent"}`}><PlugZap className="h-5 w-5" /></TooltipTrigger>
             <TooltipContent side="right">Connectors</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger aria-label="Quick start guide" onClick={onQuickStart} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
-              <CircleHelp className="h-4 w-4" />
-            </TooltipTrigger>
-            <TooltipContent side="right">Quick start guide</TooltipContent>
           </Tooltip>
           {/* Daemon status indicator */}
           <Tooltip>

@@ -210,7 +210,8 @@ describe.runIf(RUNNABLE)('against a real vault that an agent edits', () => {
     expect(opened.detail.relationships.map(related => related.title)).toContain('OAuthCallback')
     const briefed = context?.brief.nodes.find(node => node.title === 'Validate state first')
     expect(briefed?.page?.absolutePath).toBe(page?.absolutePath)
-    expect(context?.prompt).toContain(`Page: ${page?.absolutePath ?? ''}`)
+    expect(context?.prompt).not.toContain(`Page: ${page?.absolutePath ?? ''}`)
+    expect(context?.prompt).toContain('Creating the session first opens a login CSRF.')
   })
 
   it('answers from the page as the agent just edited it, with no re-index', async ({ skip }) => {

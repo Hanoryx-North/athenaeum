@@ -308,7 +308,7 @@ fn bridge_tells_an_agent_which_file_a_page_node_is() {
     );
     let brief = &context["response"]["context"];
     assert_eq!(brief["brief"]["nodes"][0]["page"]["absolutePath"], absolute);
-    assert!(brief["prompt"]
+    assert!(!brief["prompt"]
         .as_str()
         .unwrap()
         .contains(&format!("Page: {absolute}")));

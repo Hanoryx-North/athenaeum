@@ -61,7 +61,7 @@
     "native:build": "node runtime/manage.mjs build",
     "native:check": "node runtime/manage.mjs check",
     "native:start": "node runtime/manage.mjs run",
-    "native:verify-source": "python runtime/verify_source.py",
+    "native:verify-source": "python3 runtime/verify_source.py",
     "native:test": "node --test runtime/src/*.test.mjs"
   },
   "peerDependencies": {

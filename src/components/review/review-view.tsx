@@ -1,16 +1,4 @@
-/**
- * The review pane.
- *
- * Two queues live behind this shell, and the order says which one matters:
- * the engine's proposals — a model asked for something and a person has to
- * decide — come first, and the file-based queue the app has always had
- * (`review.json`: lint findings and ingest suggestions) sits beside it.
- *
- * The distinction is the product's central rule. Only the proposal queue can
- * turn a model's proposal into durable Markdown, and only through the engine
- * when a person accepts one. The wiki queue resolves its own items and writes
- * nothing on its own.
- */
+/** Pending knowledge and file review findings. */
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { ClipboardList, FileJson } from "lucide-react"
@@ -26,12 +14,12 @@ const TABS: { id: ReviewTab; label: string; description: string }[] = [
   {
     id: "proposals",
     label: "Proposals",
-    description: "What agents proposed, decided here and written by the engine",
+    description: "Pages waiting for automatic saving",
   },
   {
     id: "wiki",
     label: "Wiki queue",
-    description: "Lint findings and ingest suggestions held in review.json",
+    description: "Lint findings and import suggestions",
   },
 ]
 

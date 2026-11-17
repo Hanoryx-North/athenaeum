@@ -2,34 +2,40 @@ import { useEffect } from "react"
 import { CheckCircle2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useChatgptStore } from "@/stores/chatgpt-store"
+import { useAgentRuntimeStore } from "@/stores/agent-runtime-store"
+import { useWikiStore } from "@/stores/wiki-store"
 
 export function ChatgptConnection({ workspace }: { workspace: string }) {
-  const { account, login, busy, error, check, signIn, openSignInPage, cancel, signOut } = useChatgptStore()
-  useEffect(() => { void check(workspace) }, [workspace, check])
-  useEffect(() => {
-    if (!login) return
-    const timer = setInterval(() => { void check(workspace) }, 2000)
-    return () => clearInterval(timer)
-  }, [workspace, login, check])
-  return (
-    <div className="space-y-3 rounded-xl border p-5 text-sm" aria-label="ChatGPT account">
-      {account ? <>
-        <p className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-600" />Signed in{account.email ? ` as ${account.email}` : " with ChatGPT"}{account.planType ? ` (${account.planType})` : ""}.</p>
-        <p className="text-muted-foreground">Use your ChatGPT plan for tasks inside Athenaeum. Your plan's usage limits apply.</p>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => void signOut(workspace)}>Sign out of ChatGPT</Button>
-        <p className="text-xs text-muted-foreground">Sign-in is shared with your local Codex clients. Signing out also signs them out.</p>
-      </> : login ? <>
-        <p role="status">Finish signing in with ChatGPT in your browser. This page updates when you're done.</p>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void openSignInPage()}>Open sign-in page</Button>
-          <Button variant="ghost" disabled={busy} onClick={() => void cancel()}>Cancel sign-in</Button>
-        </div>
-      </> : <>
-        <p>Use your ChatGPT account for chat inside Athenaeum. You don't need an OpenAI API key.</p>
-        <Button disabled={busy} onClick={() => void signIn(workspace)}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Sign in with ChatGPT</Button>
-      </>}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
-      {!login && <Button variant="ghost" size="sm" disabled={busy} onClick={() => void check(workspace)}>{busy ? "Checking account..." : "Check account"}</Button>}
-    </div>
-  )
+  const state = useChatgptStore()
+  const account = state.workspace === workspace ? state.account : null
+  const login = state.workspace === workspace ? state.login : null
+  const error = state.workspace === workspace ? state.error : null
+  useEffect(() => { void state.check(workspace) }, [workspace, state.check])
+
+  function openChat() {
+    useAgentRuntimeStore.getState().setRuntime("chatgpt")
+    useWikiStore.getState().setActiveView("chat")
+  }
+
+  return <section className="space-y-4" aria-label="Codex connection">
+    <h2 className="text-lg font-medium">Codex</h2>
+    {account ? <>
+      <p role="status" className="flex items-center gap-2 text-sm"><CheckCircle2 className="h-4 w-4" />{account.email || "Connected with ChatGPT"}</p>
+      <div className="flex items-center gap-3">
+        <Button onClick={openChat}>Open chat</Button>
+        <Button variant="ghost" disabled={state.busy} onClick={() => void state.signOut(workspace)}>Sign out</Button>
+      </div>
+    </> : login ? <>
+      <p role="status" className="text-sm text-muted-foreground">Finish signing in in your browser.</p>
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={() => void state.openSignInPage()}>Open sign-in page</Button>
+        <Button variant="ghost" disabled={state.busy} onClick={() => void state.cancel()}>Cancel</Button>
+      </div>
+      {error && <a href={login.url} target="_blank" rel="noreferrer" className="block break-all text-sm underline underline-offset-4">{login.url}</a>}
+    </> : <Button disabled={state.busy} onClick={() => void state.signIn(workspace)}>
+      {state.busy && <Loader2 className="h-4 w-4 animate-spin" />}
+      {state.busy ? "Opening sign-in…" : "Connect with ChatGPT"}
+    </Button>}
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  </section>
 }

@@ -1,8 +1,4 @@
-# Athenaeum desktop shell.
-#
-# Dependencies are llm_wiki's (GPL-3.0, © Yong Su) minus everything the agent
-# runtime needed: no `which` for locating agent CLIs on PATH, no tokio process
-# features for spawning them. DeepSeek Harness owns the agent runtime.
+# Native desktop shell; coding turns stay in packages/agent.
 [package]
 name = "athenaeum-app"
 description = "Athenaeum desktop shell."

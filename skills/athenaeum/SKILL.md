@@ -45,9 +45,11 @@ for a full project switch; low-level `fs.openProject` only reads project metadat
 - Knowledge: `list`, `show`, `search`, `navigate`, `path`, `brief`, `history`.
   Use `brief --stage initialize|design|coding|debugging|verification|tools`,
   `--project-id`, `--technology` and `--max-nodes` to select relevant guidance.
-  `principles` lists starter guidance; `principles --propose` queues it for review.
-- Proposals: `create`, `proposals`, `accept`, `reject`. Follow the owner's saving
-  policy. A model must not accept its own memory proposal.
+  Agent prompts contain bounded summaries of procedures and task findings;
+  repository inventory and audit detail require explicit inspection.
+  `principles` lists starter guidance; `principles --propose` queues it for saving.
+- Proposals: `create`, `proposals`, `accept`, `reject`. Completed proposals save
+  automatically. A model only proposes and must never accept its own proposal.
 - Relationships: `link`, `unlink EDGE_ID`, live `knowledge-api.api.linkNodes`, and the native
   relationship commands in discovery. Check persistence after an index rebuild.
 - Files: live `fs.*` services for tree, read, write, existence, metadata,
@@ -57,6 +59,9 @@ for a full project switch; low-level `fs.openProject` only reads project metadat
 - Agent connections: `setup`, `doctor`, `disconnect-agents`, or live `setup.*`.
 - Accounts and hosted repositories: `library`, `sync`, `api`. Use stdin for
   credentials. Discovery documents the supported login flow.
+- Codex: live `chatgpt.check`, `chatgpt.signIn`, `chatgpt.cancel`, and
+  `chatgpt.signOut`. Sign-in opens the system browser. Its account is separate
+  from the Library account; credentials remain in the official Codex runtime.
 - Saved settings: `config` with the app closed. Live state/settings:
   `desktop state`, `wiki.*`, and `project-store.*`. Store setters alone may be
   transient; use the matching save operation when persistence is required.

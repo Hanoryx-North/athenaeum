@@ -64,6 +64,47 @@ fn an_unchanged_vault_is_not_read_again() {
 }
 
 #[test]
+fn an_older_summary_projection_is_refreshed_without_rewriting_markdown() {
+    let (project, mut store) = project();
+    let paragraph = "Verify the relevant failure paths. ".repeat(18);
+    let markdown = format!("---\ntype: procedure\ntitle: OAuthCallback\n---\n\n{paragraph}\n");
+    write(project.path(), "wiki/concepts/oauthcallback.md", &markdown);
+    index(&mut store, project.path());
+    let mut node = WikiService::new(&mut store)
+        .open("OAuthCallback")
+        .unwrap()
+        .node;
+    let id = node.id.clone();
+    node.summary.truncate(240);
+    store
+        .update_node(node, Some("legacy summary fixture".into()))
+        .unwrap();
+    store
+        .connection()
+        .execute(
+            "UPDATE meta SET value = ?1 WHERE key = ?2",
+            [
+                "legacy-projection-fingerprint",
+                athenaeum_core::vault::FINGERPRINT_KEY,
+            ],
+        )
+        .unwrap();
+    assert!(matches!(
+        sync(&mut store, project.path()).unwrap(),
+        VaultSync::Reconciled(_)
+    ));
+    assert_eq!(store.get_node(&id).unwrap().summary, paragraph.trim());
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("wiki/concepts/oauthcallback.md")).unwrap(),
+        markdown
+    );
+    assert_eq!(
+        sync(&mut store, project.path()).unwrap(),
+        VaultSync::Unchanged
+    );
+}
+
+#[test]
 fn an_edited_page_is_what_the_next_read_sees() {
     let (project, mut store) = project();
     index(&mut store, project.path());

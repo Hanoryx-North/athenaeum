@@ -103,6 +103,8 @@ fn mark_arrivals(root: &Path, snapshot: &mut VaultSnapshot) {
 /// filesystems the app ships on, and a missed edit is repaired by the next explicit index.
 pub(super) fn fingerprint(root: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
+    // Reconcile older indexes once when the summary projection changes.
+    hasher.update(b"vault-summary-v2\n");
     let mut feed = |relative: &str, metadata: &std::fs::Metadata| {
         let modified = metadata
             .modified()

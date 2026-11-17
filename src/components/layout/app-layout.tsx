@@ -4,8 +4,6 @@ import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { useEngineWorkspace } from "@/hooks/useEngineWorkspace"
 import { IconSidebar } from "./icon-sidebar"
 import { UpdateBanner } from "./update-banner"
-import { SetupBanner } from "@/components/setup/setup-card"
-import { openConnectors } from "@/stores/connectors-store"
 import { SidebarPanel } from "./sidebar-panel"
 import { ContentArea } from "./content-area"
 import { ResearchPanel } from "./research-panel"
@@ -21,10 +19,9 @@ const LEFT_PANEL_COLLAPSED_KEY = "athenaeum:left-panel-collapsed"
 
 interface AppLayoutProps {
   onSwitchProject: () => void
-  onQuickStart: () => void
 }
 
-export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
+export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
@@ -114,10 +111,9 @@ export function AppLayout({ onSwitchProject, onQuickStart }: AppLayoutProps) {
     // it fills the rest of the viewport.
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
-      <div className="flex shrink-0 items-center justify-between border-b px-4 py-2 text-sm"><span className="truncate font-medium">{project?.name}</span><button onClick={() => openConnectors()} className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">Connectors</button></div>
-      <SetupBanner />
+      <div className="shrink-0 truncate border-b px-4 py-2 text-sm font-medium">{project?.name}</div>
       <div className="flex min-h-0 flex-1">
-        <IconSidebar onSwitchProject={onSwitchProject} onQuickStart={onQuickStart} />
+        <IconSidebar onSwitchProject={onSwitchProject} />
         <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">
           {showLeftPanel && !leftCollapsed && (
             <>

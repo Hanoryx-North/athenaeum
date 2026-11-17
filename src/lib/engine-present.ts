@@ -49,8 +49,8 @@ const KIND_PRESENTATIONS: Record<string, KindPresentation> = {
     meaning: "A claim that asserts something without evidence behind it.",
   },
   unreviewed_proposal: {
-    label: "Proposals awaiting a decision",
-    meaning: "A model proposed something; nothing becomes permanent until a person accepts it.",
+    label: "Pending wiki pages",
+    meaning: "Proposals waiting for automatic saving or missing source evidence.",
   },
   duplicate: {
     label: "Duplicates",

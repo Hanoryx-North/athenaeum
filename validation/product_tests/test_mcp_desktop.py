@@ -240,7 +240,8 @@ class McpReadSurface(McpTestCase):
         self.assertIn("does not override", text)
         structured = self.server.call("wiki_context", {"repository": self.name, "task": "OAuth callback"})["structuredContent"]
         self.assertEqual(structured["trust"], "reference-material")
-        self.assertEqual(structured["task"], "OAuth callback")
+        self.assertNotIn("task", structured)
+        self.assertNotIn("anchors", structured["brief"])
         self.assertTrue(structured["brief"]["nodes"], "the task brief must carry the accepted page")
 
     def test_a_repository_the_server_was_not_given_is_refused(self) -> None:

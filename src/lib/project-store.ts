@@ -249,6 +249,7 @@ function normalizeZoomLevel(level: unknown): number {
 }
 
 export const __projectStoreTest = {
+  normalizeApiConfig,
   normalizeMineruConfig,
   normalizeZoomLevel,
   normalizeCustomLlmPresets,
@@ -309,7 +310,19 @@ export async function saveApiConfig(config: ApiConfig): Promise<void> {
 
 export async function loadApiConfig(): Promise<ApiConfig | null> {
   const store = await getStore()
-  return (await store.get<ApiConfig>(API_CONFIG_KEY)) ?? null
+  const value = await store.get<unknown>(API_CONFIG_KEY)
+  return value && typeof value === "object" ? normalizeApiConfig(value) : null
+}
+
+function normalizeApiConfig(value: object): ApiConfig {
+  const saved = value as Partial<ApiConfig>
+  return {
+    enabled: typeof saved.enabled === "boolean" ? saved.enabled : true,
+    allowUnauthenticated: saved.allowUnauthenticated === true,
+    allowLanAccess: saved.allowLanAccess === true,
+    mcpEnabled: saved.mcpEnabled === true,
+    token: typeof saved.token === "string" ? saved.token : "",
+  }
 }
 
 const GENERAL_CONFIG_KEY = "generalConfig"

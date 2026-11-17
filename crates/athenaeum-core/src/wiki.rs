@@ -754,16 +754,24 @@ impl<'a> WikiService<'a> {
     ) -> Result<WikiContext> {
         selection.validate()?;
         let mut seeds = if seed_references.is_empty() {
-            let mut seeds = self
+            let matched = self
                 .store
                 .search_context_selected(task, DEFAULT_CONTEXT_SEEDS, &selection)?
                 .into_iter()
                 .map(|hit| hit.node.id)
                 .collect::<Vec<_>>();
-            seeds.extend(
-                self.store
-                    .core_context_seeds(&selection, DEFAULT_CONTEXT_SEEDS)?,
-            );
+            let core = self
+                .store
+                .core_context_seeds(&selection, DEFAULT_CONTEXT_SEEDS)?;
+            let mut seeds = Vec::new();
+            for index in 0..core.len().max(matched.len()) {
+                if let Some(id) = core.get(index) {
+                    seeds.push(id.clone());
+                }
+                if let Some(id) = matched.get(index) {
+                    seeds.push(id.clone());
+                }
+            }
             seeds
         } else {
             seed_references
@@ -776,6 +784,7 @@ impl<'a> WikiService<'a> {
         seeds.retain(|id| seen.insert(id.clone()));
         let mut options = bounded_navigation(depth, max_nodes);
         options.selection = Some(selection);
+        options.claims_only = seed_references.is_empty();
         let brief = KnowledgeBrief::assemble(self.store, task, &seeds, &options)?;
         let prompt = brief.to_prompt();
         Ok(WikiContext { brief, prompt })

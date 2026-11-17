@@ -7,7 +7,7 @@ import { LlmProviderSection } from "@/components/settings/sections/llm-provider-
 import { cn } from "@/lib/utils"
 
 const PAGES: { id: ConnectorPage; label: string; icon: typeof Bot }[] = [
-  { id: "agents", label: "Coding agents", icon: PlugZap },
+  { id: "agents", label: "Coding agent", icon: PlugZap },
   { id: "account", label: "Library account", icon: Cloud },
   { id: "model", label: "AI model", icon: Bot },
 ]
@@ -18,9 +18,6 @@ export function ConnectorsView() {
     <div className="flex h-full flex-col overflow-hidden">
       <header className="shrink-0 border-b px-6 py-5">
         <h1 className="text-xl font-semibold">Connectors</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage your coding agents, Library account and wiki model.
-        </p>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav
@@ -52,10 +49,6 @@ export function ConnectorsView() {
               <div className="space-y-6">
                 <header>
                   <h2 className="text-2xl font-semibold">AI model</h2>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    Choose a model API or local server for Athenaeum Agent and wiki building.
-                    External coding agents use their own accounts.
-                  </p>
                 </header>
                 <ActiveModelStatus />
                 <LlmProviderSection />

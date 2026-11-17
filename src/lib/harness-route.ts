@@ -1,14 +1,6 @@
 import type { LlmConfig } from "@/stores/wiki-store"
 
-/**
- * The chat agent's model route, derived from the provider chosen in Settings.
- *
- * Chat runs in DeepSeek Harness, which owns its adapters and reads credentials
- * from its environment. This only describes which of its routes to use; the
- * backend hands that to the runtime as a per-launch profile patch (naming the
- * key's variable, never the key) and puts the key in that variable of the
- * runtime's own process.
- */
+/** Model routes passed to the owned runtime or optional Harness integration. */
 export interface HarnessRoute {
   /** Harness provider route id, e.g. `openai` or `deepseek-official`. */
   provider: string
