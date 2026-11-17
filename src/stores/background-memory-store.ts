@@ -15,6 +15,11 @@ interface MemoryJob {
   proposed?: string[]
   failureStage?: string
   outcome?: string
+  extraction?: {
+    completedChunks?: number
+    totalChunks?: number
+    coverage?: { truncated: boolean }
+  }
 }
 interface MemoryStatus {
   settings: BackgroundMemorySettings

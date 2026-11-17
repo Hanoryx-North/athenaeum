@@ -56,7 +56,8 @@ class AthenaeumAgentMemorySetup(unittest.TestCase):
         self.setup_wiki()
         installed = self.instructions.read_text(encoding="utf-8")
         self.assertTrue(installed.startswith("Keep my coding conventions.\n"))
-        self.assertIn("at the start of each task", installed)
+        self.assertIn("if automatic task recall has not already been attempted", installed)
+        self.assertIn("Skip acknowledgements and repeated checks", installed)
         self.assertIn("Record before finishing", installed)
         self.assertIn("Do not start a subagent", installed)
         self.assertIn("Do not accept your own proposals", installed)
@@ -118,7 +119,8 @@ class AthenaeumAgentMemorySetup(unittest.TestCase):
         try:
             initialized = session.start()
             self.assertIn("call wiki_context once", initialized["instructions"])
-            self.assertIn("Do not narrate memory activity", initialized["instructions"])
+            self.assertIn("Do not narrate routine memory activity", initialized["instructions"])
+            self.assertIn("Report failures that block an explicit memory request", initialized["instructions"])
             tools = {t["name"] for t in session.call("tools/list")["result"]["tools"]}
             self.assertTrue({"wiki_context", "wiki_search", "wiki_create"} <= tools)
             self.assertNotIn("wiki_accept", tools)

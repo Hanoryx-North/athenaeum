@@ -10,6 +10,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("cli.mjs", include_str!("../../src/cli.mjs")),
     ("agent.mjs", include_str!("../../src/agent.mjs")),
     ("context.mjs", include_str!("../../src/context.mjs")),
+    ("engineering-memory.mjs", include_str!("../../src/engineering-memory.mjs")),
     ("learning.mjs", include_str!("../../src/learning.mjs")),
     ("codex.mjs", include_str!("../../src/codex.mjs")),
     ("memory-service.mjs", include_str!("../../src/memory-service.mjs")),

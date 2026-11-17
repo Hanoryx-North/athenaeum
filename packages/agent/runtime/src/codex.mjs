@@ -25,7 +25,7 @@ export class CodexConnection extends McpClient {
     const cwd = join(home, 'memory-extraction')
     await mkdir(cwd, { recursive: true, mode: 0o700 })
     const configured = await this.request('config/read', { includeLayers: false }, signal)
-    const config = { web_search: 'disabled', model_reasoning_effort: 'low', model_max_output_tokens: 2048,
+    const config = { web_search: 'disabled', model_reasoning_effort: 'low', model_max_output_tokens: 4096,
       'features.shell_tool': false, 'features.apply_patch_freeform': false, 'features.multi_agent': false,
       'features.js_repl': false, 'features.apps': false }
     for (const name of Object.keys(configured.config?.mcp_servers || {})) config[`mcp_servers.${name}.enabled`] = false

@@ -47,7 +47,30 @@ impl KnowledgeStore {
         Ok(hits
             .into_iter()
             .filter(|hit| {
-                let text = hit.node.search_text();
+                // Source paths and registry text can match a task without
+                // contributing a lesson. Require a semantic entry point in
+                // the title or summary before counting body matches.
+                let heading = format!("{} {}", hit.node.title, hit.node.summary);
+                let expanded_heading =
+                    format!("{} {}", heading, identifier_parts(&heading)).to_lowercase();
+                let heading_words: std::collections::HashSet<_> = expanded_heading
+                    .split(|c: char| !c.is_alphanumeric())
+                    .collect();
+                if !terms
+                    .iter()
+                    .any(|term| heading_words.contains(term.as_str()))
+                {
+                    return false;
+                }
+                // Older capture appended provenance to the body. It remains
+                // searchable interactively but must not establish relevance.
+                let body = hit
+                    .node
+                    .content
+                    .split("\n\nWorkspace:")
+                    .next()
+                    .unwrap_or_default();
+                let text = format!("{} {} {}", hit.node.title, hit.node.summary, body);
                 let expanded = format!("{} {}", text, identifier_parts(&text)).to_lowercase();
                 let words: std::collections::HashSet<_> =
                     expanded.split(|c: char| !c.is_alphanumeric()).collect();
@@ -404,6 +427,31 @@ fn context_terms(task: &str) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::model::NodeType;
+
+    #[test]
+    fn source_registry_matches_do_not_establish_task_relevance() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        store
+            .create_node(
+                KnowledgeNode::new(NodeType::Fact, "Imported source registry")
+                    .with_summary("A source was registered.")
+                    .with_content(
+                        "Workspace: /projects/oauth/callback\nSources: oauth_callback.rs",
+                    ),
+            )
+            .unwrap();
+        assert!(store
+            .search_context("debug oauth callback", 5)
+            .unwrap()
+            .is_empty());
+        // Interactive search still finds the reference when explicitly requested.
+        assert!(!store.search("oauth callback", 5).unwrap().is_empty());
+        let useful = store.create_node(KnowledgeNode::new(NodeType::Gotcha, "OAuth callback must validate state")
+            .with_summary("Reject a callback whose state does not match the initiating session to prevent CSRF.")).unwrap();
+        let hits = store.search_context("debug oauth callback", 5).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.id, useful.id);
+    }
 
     #[test]
     fn task_recall_does_not_seed_unrelated_claims_from_common_words() {

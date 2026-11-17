@@ -31,17 +31,17 @@ export function BackgroundMemory({ workspace }: { workspace: string }) {
           <Label htmlFor="background-memory-model">Memory model</Label>
           <Input id="background-memory-model" value={model} onChange={(event) => setModel(event.target.value)} disabled={busy} />
         </div>
-        <Button variant="outline" disabled={busy || !status || !model.trim() || model === settings.model} onClick={() => void configure(workspace, { ...settings, model })}>Save model</Button>
+        <Button variant="outline" disabled={busy || !status || !model.trim() || model === settings.model && settings.wikiRoot === workspace} onClick={() => void configure(workspace, { ...settings, model })}>Save model</Button>
       </div>
       <p className="text-xs text-muted-foreground">Memory activity stays out of chat. The selected model is checked before enabling. It never falls back to the coding model.</p>
       <p role="status" className="text-sm">{!status ? busy ? "Checking memory service..." : "Memory service unavailable." : !settings.enabled ? "Background learning is off." : status.active === false ? "Automatic capture is off in your agent connection settings." : `${status.state === "running" ? "Processing. " : "Ready. "}${pending} queued, ${completed} completed, ${proposed} proposed${failed ? `, ${failed} failed` : ""}.`}</p>
       {settings.wikiRoot && <p className="break-all text-xs text-muted-foreground">Memory wiki: {settings.wikiRoot}</p>}
       {(error || status?.error || failed > 0) && <p role="alert" className="text-sm text-destructive">{error || status?.error || "Some memory jobs failed. Check the model and connection before trying again. Completed jobs remain available."}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" size="sm" disabled={busy || !settings.enabled} onClick={() => void run(workspace)}>{busy ? "Checking..." : "Process pending memory"}</Button>
+        <Button variant="ghost" size="sm" disabled={busy || !settings.wikiRoot} onClick={() => void run(workspace)}>{busy ? "Checking..." : "Process pending memory"}</Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => void refresh(workspace)}>Check memory service</Button>
       </div>
-      {!!status?.jobs.length && <ul className="space-y-1 text-xs text-muted-foreground" aria-label="Recent memory jobs">{status.jobs.slice(0, 3).map((job) => <li key={job.id}>{job.source === "codex" ? "Codex" : "Athenaeum"}: {job.status === "failed" ? `failed during ${job.failureStage ?? "processing"}` : job.proposed?.length ? `${job.proposed.length} proposed` : job.outcome === "no_candidates" ? "no reusable finding" : job.outcome === "discarded" ? "unsupported or duplicate findings skipped" : job.outcome?.startsWith("no_") ? "no supported source excerpts" : job.status}{job.model ? ` (${job.model})` : ""}</li>)}</ul>}
+      {!!status?.jobs.length && <ul className="space-y-1 text-xs text-muted-foreground" aria-label="Recent memory jobs">{status.jobs.slice(0, 3).map((job) => <li key={job.id}>{job.source === "text" ? "Submitted text" : job.source === "codex" ? "Codex" : "Athenaeum"}: {job.status === "failed" ? `failed during ${job.failureStage ?? "processing"}` : job.proposed?.length ? `${job.proposed.length} proposed` : job.outcome === "no_candidates" ? "no reusable finding" : job.outcome === "discarded" ? "unsupported or duplicate findings skipped" : job.outcome?.startsWith("no_") ? "no supported source excerpts" : job.status}{job.extraction?.totalChunks ? ` · ${job.extraction.completedChunks ?? 0}/${job.extraction.totalChunks} sections analyzed` : ""}{job.extraction?.coverage?.truncated ? " · source observations exceeded the capture budget" : ""}{job.model ? ` (${job.model})` : ""}</li>)}</ul>}
     </section>
   )
 }

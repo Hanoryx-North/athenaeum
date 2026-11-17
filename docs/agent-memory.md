@@ -42,10 +42,11 @@ while minimized. Closing Athenaeum stops this service. New Codex sessions are
 collected every 15 seconds. Interrupted turns and turns from before enabling are
 skipped. Pausing and resuming does not import work from the paused interval.
 
-The memory model receives the completed result and numbered source excerpts,
-without the raw conversation. It selects evidence references instead of copying
-code. The worker checks those exact excerpts against current files, searches for
-duplicates, and proposes at most two findings. It can propose relationships only
+The memory model receives bounded task/result data, numbered source blocks and
+command observations, without the raw conversation. It selects evidence references
+instead of copying code. The worker checks source excerpts against current files,
+searches for duplicates, and proposes at most four structured lessons. Command
+failures remain session observations rather than source verification. It can propose relationships only
 to existing nodes supplied as related knowledge. References outside the memory
 wiki use external evidence with their source workspace and path. The wiki does
 not pretend it can recheck those files locally. Excerpts support review, but do
@@ -65,3 +66,9 @@ is available through `wiki desktop invoke background_memory --stdin --json` with
 through configuration to keep it paused after restart. Discover signatures with
 `wiki desktop actions background_memory --json`. `wiki agent -- memory` reads job
 diagnostics without returning transcripts.
+
+Use **Review → Extract knowledge from text** to submit a talk or explanation to
+the same configured model. Inputs up to 64 KiB are analyzed in bounded sections;
+findings use the existing review queue and automatic saving policy. Progress is
+shown under Background memory. See [engineering memory](engineering-memory.md)
+for CLI intake, architecture decisions, verification and remaining limitations.

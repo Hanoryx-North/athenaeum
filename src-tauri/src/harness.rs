@@ -879,9 +879,10 @@ pub async fn background_memory(
     action: String,
     settings: Option<Value>,
     thread_id: Option<String>,
+    document: Option<Value>,
 ) -> Result<Value, String> {
-    if !["status", "configure", "run", "restart", "stop"].contains(&action.as_str()) {
-        return Err("Choose status, configure, run, restart or stop.".into());
+    if !["status", "configure", "run", "restart", "stop", "ingest"].contains(&action.as_str()) {
+        return Err("Choose status, configure, run, restart, stop or ingest.".into());
     }
     if action == "stop" {
         state.shutdown();
@@ -900,7 +901,7 @@ pub async fn background_memory(
     let runtime = state
         .0
         .runtime_for(&app, Path::new(&project_path), Some(&route))?;
-    let response = runtime.request(json!({ "type": "memory", "requestId": runtime.next_request_id("memory"), "action": if action == "restart" { "status" } else { &action }, "settings": settings, "threadId": thread_id })).await?;
+    let response = runtime.request(json!({ "type": "memory", "requestId": runtime.next_request_id("memory"), "action": if action == "restart" { "status" } else { &action }, "settings": settings, "threadId": thread_id, "document": document })).await?;
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
 }
 

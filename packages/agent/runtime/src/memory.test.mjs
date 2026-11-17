@@ -25,7 +25,7 @@ test('automatic recall preserves the trust wrapper, bounds the query, and uses u
   assert.equal(a.items[0].call_id, a.items[1].call_id)
   assert.notEqual(a.items[0].call_id, b.items[0].call_id)
   assert.equal(requests[0][1].arguments.task.length, 4000)
-  assert.equal(requests[0][1].arguments.maxNodes, 12)
+  assert.equal(requests[0][1].arguments.maxNodes, 5)
 })
 
 test('empty, oversized, unavailable and approval-requiring recall do not retry or inject failures', async () => {
@@ -48,6 +48,23 @@ test('empty, oversized, unavailable and approval-requiring recall do not retry o
   assert.equal((await recallContext(connection(() => assert.fail()), '', signal)).diagnostic.status, 'no_text')
   const controller = new AbortController(); controller.abort()
   await assert.rejects(recallContext(connection(async () => response), 'task', controller.signal), /abort/i)
+})
+
+test('negative recall caches exact tasks within a session and retries after expiry or a repository change', async () => {
+  let calls = 0
+  const c = connection(async () => { calls++; return { structuredContent: { brief: { nodes: [], warnings: [] } } } })
+  const first = await recallContext(c, 'Debug retry failures', signal, { identity: 'project-a' })
+  for (let index = 0; index < 5; index++) {
+    const cached = await recallContext(c, 'Debug retry failures', signal, { identity: 'project-a', previous: first.diagnostic })
+    assert.equal(cached.diagnostic.cached, true); assert.deepEqual(cached.items, [])
+  }
+  assert.equal(calls, 1)
+  await recallContext(c, 'Debug retry failures', signal, { identity: 'project-b', previous: first.diagnostic })
+  await recallContext(c, 'Debug auth failures', signal, { identity: 'project-a', previous: first.diagnostic })
+  await recallContext(c, 'Debug retry failures', signal, { identity: 'project-a', previous: { ...first.diagnostic, checkedAt: new Date(Date.now() - 61000).toISOString() } })
+  assert.equal(calls, 4)
+  assert.equal((await recallContext(c, 'Thanks!', signal)).diagnostic.status, 'no_task')
+  assert.equal(calls, 4)
 })
 
 test('native turns recall once without chat activity, persist diagnostics, and honor disabled automatic memory', async (t) => {

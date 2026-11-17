@@ -50,6 +50,7 @@ import {
 } from "@/lib/engine-present"
 import { cn } from "@/lib/utils"
 import { useAutomationStore } from "@/stores/automation-store"
+import { KnowledgeIntake } from "./knowledge-intake"
 
 export function ProposalQueue() {
   const project = useWikiStore((s) => s.project)
@@ -136,6 +137,8 @@ export function ProposalQueue() {
         <p className="break-all">Pages are saved in {workspace}/wiki</p>
         {automation.error && <p role="alert" className="text-destructive">{automation.error}</p>}
       </div>
+
+      {workspace && <KnowledgeIntake key={workspace} workspace={workspace} />}
 
       {error && engineState.kind !== "absent-vault" && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-xs text-destructive">

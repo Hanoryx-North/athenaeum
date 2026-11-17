@@ -45,6 +45,7 @@ interface Payload {
 interface SessionState {
   nudged?: boolean;
   lastSyncCheck?: number;
+  emptyRecall?: { key: string; at: number };
 }
 
 /**
@@ -78,7 +79,7 @@ async function dispatch(options: HookOptions, env: NodeJS.ProcessEnv): Promise<H
     case 'session-start':
       return sessionStart(client, capture);
     case 'user-prompt':
-      return userPrompt(client, payload);
+      return userPrompt(client, payload, options, env, workspace);
     case 'stop':
       return stop(client, payload, options, env, workspace);
   }
@@ -93,16 +94,25 @@ async function sessionStart(client: AthenaeumClient, capture: CaptureMode): Prom
   if (status.indexStale || (status.hasVault && status.indexedAt == null)) await client.index({ scope: 'vault' }).catch(() => undefined);
   const lines = [`Athenaeum: this project's knowledge base has ${status.nodes} nodes${status.proposals ? ` and ${status.proposals} proposal${status.proposals === 1 ? '' : 's'} awaiting a person's review` : ''}.`];
   if (capture !== 'off') lines.push('', INSTRUCTIONS);
+  lines.push('Task recall is handled automatically by the UserPromptSubmit hook. Do not repeat wiki_context for the same task, including when the hook supplies no knowledge.');
   return output({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: lines.join('\n') } });
 }
 
-async function userPrompt(client: AthenaeumClient, payload: Payload): Promise<HookResult> {
+async function userPrompt(client: AthenaeumClient, payload: Payload, options: HookOptions, env: NodeJS.ProcessEnv, workspace: string): Promise<HookResult> {
   const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
   // Slash commands and one-word replies carry no task to recall knowledge for.
   if (prompt.length < MIN_PROMPT || prompt.startsWith('/')) return QUIET;
-  const context = await client.context({ task: prompt.slice(0, 2_000), depth: 2, maxNodes: 12 });
-  if (!context.brief.nodes.length) return QUIET;
-  const text = context.prompt.length > MAX_CONTEXT ? `${context.prompt.slice(0, MAX_CONTEXT)}\n…\n</retrieved_knowledge>` : context.prompt;
+  const state = new SessionMemory(options.stateDir ?? env.ATHENAEUM_HOOK_STATE_DIR ?? path.join(os.tmpdir(), 'athenaeum-hooks'), `${workspace}:${payload.session_id ?? ''}`);
+  const memory = state.read();
+  const key = crypto.createHash('sha256').update(prompt.slice(0, 2_000)).digest('hex');
+  if (memory.emptyRecall?.key === key && Date.now() - memory.emptyRecall.at < 60_000) return QUIET;
+  const context = await client.context({ task: prompt.slice(0, 2_000), depth: 1, maxNodes: 5 });
+  if (!context.brief.nodes.length) {
+    memory.emptyRecall = { key, at: Date.now() }; state.write(memory); return QUIET;
+  }
+  // Never cut off a trust wrapper or selectively remove its warnings.
+  if (context.prompt.length > MAX_CONTEXT) return QUIET;
+  const text = context.prompt;
   return output({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } });
 }
 

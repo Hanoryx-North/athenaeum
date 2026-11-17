@@ -16,8 +16,8 @@ test('Codex history includes successful file observations and final text, with b
     { type: 'reasoning', text: 'private reasoning' },
   ] })
   const text = JSON.stringify(history)
-  assert.match(text, /Confirmed result/); assert.match(text, /source text/)
-  assert.doesNotMatch(text, /private-image|private reasoning|Progress|read failed/)
+  assert.match(text, /read failed/); assert.match(text, /Confirmed result/); assert.match(text, /source text/)
+  assert.doesNotMatch(text, /private-image|private reasoning|Progress/)
   assert.ok(Buffer.byteLength(text) < 80 * 1024)
 })
 test('collector captures a fast completed Codex turn once, skips older/interrupted turns, and survives a lost cursor', async (t) => {
@@ -40,4 +40,16 @@ test('collector captures a fast completed Codex turn once, skips older/interrupt
   await service.collect()
   const jobs = (await learningStatus(home)).jobs
   assert.equal(jobs.length, 1); assert.equal(jobs[0].source, 'codex'); assert.equal(jobs[0].model, 'gpt-6-luna')
+})
+
+test('session collection failure does not block queued intake and remains visible in diagnostics', async () => {
+  const service = new MemoryService('/unused')
+  service.config = { backgroundMemory: { enabled: true, includeCodex: true, model: 'memory-model' } }
+  service.collect = async () => { throw new Error('Private transport detail') }
+  let processed = 0
+  service.worker = { wake: async () => { processed++ } }
+  await service.run()
+  assert.equal(processed, 1)
+  assert.match(service.error, /could not read Codex sessions/)
+  assert.doesNotMatch(service.error, /Private transport detail/)
 })

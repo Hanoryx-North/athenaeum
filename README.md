@@ -5,6 +5,9 @@ integrated coding assistant. Knowledge stays in your files; the agent uses a
 model provider you configure and recalls useful project knowledge through the
 same versioned bridge as other clients.
 
+Engineering memory supports reviewed lessons from coding work and pasted text;
+see the [implementation audit and usage guide](docs/engineering-memory.md).
+
 The desktop UI and wiki workflows derive from
 [llm_wiki](https://github.com/nashsu/llm_wiki), GPL-3.0, © Yong Su.
 See [provenance](docs/provenance.md).

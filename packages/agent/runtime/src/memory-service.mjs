@@ -4,34 +4,39 @@ import { isAbsolute, join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 import { atomicJson, loadConfig, sessionFile } from './config.mjs'
 import { CodexConnection, codexCommand } from './codex.mjs'
-import { enqueueLearning, learningEnabled, learningStatus, LearningWorker } from './learning.mjs'
+import { enqueueLearning, enqueueText, learningEnabled, memoryModelConfigured, learningStatus, LearningWorker } from './learning.mjs'
 
 export function codexHistory(turn) {
-  const history = []
+  const records = []
   let budget = 80 * 1024
-  const append = (value) => {
-    const bytes = Buffer.byteLength(JSON.stringify(value))
+  const append = (values, order) => {
+    const bytes = Buffer.byteLength(JSON.stringify(values))
     if (bytes > budget) return
-    budget -= bytes; history.push(value)
+    budget -= bytes; records.push({ values, order })
   }
-  for (const item of turn.items || []) {
-    if (item.type === 'userMessage') append({ role: 'user', content: [{ type: 'input_text', text: (item.content || []).filter((part) => part.type === 'text').map((part) => part.text).join('\n').slice(0, 12000) }] })
-    if (item.type === 'agentMessage' && item.phase !== 'commentary') append({ role: 'assistant', content: item.text.slice(0, 12000) })
-    if (item.type === 'commandExecution' && item.status === 'completed' && item.exitCode === 0 && typeof item.aggregatedOutput === 'string') {
-      const output = item.aggregatedOutput.slice(0, 48000)
-      const pair = [
+  const boundedOutput = (text, limit) => text.length <= limit ? text : text.slice(0, Math.floor(limit / 2)) + '\n[Output truncated; middle omitted]\n' + text.slice(-Math.floor(limit / 2))
+  const items = turn.items || []
+  // Reserve actual normalized task/outcome bytes first, then restore chronology.
+  for (const [order, item] of items.entries()) {
+    if (item.type === 'userMessage') append([{ role: 'user', content: [{ type: 'input_text', text: (item.content || []).filter((part) => part.type === 'text').map((part) => part.text).join('\n').slice(0, 12000) }] }], order)
+    if (item.type === 'agentMessage' && item.phase !== 'commentary') append([{ role: 'assistant', content: item.text.slice(0, 12000) }], order)
+  }
+  for (const [order, item] of items.entries()) {
+    if (item.type === 'commandExecution' && item.status === 'completed' && Number.isInteger(item.exitCode) && typeof item.aggregatedOutput === 'string') {
+      append([
         { type: 'function_call', call_id: item.id, name: 'exec_command', arguments: JSON.stringify({ cmd: item.command }) },
-        { type: 'function_call_output', call_id: item.id, output: JSON.stringify({ exitCode: 0, output }) },
-      ]
-      if (Buffer.byteLength(JSON.stringify(pair)) <= budget) pair.forEach(append)
+        { type: 'function_call_output', call_id: item.id, output: JSON.stringify({ exitCode: item.exitCode, output: boundedOutput(item.aggregatedOutput, 12000) }) },
+      ], order)
     }
     if (item.type === 'fileChange' && item.status === 'completed') for (const [index, change] of (item.changes || []).entries()) {
       if (!change.path || typeof change.diff !== 'string') continue
-      append({ type: 'function_call', call_id: `${item.id}-${index}`, name: 'apply_patch', arguments: '{}' })
-      append({ type: 'function_call_output', call_id: `${item.id}-${index}`, output: JSON.stringify({ changed: [change.path], diff: change.diff.slice(0, 16000) }) })
+      append([
+        { type: 'function_call', call_id: `${item.id}-${index}`, name: 'apply_patch', arguments: '{}' },
+        { type: 'function_call_output', call_id: `${item.id}-${index}`, output: JSON.stringify({ changed: [change.path], diff: boundedOutput(change.diff, 16000) }) },
+      ], order)
     }
   }
-  return history
+  return records.sort((a, b) => a.order - b.order).flatMap((record) => record.values)
 }
 
 export class MemoryService {
@@ -118,11 +123,14 @@ export class MemoryService {
   }
   run(threadId) {
     if (this.running) return threadId ? this.running.then(() => this.run(threadId)) : this.running
-    if (!learningEnabled(this.config)) return Promise.resolve()
+    if (!memoryModelConfigured(this.config)) return Promise.resolve()
     this.running = (async () => {
       this.state = 'running'; this.error = null
       try {
-        if (this.config.backgroundMemory.includeCodex || threadId) await this.collect(threadId)
+        if (learningEnabled(this.config) && (this.config.backgroundMemory.includeCodex || threadId)) {
+          try { await this.collect(threadId) }
+          catch { this.error = 'Background memory could not read Codex sessions. Queued work is still processed; check your ChatGPT connection.' }
+        }
         await this.worker.wake()
         this.lastRunAt = new Date().toISOString()
       } catch { this.error = 'Background memory could not connect or read sessions. Check your ChatGPT connection and retry.' }
@@ -145,13 +153,18 @@ export async function memoryServer(home) {
   let serial = Promise.resolve()
   const send = (value) => process.stdout.write(JSON.stringify(value) + '\n')
   input.on('line', (line) => {
-    if (Buffer.byteLength(line) > 16384) return
+    if (Buffer.byteLength(line) > 128 * 1024) return
     let request
     try { request = JSON.parse(line) } catch { return }
     serial = serial.then(async () => {
       try {
         if (request.type === 'shutdown') { input.close(); return }
         if (request.type !== 'memory') throw new Error('Unsupported memory operation.')
+        if (request.action === 'ingest') {
+          const result = await enqueueText(home, request.document, service.config)
+          void service.run()
+          send({ kind: 'result', requestId: request.requestId, result }); return
+        }
         if (request.action === 'configure') await service.configure(request.settings)
         else if (request.action === 'run') { await service.run(request.threadId) }
         else if (request.action !== 'status') throw new Error('Choose configure, status or run.')

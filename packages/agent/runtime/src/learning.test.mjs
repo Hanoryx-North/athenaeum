@@ -5,9 +5,12 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { atomicJson, sessionFile } from './config.mjs'
-import { enqueueLearning, learningStatus, LearningWorker } from './learning.mjs'
+import { enqueueLearning, enqueueText, captureText, learningStatus, LearningWorker } from './learning.mjs'
 
-const candidate = () => ({ type: 'gotcha', title: 'Retry budget protects the shared quota', summary: 'Keep retry work bounded to prevent outage amplification.', content: 'The retry budget is three. Broader outage behavior has not been tested.', evidence: [{ path: 'retry.mjs', excerpt: 'export const retryBudget = 3' }] })
+const candidate = () => ({ type: 'gotcha', title: 'Retry budget protects the shared quota', summary: 'Keep retry work bounded to prevent outage amplification.',
+  lesson: { recommendation: 'Keep the shared retry budget at three attempts.', rationale: 'Unbounded retries amplify outages and consume the shared quota.',
+    whenToUse: 'When changing retry behavior in this project.', validation: 'The configured budget was inspected; outage behavior has not been tested.', limits: 'Do not infer behavior under concurrent failures from this constant alone.' },
+  evidence: [{ path: 'retry.mjs', excerpt: 'export const retryBudget = 3' }] })
 async function fixture(t, candidates = [candidate()], { duplicate = false, related = false, tools = true, gate } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'athenaeum-learning-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
@@ -41,7 +44,8 @@ reply({structuredContent:data,content:[{type:'text',text:'reference material'}]}
     requested()
     if (gate) await gate
     response.writeHead(200, { 'Content-Type': 'application/json' })
-    response.end(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ candidates }) }] }] }))
+    const selected = typeof candidates === 'function' ? candidates(requests.at(-1)) : candidates
+    response.end(JSON.stringify({ status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ candidates: selected }) }] }] }))
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve) }))
@@ -68,11 +72,11 @@ test('separate learning worker verifies sources, searches first, proposes with e
   await worker.wake(); await worker.close()
   assert.equal(f.requests.length, 1)
   assert.equal(f.requests[0].model, 'cheap-model')
-  assert.equal(f.requests[0].max_output_tokens, 2048)
+  assert.equal(f.requests[0].max_output_tokens, 4096)
   assert.deepEqual(f.requests[0].tools, [])
   const calls = await f.calls()
   assert.deepEqual(calls.map((item) => item.name), ['wiki_search', 'wiki_search', 'wiki_create', 'wiki_attach_evidence'])
-  assert.match(calls[2].arguments.content, /retry.mjs/)
+  assert.match(calls[2].arguments.content, /## Why it matters/); assert.doesNotMatch(calls[2].arguments.content, /Workspace:|Sources:/)
   assert.equal(calls[3].arguments.node, 'node_proposed')
   assert.equal((await learningStatus(f.home)).jobs[0].status, 'completed')
   assert.ok(!JSON.stringify(await learningStatus(f.home)).includes('Investigate retry'))
@@ -115,10 +119,11 @@ test('learning refuses stale excerpts, private files, unobserved sources and gen
     { ...candidate(), evidence: [{ path: 'retry.mjs', excerpt: 'export const retryBudget = 99' }] },
     { ...candidate(), evidence: [{ path: '.env', excerpt: 'some private source text' }] },
     { ...candidate(), evidence: [{ path: '../outside.mjs', excerpt: 'some outside source text' }] },
-    { ...candidate(), content: 'api_key = sk-testcredentialvalue123456789' },
+    { ...candidate(), lesson: { ...candidate().lesson, rationale: 'api_key = sk-testcredentialvalue123456789' } },
     { ...candidate(), evidence: [{ path: 'unobserved.mjs', excerpt: 'some unseen source text' }] },
+    { ...candidate(), evidence: { source: 'source_1' } },
   ]
-  for (const value of bad) await t.test(value.evidence[0].path + value.content.slice(0, 6), async (subtest) => {
+  for (const value of bad) await t.test((value.evidence[0]?.path || 'invalid-shape') + value.title.slice(0, 6), async (subtest) => {
     const f = await fixture(subtest, [value])
     await enqueueLearning(f.home, f.session, f.config)
     const worker = new LearningWorker(f.home, f.config)
@@ -166,4 +171,125 @@ test('shutdown preserves pending learning for a fresh worker and releases the pr
   await resumed.wake(); await resumed.close()
   assert.equal((await learningStatus(f.home)).jobs[0].status, 'completed')
   assert.equal((await f.calls()).filter((call) => call.name === 'wiki_create').length, 1)
+})
+
+
+test('failed commands support debugging lessons without pretending to verify source files', async (t) => {
+  const value = { ...candidate(), evidence: [{ source: 'command_1' }] }
+  const f = await fixture(t, [value])
+  f.session.history = [f.session.history[0],
+    { type: 'function_call', call_id: 'test', name: 'exec_command', arguments: JSON.stringify({ cmd: 'npm test -- retry' }) },
+    { type: 'function_call_output', call_id: 'test', output: JSON.stringify({ exitCode: 1, output: 'Assertion failed: retries exceeded budget.' }) },
+    { role: 'assistant', content: 'The retry test exposed a missing retry bound.' }]
+  await enqueueLearning(f.home, f.session, f.config)
+  const worker = new LearningWorker(f.home, f.config)
+  await worker.wake(); await worker.close()
+  const calls = await f.calls()
+  assert.equal(calls.find((call) => call.name === 'wiki_attach_evidence').arguments.kind, 'external_source')
+  assert.match(calls.at(-1).arguments.note, /Exit: 1/)
+  const input = JSON.parse(f.requests[0].input[0].content)
+  assert.equal(input.sourceObservations[0].exitCode, 1)
+})
+
+test('a substantial coding turn retains late-file architectural reasoning, failures and genuine tool evidence', async (t) => {
+  const f = await fixture(t, (request) => {
+    const input = JSON.parse(request.input[0].content)
+    const source = input.sourceObservations.find((item) => item.path === 'boundary-11.rs')
+    assert.match(source.excerpt, /Only reviewed rules may enter the compiler/)
+    assert.match(source.excerpt, /struct ReviewedRule/)
+    assert.equal(input.coverage.suppliedBlocks, 12)
+    assert.ok(input.sourceObservations.some((item) => item.exitCode === 1))
+    assert.equal(input.frictionSignals.length, 1)
+    assert.doesNotMatch(JSON.stringify(input), /private credential value/)
+    return [{ ...candidate(), title: 'Reviewed rule types protect compiler boundaries',
+      lesson: { recommendation: 'Require ReviewedRule at the compiler API boundary.',
+        rationale: 'Separating generated proposals from reviewed rules prevents accidental enforcement.',
+        whenToUse: 'When extending this project’s rule compiler or memory proposal integration.',
+        validation: 'The API was inspected; the failing compile test exposed raw proposal acceptance.',
+        limits: 'The type boundary does not prove the quality of the reviewed rule.' }, evidence: [{ source: source.id }] }]
+  })
+  const history = [f.session.history[0]]
+  for (let index = 0; index < 12; index++) {
+    const path = `boundary-${index}.rs`
+    const text = index === 11
+      ? '// Only reviewed rules may enter the compiler; generated proposals remain reference data.\npub struct ReviewedRule(String);\npub fn compile(rule: ReviewedRule) {}\n'
+      : `// Separate the parsing and validation stage for component ${index}.\npub fn validate_${index}() -> bool { true }\n`
+    await writeFile(join(f.session.root, path), text)
+    history.push({ type: 'function_call', call_id: `read-${index}`, name: 'read_file', arguments: JSON.stringify({ path }) },
+      { type: 'function_call_output', call_id: `read-${index}`, output: JSON.stringify({ text }) })
+  }
+  for (const [index, command] of ['cargo test compiler', 'cargo test compiler -- --nocapture', 'cargo test compiler --lib'].entries()) {
+    history.push({ type: 'function_call', call_id: `cmd-${index}`, name: 'exec_command', arguments: JSON.stringify({ cmd: command }) },
+      { type: 'function_call_output', call_id: `cmd-${index}`, output: JSON.stringify({ exitCode: index === 2 ? 0 : 1, output: index === 2 ? 'Compiler boundary test passed.' : 'Compile test failed: raw proposals accepted by compiler.' }) })
+  }
+  history.push({ type: 'function_call', call_id: 'private', name: 'exec_command', arguments: JSON.stringify({ cmd: 'cat .env' }) },
+    { type: 'function_call_output', call_id: 'private', output: JSON.stringify({ exitCode: 0, output: 'private credential value' }) },
+    { role: 'assistant', content: 'Introduced a reviewed rule type at the compiler boundary after reproducing unsafe raw proposal acceptance.' })
+  f.session.history = history
+  await enqueueLearning(f.home, f.session, f.config)
+  const worker = new LearningWorker(f.home, f.config)
+  await worker.wake(); await worker.close()
+  assert.equal((await learningStatus(f.home)).jobs[0].proposed.length, 1)
+  const calls = await f.calls()
+  assert.equal(calls.find((call) => call.name === 'wiki_attach_evidence').arguments.file, 'boundary-11.rs')
+})
+
+test('text intake is opt-in, bounded, deduplicated and tied to the selected wiki', async (t) => {
+  const f = await fixture(t)
+  const config = { ...f.config, capture: 'off', backgroundMemory: { ...f.config.backgroundMemory, enabled: false, wikiRoot: f.session.root } }
+  const document = { title: 'High trust engineering', scope: 'universal', text: 'Use type boundaries and regression tests for recurring mistakes.', wikiRoot: f.session.root }
+  await assert.rejects(enqueueText(f.home, document, {}), /Configure a separate/)
+  await assert.rejects(enqueueText(f.home, { ...document, text: 'x'.repeat(65537) }, config), /64 KiB/)
+  await assert.rejects(enqueueText(f.home, { ...document, text: 'password = abcdefghijklmnop' }, config), /credentials/)
+  await assert.rejects(enqueueText(f.home, { ...document, wikiRoot: f.home }, config), /another wiki/)
+  assert.equal((await enqueueText(f.home, document, config)).status, 'queued')
+  assert.equal((await enqueueText(f.home, document, config)).status, 'already_queued')
+  assert.equal(f.requests.length, 0)
+})
+
+test('an explicitly submitted document runs while automatic session learning stays off', async (t) => {
+  const f = await fixture(t, [{ ...candidate(), evidence: [{ source: 'text_1_1' }] }])
+  await enqueueLearning(f.home, f.session, f.config)
+  const [name] = await readdir(join(f.home, 'memory-jobs'))
+  const file = join(f.home, 'memory-jobs', name)
+  const job = JSON.parse(await readFile(file, 'utf8'))
+  job.document = { title: 'Reviewed engineering reference', text: 'Bound retries to avoid amplifying an outage and exhausting a shared quota.', scope: 'project' }
+  delete job.history
+  await atomicJson(file, job)
+  // Leave a second ordinary coding job pending: pausing capture must protect it.
+  await enqueueLearning(f.home, f.session, f.config)
+  const worker = new LearningWorker(f.home, { ...f.config, capture: 'off', backgroundMemory: { ...f.config.backgroundMemory, enabled: false } })
+  await worker.wake(); await worker.close()
+  const jobs = (await learningStatus(f.home)).jobs
+  assert.equal(f.requests.length, 1)
+  assert.equal(jobs.filter((item) => item.status === 'pending').length, 1)
+  assert.equal(jobs.filter((item) => item.status === 'completed' && item.proposed.length === 1).length, 1)
+})
+
+test('long text is analyzed completely, resumes at its checkpoint and proposes reviewable lessons with separate evidence', async (t) => {
+  const f = await fixture(t, [{ ...candidate(), evidence: [{ source: 'text_1_1' }] }])
+  const calls = []
+  const client = { request: async (_method, params) => {
+    calls.push(params)
+    return { structuredContent: params.name === 'wiki_search' ? { items: [] } : params.name === 'wiki_create' ? { node: { id: 'lesson' }, pendingReview: true, durable: false } : { evidence: {} } }
+  } }
+  const connection = { handlers: new Map(['wiki_search', 'wiki_create', 'wiki_attach_evidence'].map((tool) => [tool, { tool, client }])) }
+  const text = ('Enforce dependency boundaries with types and tests. Preserve CLI errors and measure unnecessary retries.\n\n').repeat(280) + 'Final unique lesson: verify the application at runtime.'
+  const job = { root: f.session.root, model: 'cheap-model', inputHash: 'source-hash', document: { title: 'Two engineering talks', text, scope: 'universal' } }
+  let checkpoints = 0
+  const result = await captureText(job, f.config, connection, new AbortController().signal, async () => { checkpoints++ })
+  const inputs = f.requests.map((request) => JSON.parse(request.input[0].content))
+  assert.equal(inputs.flatMap((input) => input.sourceObservations.map((source) => source.excerpt)).join(''), text)
+  assert.ok(checkpoints >= 3)
+  assert.equal(result.extraction.completedChunks, result.extraction.totalChunks)
+  // The fixed fixture refers to chunk one's evidence. Subsequent chunks must
+  // reject that reference rather than attaching the wrong source.
+  assert.equal(result.proposed.length, 1)
+  assert.ok(result.extraction.unsupported >= 2)
+  assert.equal(calls.find((call) => call.name === 'wiki_create').arguments.scope, 'universal')
+  assert.doesNotMatch(calls.find((call) => call.name === 'wiki_create').arguments.content, /source-hash|Sources:/)
+  assert.match(calls.find((call) => call.name === 'wiki_attach_evidence').arguments.note, /not verified project behavior/)
+  const before = f.requests.length
+  await captureText(job, f.config, connection, new AbortController().signal)
+  assert.equal(f.requests.length, before)
 })

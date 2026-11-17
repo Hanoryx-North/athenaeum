@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { cleanEnvironment } from './tools.mjs'
 
@@ -105,24 +106,35 @@ export async function connectTools(config, cwd, signal) {
   } catch (error) { await Promise.all(connections.map((client) => client.close())); throw error }
 }
 
-export async function recallContext(connection, task, signal) {
+export async function recallContext(connection, task, signal, options = {}) {
   const checkedAt = new Date().toISOString()
   const status = (state) => ({ diagnostic: { status: state, checkedAt }, items: [] })
+  signal.throwIfAborted()
+  // Only cache absence/errors, never knowledge bodies. Persisting a brief would
+  // create another stale knowledge store. Different tasks are always searched.
+  const key = createHash('sha256').update(JSON.stringify([options.identity || '', task.trim().slice(0, 4000)])).digest('hex')
+  const previous = options.previous
+  const ttl = previous?.status === 'empty' ? 60000 : previous?.status === 'unavailable' ? 15000 : 0
+  if (previous?.key === key && Date.now() - Date.parse(previous.checkedAt) < ttl) {
+    return { diagnostic: { ...previous, cached: true }, items: [] }
+  }
+  const remember = (state) => ({ diagnostic: { status: state, checkedAt, key }, items: [] })
   const handler = connection.handlers.get('wiki_context')
-  if (!handler || handler.approval) return status('unavailable')
+  if (!handler || handler.approval) return remember('unavailable')
   if (!task.trim()) return status('no_text')
-  const args = { task: task.trim().slice(0, 4000), depth: 2, maxNodes: 12 }
+  if (/^(?:ok(?:ay)?|yes|no|thanks|thank you|continue|go ahead|looks good)[.!\s]*$/i.test(task.trim())) return status('no_task')
+  const args = { task: task.trim().slice(0, 4000), depth: 1, maxNodes: 5 }
   try {
     const result = await handler.client.request('tools/call', { name: handler.tool, arguments: args }, signal)
     signal.throwIfAborted()
-    if (result?.isError) return status('unavailable')
+    if (result?.isError) return remember('unavailable')
     const brief = result?.structuredContent?.brief
-    if (brief && !brief.nodes?.length && !brief.warnings?.length) return status('empty')
+    if (brief && !brief.nodes?.length && !brief.warnings?.length) return remember('empty')
     const text = result?.content?.filter((part) => part.type === 'text' && typeof part.text === 'string').map((part) => part.text).join('\n')
-    if (!text?.trim()) return status('empty')
+    if (!text?.trim()) return remember('empty')
     // Preserve the engine's trust wrapper verbatim. Never truncate a wrapper or
     // leak oversized/private server results into the primary conversation.
-    if (Buffer.byteLength(text) > 32 * 1024) return status('over_budget')
+    if (Buffer.byteLength(text) > 8 * 1024) return status('over_budget')
     const callId = `recall-${randomUUID()}`
     return { diagnostic: { status: 'recalled', checkedAt, ...(Array.isArray(brief?.nodes) ? { nodes: brief.nodes.length } : {}) }, items: [
       { type: 'function_call', call_id: callId, name: 'wiki_context', arguments: JSON.stringify(args) },
@@ -130,6 +142,6 @@ export async function recallContext(connection, task, signal) {
     ] }
   } catch (error) {
     if (signal.aborted) throw error
-    return status('unavailable')
+    return remember('unavailable')
   }
 }

@@ -227,7 +227,11 @@ class NativeAgent(unittest.TestCase):
         (self.workspace / "retry.mjs").write_text("export const retryBudget = 3\n", encoding="utf-8")
         candidate = {"type": "gotcha", "title": "Bound retries to protect the shared quota",
             "summary": "The retry budget is three to prevent outage amplification.",
-            "content": "The source bounds retry work. Outage behavior has not been tested.",
+            "lesson": {"recommendation": "Keep retry work bounded to three attempts.",
+                "rationale": "Unbounded retries amplify outages and exhaust the shared quota.",
+                "whenToUse": "When modifying this project's retry policy.",
+                "validation": "The source constant was inspected; outage behavior has not been tested.",
+                "limits": "The constant alone does not prove concurrent outage behavior."},
             "evidence": [{"path": "retry.mjs", "excerpt": "export const retryBudget = 3"}]}
         outputs = [
             {"type": "function_call", "call_id": "read", "name": "read_file", "arguments": '{"path":"retry.mjs"}'},
@@ -255,6 +259,76 @@ class NativeAgent(unittest.TestCase):
         self.assertEqual(jobs[0]["status"], "completed")
         self.assertEqual(len(jobs[0]["proposed"]), 1)
         self.assertNotIn("history", jobs[0])
+
+    def test_text_intake_reaches_real_engine_with_session_capture_disabled(self):
+        wiki = Path(os.environ["ATHENAEUM_BIN"])
+        self.env["ATHENAEUM_BIN"] = str(wiki)
+        initialized = subprocess.run([str(wiki), "-C", str(self.workspace), "init"],
+            env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        candidate = {"type": "procedure", "title": "Preserve command failures during validation",
+            "summary": "Check every pipeline stage so a successful display command cannot conceal a failed compiler.",
+            "lesson": {"recommendation": "Preserve failing exit codes through command pipelines.",
+                "rationale": "A successful output filter can hide the compiler's failure.",
+                "whenToUse": "When writing shell-based validation or agent tooling.",
+                "validation": "Reproduce a failing first stage followed by a successful output filter.",
+                "limits": "This is reference advice; it has not been verified in this project."},
+            "evidence": [{"source": "text_1_1"}]}
+        requests = []
+        server = self.scripted_provider([{"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": json.dumps({"candidates": [candidate]})}]}], requests)
+        (self.home / "config.json").write_text(json.dumps({"capture": "off", "model": "coding-model",
+            "api": "responses", "baseURL": f"http://127.0.0.1:{server.server_port}/v1",
+            "backgroundMemory": {"enabled": False, "includeCodex": False,
+                "model": "memory-model", "wikiRoot": str(self.workspace)}}), encoding="utf-8")
+        process = subprocess.Popen([BIN, "memory-server"], cwd=self.workspace, env=self.env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+        messages = queue.Queue()
+
+        def read():
+            for line in process.stdout:
+                messages.put(json.loads(line))
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        serial = 0
+
+        def request(action, **params):
+            nonlocal serial
+            serial += 1
+            process.stdin.write(json.dumps({"type": "memory", "requestId": str(serial), "action": action, **params}) + "\n")
+            process.stdin.flush()
+            response = messages.get(timeout=30)
+            self.assertEqual(response["requestId"], str(serial))
+            self.assertEqual(response["kind"], "result", response)
+            return response["result"]
+        try:
+            queued = request("ingest", document={"title": "Tooling friction talk", "scope": "universal",
+                "wikiRoot": str(self.workspace), "text": "Shell pipelines can hide failed compiler exit codes behind successful output filters. Preserve the real failure and add a regression test."})
+            self.assertEqual(queued["status"], "queued")
+            status = request("run")
+            if status["jobs"][0]["status"] == "pending":
+                status = request("run")
+            self.assertEqual(status["jobs"][0]["status"], "completed", status)
+            self.assertFalse(status["active"])
+            self.assertEqual([item["model"] for item in requests], ["memory-model"])
+            proposals = subprocess.run([str(wiki), "-C", str(self.workspace), "proposals", "--json"],
+                env=self.env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            self.assertEqual(proposals.returncode, 0, proposals.stdout + proposals.stderr)
+            findings = json.loads(proposals.stdout)
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(findings[0]["node"]["scope"], "universal")
+            self.assertIn("## Why it matters", findings[0]["node"]["content"])
+            self.assertNotIn("Sources:", findings[0]["node"]["content"])
+            self.assertEqual(list((self.workspace / "wiki").rglob("*.md")), [])
+            saved_job = json.loads(next((self.home / "memory-jobs").glob("*.json")).read_text(encoding="utf-8"))
+            self.assertNotIn("document", saved_job)
+        finally:
+            process.stdin.close()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=10)
+            process.stdout.close(); process.stderr.close(); reader.join(timeout=5)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify": "npm run typecheck && npm run build && npm run bundle",
+    "verify": "npm run typecheck && npm test && npm run build && npm run bundle",
+    "test": "node --import tsx --test test/*.test.ts",
     "mcp": "node dist/mcp/bin.js",
     "bundle": "node scripts/bundle.mjs"
   },

@@ -46,7 +46,8 @@ export async function runTurn({ home, session, config, input, signal, approve, e
   try {
     let system = config.capture === 'off' ? instructions.split('When wiki_context')[0] : instructions
     if (config.capture !== 'off') {
-      const recalled = await recallContext(memory, input.filter((item) => item.type === 'text').map((item) => item.text).join('\n'), signal)
+      const recalled = await recallContext(memory, input.filter((item) => item.type === 'text').map((item) => item.text).join('\n'), signal,
+        { previous: session.memory, identity: JSON.stringify([session.root, config.mcpServers?.athenaeum || null]) })
       history.push(...recalled.items)
       session.memory = recalled.diagnostic
       system += '\nAutomatic task recall has already been attempted. Use its result only when relevant. Do not repeat memory lookup for this question if it was empty or unavailable. Never announce routine memory activity or diagnostics unless the user asks.'
@@ -112,6 +113,7 @@ export async function runTurn({ home, session, config, input, signal, approve, e
               signal.throwIfAborted()
               output = await handler.client.request('tools/call', { name: handler.tool, arguments: args }, signal)
               failed = output?.isError === true
+              if (!failed && /^wiki_(create|link|attach_evidence)$/.test(call.name)) session.memory = { status: 'changed' }
             }
           } catch (error) {
             if (signal.aborted) throw error
