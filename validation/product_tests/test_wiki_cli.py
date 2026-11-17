@@ -317,6 +317,11 @@ class WikiCli(unittest.TestCase):
             time.sleep(0.05)
         self.assertEqual(json.loads((app / 'started.json').read_text()), ['dev'])
         try:
+            npm = subprocess.run(['node', str(scripts / source.name)], cwd=app,
+                                 capture_output=True, text=True, timeout=10)
+            self.assertEqual(npm.returncode, 0, npm.stdout + npm.stderr)
+            self.assertTrue(json.loads(npm.stdout)['reused'])
+            self.assertEqual(json.loads(npm.stdout)['pid'], first['pid'])
             second = self.cli('start', '--root', self.root, '--json')
             self.assertTrue(json.loads(second.stdout)['reused'])
         finally:
@@ -327,6 +332,37 @@ class WikiCli(unittest.TestCase):
         while descriptor.exists() and time.monotonic() < until:
             time.sleep(0.05)
         self.assertFalse(descriptor.exists())
+
+        # npm start can recover a stale descriptor and outlive its invoking shell.
+        (app / 'stop').unlink()
+        descriptor.write_text('{"pid":1,"port":1,"token":"stale"}')
+        restarted = subprocess.run(['node', str(scripts / source.name)], cwd=app,
+                                   capture_output=True, text=True, timeout=10)
+        try:
+            self.assertEqual(restarted.returncode, 0, restarted.stdout + restarted.stderr)
+            self.assertTrue(json.loads(restarted.stdout)['started'])
+            self.assertNotEqual(json.loads(restarted.stdout)['pid'], first['pid'])
+        finally:
+            (app / 'stop').write_text('stop')
+        until = time.monotonic() + 10
+        while descriptor.exists() and time.monotonic() < until:
+            time.sleep(0.05)
+        self.assertFalse(descriptor.exists())
+
+    def test_live_foreground_launcher_preserves_build_failure(self):
+        app = self.workspace()
+        scripts = app / 'scripts'
+        scripts.mkdir()
+        source = Path(__file__).resolve().parents[2] / 'scripts' / 'live-desktop.mjs'
+        shutil.copy2(source, scripts / source.name)
+        tauri = app / 'node_modules' / '@tauri-apps' / 'cli'
+        tauri.mkdir(parents=True)
+        (tauri / 'tauri.js').write_text("console.error('build failed'); process.exit(7)")
+        result = subprocess.run(['node', str(scripts / source.name), '--foreground'], cwd=app,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+        self.assertIn('build failed', result.stderr)
+        self.assertFalse((app / '.athenaeum-dev' / 'live.json').exists())
 
     def test_disconnect_saved_links_survives_reindex_and_preserves_code(self):
         self.data('-C', self.root, 'repo', 'init', '--name', 'Disconnect')

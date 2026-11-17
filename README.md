@@ -45,7 +45,10 @@ npm run native:build -w athenaeum-agent
 npm start
 ```
 
-`npm start` and `wiki start` use live frontend HMR and incremental native builds.
+`npm start` and `wiki start` start or reuse one persistent live desktop. Leave it
+running: frontend edits hot-update without compiling Rust. Native edits rebuild
+incrementally and restart the app. Logs: `.athenaeum-dev/live.log`.
+Use `npm start -- --foreground` for an attached session when none is running.
 `wiki start --standalone` deliberately uses a frozen snapshot; use
 `npm run desktop:build` to refresh it. Routine development needs no installer or
 release optimization. Native desktop compilation also needs the platform's Tauri

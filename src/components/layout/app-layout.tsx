@@ -111,7 +111,6 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     // it fills the rest of the viewport.
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
-      <div className="shrink-0 truncate border-b px-4 py-2 text-sm font-medium">{project?.name}</div>
       <div className="flex min-h-0 flex-1">
         <IconSidebar onSwitchProject={onSwitchProject} />
         <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">

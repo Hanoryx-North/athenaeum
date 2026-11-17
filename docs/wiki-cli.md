@@ -18,7 +18,10 @@ wiki start --onboarding    # replay the opening flow; keep saved projects and ac
 wiki start --dry-run --json
 ```
 
-The managed session writes logs to `.athenaeum-dev/live.log`. Frontend edits
+`npm start` uses the same persistent session and returns after launching it;
+repeating either command reuses it. `npm start -- --foreground` attaches build
+output when starting a new session. The managed session writes logs to
+`.athenaeum-dev/live.log`. Frontend edits
 hot-update the running webview. Rust changes rebuild incrementally and restart
 the native process. `wiki desktop status --json` reports whether the running app
 is live. Do not leave source changes verified only in a bundle while the user

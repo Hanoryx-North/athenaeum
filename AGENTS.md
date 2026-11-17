@@ -72,6 +72,10 @@ without controlling the user's PC. Expose new domain operations alongside UI wor
 Use `npm start` / `wiki start` for live development with frontend HMR. Native edits
 need incremental compilation. Use `wiki start --standalone` for the deliberately
 frozen snapshot. Do not package installers or use release LTO for routine iteration.
+Before changing the app, start or reuse `wiki start` and confirm desktop status
+reports `live: true`. Leave the managed session running after verification so the
+next edit hot-updates it. Frontend edits need no Cargo build. Preserve `target/`
+and its incremental cache; do not run `cargo clean` for routine changes.
 
 The frontend uses React 19, Tailwind 4 and zustand; `@/` resolves to `src/`. Keep
 `athenaeum-core` free of UI, Tauri and network dependencies. Compile SQLite

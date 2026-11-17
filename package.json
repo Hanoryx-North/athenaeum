@@ -5,7 +5,7 @@
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
-    "start": "tauri dev",
+    "start": "node scripts/live-desktop.mjs",
     "dev": "vite",
     "desktop:build": "node scripts/desktop-build.mjs",
     "relay:build": "node scripts/relay-build.mjs",

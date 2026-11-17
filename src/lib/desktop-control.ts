@@ -8,7 +8,9 @@ import type { DesktopAction } from "@/types/desktop-control"
 type Handler = (...args: unknown[]) => unknown
 interface Registration { description: DesktopAction; run: Handler }
 interface Request { id: string; operation: string; payload: { reveal?: boolean; request?: Record<string, unknown> } }
-const registered = new Map<string, Registration>()
+// Mounted surfaces and the native event listener outlive replaced Vite modules.
+const registered: Map<string, Registration> = import.meta.hot?.data.registered ?? new Map()
+if (import.meta.hot) import.meta.hot.data.registered = registered
 const actions = new Map(catalog.entries.map(action => [action.name, action]))
 const nativeNames = new Set(catalog.native.map(command => command.name))
 const startedAt = new Date().toISOString()
@@ -84,12 +86,16 @@ async function dispatch(operation: string, request: Record<string, unknown>): Pr
   }
 }
 
+const transport: { dispatch: typeof dispatch } = import.meta.hot?.data.transport ?? { dispatch }
+transport.dispatch = dispatch
+if (import.meta.hot) import.meta.hot.data.transport = transport
+
 export async function startDesktopControl(): Promise<() => void> {
   const session = crypto.randomUUID()
   const unlisten = await listen<Request>("desktop-control-request", async ({ payload }) => {
     let response: unknown
     try {
-      const result = await dispatch(payload.operation, payload.payload.request ?? {})
+      const result = await transport.dispatch(payload.operation, payload.payload.request ?? {})
       response = { result: safeDesktopResult(result, payload.payload.reveal) }
     } catch (error) {
       response = { error: error instanceof Error ? error.message : String(error) }
