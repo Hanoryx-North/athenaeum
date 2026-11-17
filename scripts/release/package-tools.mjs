@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
-const [target, integration, agentDir] = process.argv.slice(2)
+const [target, integration, agentDir, profile = 'release'] = process.argv.slice(2)
+const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || 'target')
 const version = 'v22.22.0'
 const nodes = {
   'aarch64-apple-darwin': ['darwin-arm64', 'tar.gz', '5ed4db0fcf1eaf84d91ad12462631d73bf4576c1377e192d222e48026a902640'],
@@ -21,17 +22,17 @@ const nodes = {
 }
 
 try {
-  if (!nodes[target] || !integration || !agentDir) throw new Error('Usage: package-tools.mjs TARGET INTEGRATION_FILE AGENT_ARTIFACT_DIR')
+  if (!nodes[target] || !integration || !agentDir || !['release', 'debug'].includes(profile)) throw new Error('Usage: package-tools.mjs TARGET INTEGRATION_FILE AGENT_ARTIFACT_DIR [release|debug]')
   const windows = target.includes('windows')
-  let cli = join(root, 'target', target, 'release', windows ? 'athenaeum.exe' : 'athenaeum')
+  let cli = join(targetDir, target, profile, windows ? 'athenaeum.exe' : 'athenaeum')
   if (!existsSync(cli)) {
     // A native cargo build omits the target triple directory. Never use that fallback
     // for a cross-target package: the compiler must identify the exact requested host.
     const host = /^host: (.+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))?.[1]?.trim()
-    if (host === target) cli = join(root, 'target', 'release', windows ? 'athenaeum.exe' : 'athenaeum')
+    if (host === target) cli = join(targetDir, profile, windows ? 'athenaeum.exe' : 'athenaeum')
   }
   const nativeName = windows ? "athenaeum-agent.exe" : "athenaeum-agent"
-  const native = join(root, "target/native-runtime", target, "release", nativeName)
+  const native = join(targetDir, 'native-runtime', target, profile, nativeName)
   if (!existsSync(native)) throw new Error(`Missing native agent: ${native}`)
   const integrationLicense = [join(dirname(integration), 'LICENSE-integrations'), resolve(dirname(integration), '../LICENSE'), join(root, 'install', 'NOTICE-MIT.txt')].find(existsSync)
   if (!integrationLicense) throw new Error('The MCP integration artifact must include its MIT LICENSE-integrations notice')

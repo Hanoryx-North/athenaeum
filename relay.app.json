@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "project": ".",
+  "targets": {
+    "macos-aarch64": {
+      "steps": [
+        { "program": "npm", "args": ["ci"] },
+        { "program": "npm", "args": ["run", "build:packages"] },
+        { "program": "npm", "args": ["run", "relay:build"] }
+      ],
+      "output": "dist-relay",
+      "entry": "Athenaeum.app"
+    },
+    "macos-x86_64": {
+      "steps": [
+        { "program": "npm", "args": ["ci"] },
+        { "program": "npm", "args": ["run", "build:packages"] },
+        { "program": "npm", "args": ["run", "relay:build"] }
+      ],
+      "output": "dist-relay",
+      "entry": "Athenaeum.app"
+    }
+  }
+}

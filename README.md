@@ -16,6 +16,7 @@ See [provenance](docs/provenance.md).
 
 Download a platform installer from the
 [latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest).
+For local macOS builds through Relay, see [the build contract](docs/relay-build.md).
 Open or create a project, add sources, and review the wiki pages and proposals.
 Choose a model provider in Settings to use Athenaeum Agent in chat. Local wiki
 browsing, search and review need no API key. Library sync is optional.

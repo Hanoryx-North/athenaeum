@@ -26,18 +26,15 @@
 //       Build the updater manifest from the downloaded *.sig files.
 
 import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { downloadPdfium } from "./pdfium.mjs"
 import {
-  PDFIUM_BY_TARGET,
   buildLatestJson,
   buildReleaseConfig,
   computeVersion,
   isValidUpdaterPubkey,
-  pdfiumUrl,
   selectBuilds,
   stampPackageJson,
   stampWorkspaceCargo,
@@ -74,36 +71,6 @@ function readJson(file) {
 
 function configuredPubkey() {
   return readJson(path("src-tauri", "tauri.conf.json")).plugins?.updater?.pubkey
-}
-
-async function downloadPdfium(target) {
-  const entry = PDFIUM_BY_TARGET[target]
-  if (!entry) throw new Error(`No PDFium build is pinned for target "${target}"`)
-
-  const res = await fetch(pdfiumUrl(entry), { redirect: "follow" })
-  if (!res.ok) throw new Error(`PDFium download failed: HTTP ${res.status} for ${pdfiumUrl(entry)}`)
-  const bytes = Buffer.from(await res.arrayBuffer())
-
-  const actual = createHash("sha256").update(bytes).digest("hex")
-  if (actual !== entry.sha256) {
-    throw new Error(`PDFium ${entry.asset} checksum mismatch: expected ${entry.sha256}, got ${actual}`)
-  }
-
-  const work = mkdtempSync(join(tmpdir(), "pdfium-"))
-  try {
-    const archive = join(work, entry.asset)
-    writeFileSync(archive, bytes)
-    // `tar` ships with Windows 10+ as well as macOS and Linux. Run it from the
-    // work directory with relative names: GNU tar reads "C:\..." as host:path.
-    execFileSync("tar", ["-xzf", entry.asset, entry.inArchive], { cwd: work, stdio: "inherit" })
-    const dest = path("src-tauri", "pdfium")
-    rmSync(dest, { recursive: true, force: true })
-    mkdirSync(dest, { recursive: true })
-    cpSync(join(work, entry.inArchive), join(dest, entry.file))
-    console.log(`PDFium ${entry.asset} (${actual.slice(0, 12)}…) -> src-tauri/pdfium/${entry.file}`)
-  } finally {
-    rmSync(work, { recursive: true, force: true })
-  }
 }
 
 const commands = {
@@ -147,7 +114,7 @@ const commands = {
     writeFileSync(path("package.json"), stampPackageJson(readFileSync(path("package.json"), "utf8"), version))
     writeFileSync(path("Cargo.toml"), stampWorkspaceCargo(readFileSync(path("Cargo.toml"), "utf8"), version))
 
-    await downloadPdfium(target)
+    await downloadPdfium(target, path("src-tauri", "pdfium"))
 
     const config = buildReleaseConfig({ version, target, updater, pubkey, tools: true })
     writeFileSync(path("src-tauri", "tauri.release.conf.json"), JSON.stringify(config, null, 2) + "\n")

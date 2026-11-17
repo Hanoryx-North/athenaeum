@@ -17,6 +17,8 @@ node_modules/
 /src-tauri/tools/
 /src-tauri/tauri.release.conf.json
 /dist-release/
+/dist-relay/
+/src-tauri/tauri.relay.conf.json
 
 # A knowledge base created while testing in the repo itself
 .athenaeum/
