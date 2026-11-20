@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText, ListTree, ChevronDown, ChevronRight, CircleAlert, CircleCheck, ClipboardCheck, LoaderCircle } from "lucide-react"
+import { BookOpen, Plus, Trash2, MessageSquare, X, Maximize2, FolderOpen, FileText, ListTree, ChevronDown, ChevronRight, CircleAlert, CircleCheck, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatMessage, StreamingMessage, useSourceFiles, type ChatReferencePreview } from "./chat-message"
 import { ChatInput, type ChatSendOptions, type ChatSkillOption } from "./chat-input"
@@ -426,7 +426,6 @@ export function ChatPanel() {
     : []
 
   const project = useWikiStore((s) => s.project)
-  const setActiveView = useWikiStore((s) => s.setActiveView)
   const projectPathIndex = useWikiStore((s) => s.projectPathIndex)
   const baseLlmConfig = useWikiStore((s) => s.llmConfig)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
@@ -1094,18 +1093,6 @@ export function ChatPanel() {
                 ? `${runtimeLabel}: ${harnessStatus.message}`
                 : runtimeLabel}</span>
             </span>
-            <span className="hidden min-w-0 flex-1 truncate text-muted-foreground lg:inline" title={t("chat.agent.proposalReminder")}>
-              {t("chat.agent.proposalReminder")}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-auto h-7 shrink-0 gap-1.5 px-2 text-xs"
-              onClick={() => setActiveView("review")}
-            >
-              <ClipboardCheck className="h-3.5 w-3.5" aria-hidden />
-              {t("chat.agent.reviewProposals")}
-            </Button>
           </div>
         )}
         {!activeConversationId ? (

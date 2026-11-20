@@ -1,7 +1,7 @@
 //! Typed desktop requests and responses for the versioned knowledge bridge.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::core_bridge;
 use crate::panic_guard::{run_guarded, run_guarded_async};
@@ -11,7 +11,6 @@ use crate::panic_guard::{run_guarded, run_guarded_async};
 pub async fn wiki_automation(
     workspace: String,
     settings: Option<athenaeum_core::portable::automation::Automation>,
-    accept_all: Option<bool>,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let workspace = require_workspace(&workspace)?;
@@ -25,25 +24,13 @@ pub async fn wiki_automation(
         }
         let settings = athenaeum_core::portable::automation::Automation::load(&root)
             .map_err(|e| e.to_string())?;
-        let batch = if accept_all.unwrap_or(false) {
-            athenaeum_core::portable::automation::accept_pending(&mut store, false)
-        } else {
-            athenaeum_core::portable::automation::maintain(&mut store)
-        }
-        .map_err(|e| e.to_string())?;
+        let batch = athenaeum_core::portable::automation::maintain(&mut store)
+            .map_err(|e| e.to_string())?;
         let revision = store.stats().map_err(|e| e.to_string())?.events;
         Ok(serde_json::json!({ "settings": settings, "batch": batch, "revision": revision }))
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-/// What the desktop says when it accepts or rejects a proposal.
-///
-/// The decision belongs to the person at the keyboard, so the caller recorded
-/// in the journal is the application acting for them, never a model.
-fn reviewer() -> Value {
-    json!({ "model": "athenaeum-desktop" })
 }
 
 // ---------------------------------------------------------------------------
@@ -350,21 +337,6 @@ pub struct EnginePage {
     pub content_hash: String,
 }
 
-/// What accepting produced: the durable page, and what happened to the links.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EngineAccepted {
-    pub node: EngineNode,
-    pub page: EnginePage,
-    /// True when the node already had a page; accepting changed nothing.
-    pub already_accepted: bool,
-    pub relationships_written: u64,
-    /// Relationships a model proposed that stayed in the index, because
-    /// writing them would join accepted pages to something unaccepted.
-    #[serde(default)]
-    pub relationships_left_local: Vec<String>,
-}
-
 /// A node with everything the engine holds about it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -560,95 +532,6 @@ fn method_of(request: &EngineRequest) -> &'static str {
     }
 }
 
-/// The edit a person made to a proposal before accepting it.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProposalEdit {
-    pub title: String,
-    pub summary: String,
-    pub content: String,
-    #[serde(default)]
-    pub reason: Option<String>,
-}
-
-/// Accept a proposal: the only path that turns one into permanent knowledge.
-///
-/// The engine writes the Markdown page. An edit is applied through the
-/// engine's own `update` first, so what becomes durable is the text the person
-/// approved, not the text the model proposed. If the update succeeds and the
-/// acceptance then fails, the proposal stays in the index with its edited text
-/// and no file is written — the vault is never left half-changed.
-#[tauri::command]
-pub async fn engine_accept(
-    workspace: String,
-    node: String,
-    edit: Option<ProposalEdit>,
-) -> Result<EngineAccepted, String> {
-    run_guarded_async("engine_accept", async move {
-        let workspace = require_workspace(&workspace)?;
-        if node.trim().is_empty() {
-            return Err("invalid_request: no proposal was given to accept".to_string());
-        }
-        if let Some(edit) = &edit {
-            if edit.title.trim().is_empty() {
-                return Err("invalid_request: an accepted page needs a title".to_string());
-            }
-            let mut input = json!({
-                "node": node,
-                "title": edit.title,
-                "summary": edit.summary,
-                "content": edit.content,
-            });
-            if let Some(reason) = &edit.reason {
-                input["reason"] = json!(reason);
-            }
-            let response = call(
-                workspace.clone(),
-                json!({ "method": "update", "input": input, "caller": reviewer() }),
-            )
-            .await?;
-            expect_method(&response, "update")?;
-        }
-        let response = call(
-            workspace,
-            json!({ "method": "accept", "node": node, "caller": reviewer() }),
-        )
-        .await?;
-        parse_response("accept", &response)
-    })
-    .await
-}
-
-/// Reject a proposal. The engine writes nothing durable; the node stops being
-/// offered, with the reason kept for the record.
-#[tauri::command]
-pub async fn engine_reject(
-    workspace: String,
-    node: String,
-    reason: Option<String>,
-) -> Result<EngineNode, String> {
-    run_guarded_async("engine_reject", async move {
-        let workspace = require_workspace(&workspace)?;
-        if node.trim().is_empty() {
-            return Err("invalid_request: no proposal was given to reject".to_string());
-        }
-        let mut request = json!({ "method": "reject", "node": node, "caller": reviewer() });
-        if let Some(reason) = reason {
-            request["reason"] = json!(reason);
-        }
-        let response = call(workspace, request).await?;
-        expect_method(&response, "reject")?;
-        let node = response
-            .get("node")
-            .ok_or_else(|| "engine_protocol_error: the reject response has no node".to_string())?
-            .clone();
-        serde_json::from_value(node).map_err(|error| {
-            format!("engine_protocol_error: the reject response did not match this app's protocol: {error}")
-        })
-    })
-    .await
-}
-
 /// Which Library repository this project is linked to, if any.
 ///
 /// Read from `athenaeum.json` and the sync state on disk. No network call is
@@ -714,6 +597,7 @@ pub fn library_link(workspace: String) -> Result<LibraryLink, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn reviewed_scope_and_history_survive_desktop_response_validation() {

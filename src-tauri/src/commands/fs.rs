@@ -1496,6 +1496,134 @@ pub async fn create_missing_wiki_page(
     .map_err(|err| format!("create_missing_wiki_page blocking task join error: {err}"))?
 }
 
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WikiNote {
+    Titled { title: String },
+    Daily { date: Option<String> },
+}
+
+#[tauri::command]
+pub async fn open_wiki_note(project_path: String, note: WikiNote) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_guarded("open_wiki_note", || {
+            open_wiki_note_inner(&project_path, note)
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn open_wiki_note_inner(project_path: &str, note: WikiNote) -> Result<String, String> {
+    use std::io::{ErrorKind, Write};
+
+    let today = chrono::Local::now().date_naive();
+    let (folder, page_type, title, date) = match note {
+        WikiNote::Daily { date } => {
+            let date = match date {
+                Some(value) => chrono::NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+                    .ok()
+                    .filter(|date| {
+                        value.len() == 10 && date.format("%Y-%m-%d").to_string() == value
+                    })
+                    .ok_or("Use a date in YYYY-MM-DD format.")?,
+                None => today,
+            };
+            ("daily", "journal", date.to_string(), date)
+        }
+        WikiNote::Titled { title } => {
+            let title = title.replace(char::is_control, " ").trim().to_string();
+            if title.is_empty() || title.chars().count() > 200 {
+                return Err("Enter a note title between 1 and 200 characters.".into());
+            }
+            ("notes", "note", title, today)
+        }
+    };
+
+    require_absolute_path("open_wiki_note", project_path)?;
+    let project = fs::canonicalize(project_path).map_err(|error| error.to_string())?;
+    let mut directory = project.clone();
+    for component in ["wiki", folder] {
+        let child = directory.join(component);
+        match fs::create_dir(&child) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let resolved = fs::canonicalize(&child).map_err(|error| error.to_string())?;
+        if !resolved.is_dir() || resolved == directory || !resolved.starts_with(&directory) {
+            return Err("The note folder must be inside the wiki.".into());
+        }
+        directory = resolved;
+    }
+
+    let stem = safe_missing_page_stem(&title.replace(['[', ']', '#'], "-"));
+    let cutoff = stem
+        .char_indices()
+        .find(|(index, ch)| index + ch.len_utf8() > 200)
+        .map_or(stem.len(), |(index, _)| index);
+    let stem = stem[..cutoff].trim_end_matches([' ', '.']);
+    let title_yaml = serde_json::to_string(&title).map_err(|error| error.to_string())?;
+    let content =
+        format!("---\ntype: {page_type}\ntitle: {title_yaml}\ncreated: {date}\n---\n\n# {title}\n");
+    let daily = folder == "daily";
+    for suffix in 1..=9999 {
+        let name = if suffix == 1 {
+            format!("{stem}.md")
+        } else {
+            format!("{stem}-{suffix}.md")
+        };
+        let target = directory.join(&name);
+        let relative = format!("wiki/{folder}/{name}");
+        if daily && daily_note_exists(&target)? {
+            return Ok(relative);
+        }
+        let write = (|| -> std::io::Result<()> {
+            let mut temporary = tempfile::Builder::new()
+                .prefix(".note-")
+                .tempfile_in(&directory)?;
+            temporary.write_all(content.as_bytes())?;
+            file_sync::mark_app_write_path(&target);
+            temporary
+                .persist_noclobber(&target)
+                .map_err(|error| error.error)?;
+            Ok(())
+        })();
+        match write {
+            Ok(_) => {
+                crate::commands::file_history::record_file_version(
+                    &target,
+                    "human",
+                    "wiki.note.create",
+                );
+                return Ok(relative);
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                if daily {
+                    return if daily_note_exists(&target)? {
+                        Ok(relative)
+                    } else {
+                        Err("The daily note moved. Try again.".into())
+                    };
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err("Could not name this note. Try another title.".into())
+}
+
+fn daily_note_exists(path: &Path) -> Result<bool, String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => {
+            Err("The daily note path is occupied. Move the existing item and try again.".into())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 /// Whether a directory entry should appear in a listing.
 ///
 /// Hidden (dot-prefixed) entries are shown only when `include_hidden`
@@ -2029,6 +2157,57 @@ mod anydoc_benchmark;
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn daily_note_is_idempotent_across_two_writers_and_reopening() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().to_str().unwrap();
+        let open = || {
+            open_wiki_note_inner(
+                path,
+                WikiNote::Daily {
+                    date: Some("2026-11-20".into()),
+                },
+            )
+            .unwrap()
+        };
+        let relative = thread::scope(|scope| {
+            let first = scope.spawn(open);
+            let second = scope.spawn(open);
+            let result = first.join().unwrap();
+            assert_eq!(second.join().unwrap(), result);
+            result
+        });
+        assert_eq!(relative, "wiki/daily/2026-11-20.md");
+        let file = root.path().join(&relative);
+        assert!(fs::read_to_string(&file).unwrap().contains("type: journal"));
+        fs::write(&file, "Captured today.\n").unwrap();
+        assert_eq!(open(), relative);
+        assert_eq!(fs::read_to_string(file).unwrap(), "Captured today.\n");
+    }
+
+    #[test]
+    fn titled_note_reserves_a_unique_file_for_an_existing_title() {
+        let root = tempfile::tempdir().unwrap();
+        let title = "Note with a \"quote\" and a \\ slash";
+        let create = || {
+            open_wiki_note_inner(
+                root.path().to_str().unwrap(),
+                WikiNote::Titled {
+                    title: title.into(),
+                },
+            )
+            .unwrap()
+        };
+        let first = create();
+        let second = create();
+        assert_ne!(first, second);
+        assert!(first.starts_with("wiki/notes/"));
+        assert!(second.ends_with("-2.md"));
+        assert!(fs::read_to_string(root.path().join(first))
+            .unwrap()
+            .contains(&serde_json::to_string(title).unwrap()));
+    }
 
     fn tmp_file_with_extension(extension: &str, bytes: &[u8]) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(

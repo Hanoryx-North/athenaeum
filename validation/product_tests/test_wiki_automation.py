@@ -24,10 +24,9 @@ class WikiAutomation(unittest.TestCase):
 
     def test_defaults_and_settings_survive_another_process(self):
         settings = run_json(self.root, "automation")["settings"]
-        self.assertEqual(settings, {"acceptProposals": True, "autoSync": False})
-        run(self.root, "automation", "--accept-proposals", "true", "--auto-sync", "true")
-        self.assertEqual(run_json(self.root, "automation")["settings"],
-                         {"acceptProposals": True, "autoSync": True})
+        self.assertEqual(settings, {"autoSync": False})
+        run(self.root, "automation", "--auto-sync", "true")
+        self.assertEqual(run_json(self.root, "automation")["settings"], {"autoSync": True})
 
     def test_accept_all_preserves_links_regardless_of_order_and_rebuild(self):
         first = self.propose("First proposal")
@@ -56,6 +55,7 @@ class WikiAutomation(unittest.TestCase):
         self.assertTrue(any(edge["id"] == second for edge in self.bridge.request("open", node=first)["detail"]["relationships"]))
 
     def test_default_policy_saves_settled_proposals_on_next_recall(self):
+        (self.root / ".athenaeum/automation.json").write_text('{"acceptProposals":false,"autoSync":false}')
         first = self.propose("Settled automatic capture")
         self.assertEqual(self.bridge.request("proposals")["proposals"][0]["node"]["id"], first)
         time.sleep(16)

@@ -7,44 +7,26 @@ use super::{memory, write_atomic};
 use crate::error::Result;
 use crate::store::KnowledgeStore;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct Automation {
-    pub accept_proposals: bool,
     pub auto_sync: bool,
 }
 
 impl Automation {
     pub fn load(project: &Path) -> Result<Self> {
         match std::fs::read(project.join(".athenaeum/automation.json")) {
-            Ok(bytes) => {
-                let mut settings: Self = serde_json::from_slice(&bytes)?;
-                settings.accept_proposals = true;
-                Ok(settings)
-            }
+            Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
     }
 
     pub fn save(&self, project: &Path) -> Result<()> {
-        let settings = Self {
-            accept_proposals: true,
-            auto_sync: self.auto_sync,
-        };
         write_atomic(
             &project.join(".athenaeum/automation.json"),
-            &serde_json::to_vec_pretty(&settings)?,
+            &serde_json::to_vec_pretty(self)?,
         )
-    }
-}
-
-impl Default for Automation {
-    fn default() -> Self {
-        Self {
-            accept_proposals: true,
-            auto_sync: false,
-        }
     }
 }
 
@@ -59,16 +41,17 @@ pub struct AcceptanceBatch {
 pub fn accept_pending(store: &mut KnowledgeStore, automatic: bool) -> Result<AcceptanceBatch> {
     let mut batch = AcceptanceBatch::default();
     for node in memory::proposals(store, None)? {
-        // A background extraction can fail between creating its proposal and
-        // attaching checked evidence. Such drafts need review, not automatic saving.
+        // Leave time for a capturing agent to attach evidence and relationships.
+        if automatic && (chrono::Utc::now() - node.updated_at).num_seconds() < 15 {
+            continue;
+        }
         if automatic
             && node.provenance.detail.as_deref() == Some("athenaeum-background-memory")
             && store.evidence_for(&node.id)?.is_empty()
         {
-            continue;
-        }
-        // Leave time for a capturing agent to attach evidence and relationships.
-        if automatic && (chrono::Utc::now() - node.updated_at).num_seconds() < 15 {
+            batch
+                .errors
+                .push(format!("{} is waiting for source evidence.", node.title));
             continue;
         }
         match memory::accept_deferred(store, &node.id, "user-automation") {
@@ -98,25 +81,20 @@ mod tests {
     use crate::model::{Evidence, EvidenceKind, KnowledgeNode, NodeType, Provenance};
 
     #[test]
-    fn saving_is_always_enabled_including_legacy_settings() {
+    fn legacy_acceptance_setting_does_not_change_automatic_saving() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".athenaeum")).unwrap();
-        assert!(Automation::load(dir.path()).unwrap().accept_proposals);
+        assert!(!Automation::load(dir.path()).unwrap().auto_sync);
         std::fs::write(
             dir.path().join(".athenaeum/automation.json"),
             r#"{"acceptProposals":false,"autoSync":true}"#,
         )
         .unwrap();
         let settings = Automation::load(dir.path()).unwrap();
-        assert!(settings.accept_proposals);
         assert!(settings.auto_sync);
-        Automation {
-            accept_proposals: false,
-            auto_sync: false,
-        }
-        .save(dir.path())
-        .unwrap();
-        assert!(Automation::load(dir.path()).unwrap().accept_proposals);
+        settings.save(dir.path()).unwrap();
+        let saved = std::fs::read_to_string(dir.path().join(".athenaeum/automation.json")).unwrap();
+        assert!(!saved.contains("acceptProposals"));
     }
 
     #[test]
@@ -137,10 +115,12 @@ mod tests {
                 .unwrap();
         };
         settle(&store);
-        assert!(accept_pending(&mut store, true)
-            .unwrap()
-            .accepted
-            .is_empty());
+        let batch = accept_pending(&mut store, true).unwrap();
+        assert!(batch.accepted.is_empty());
+        assert_eq!(
+            batch.errors,
+            ["Checked background finding is waiting for source evidence."]
+        );
         assert_eq!(memory::proposals(&store, None).unwrap().len(), 1);
         store
             .attach_evidence(

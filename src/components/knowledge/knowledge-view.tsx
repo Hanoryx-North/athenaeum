@@ -1,15 +1,3 @@
-/**
- * The knowledge surface: what the engine found, what it read, what it would
- * tell an agent, and what it is linked to.
- *
- * Four tabs over one workspace and one engine. The header belongs to all of
- * them: it states the workspace's product state (no vault, never indexed,
- * index behind the vault, protocol mismatch, engine unreachable) with the
- * action that fits, so a panel is never left guessing why it is empty.
- *
- * Review — the one place a person decides a proposal — is its own destination
- * in the sidebar, because it is the only surface that changes the vault.
- */
 import { useCallback, useState } from "react"
 import { Activity, Cloud, FileText, FolderSearch } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -58,7 +46,6 @@ export function KnowledgeView() {
   const project = useWikiStore((s) => s.project)
   const state = useEngineStore((s) => s.state)
   const findings = useEngineStore((s) => s.findings)
-  const proposals = useEngineStore((s) => s.status?.proposals ?? 0)
   const refresh = useEngineStore((s) => s.refresh)
   const rebuildIndex = useEngineStore((s) => s.rebuildIndex)
   const staleResponseDropped = useEngineStore((s) => s.staleResponseDropped)
@@ -130,14 +117,6 @@ export function KnowledgeView() {
         <p role="status" className="border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
           An answer arrived after the project changed and was discarded, so nothing here describes
           the wrong vault.
-        </p>
-      )}
-
-      {proposals > 0 && (
-        <p role="status" className="border-b bg-primary/5 px-4 py-1.5 text-xs">
-          {proposals} proposal{proposals === 1 ? "" : "s"} awaiting a decision in{" "}
-          <span className="font-medium">Review → Proposals</span>. Nothing becomes permanent until
-          you accept it.
         </p>
       )}
 

@@ -1,15 +1,3 @@
-/**
- * The file-based review queue the app has always had.
- *
- * Its items come from `review.json` under `.athenaeum/` — lint findings and
- * ingest suggestions written by the wiki builder — and it predates the engine's
- * proposal lifecycle. It is kept because it still does its job, and it now
- * sits beside the engine-backed queue rather than in front of a person who
- * came to decide a model's proposal.
- *
- * The knowledge engine does not read `review.json` and this queue does not
- * read the index.
- */
 import { useCallback, useMemo, useState } from "react"
 import { queueResearch } from "@/lib/deep-research"
 import {

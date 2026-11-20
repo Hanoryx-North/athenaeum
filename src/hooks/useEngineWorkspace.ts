@@ -1,9 +1,8 @@
 /**
  * Keep the engine-backed stores pointed at the open project.
  *
- * Mounted once, next to the layout: the sidebar's proposal badge, the review
- * queue and the knowledge surfaces all read the same store, so the workspace
- * is attached here rather than by whichever panel happens to mount first.
+ * Mounted once so background saving and every knowledge surface follow the
+ * open project.
  *
  * The vault is the source of truth, so a write anywhere in the app bumps the
  * wiki store's data version. That is the signal to ask the engine what it sees
@@ -13,7 +12,6 @@
 import { useEffect, useRef } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useEngineStore } from "@/stores/engine-store"
-import { useProposalStore } from "@/stores/proposal-store"
 import { useAutomationStore } from "@/stores/automation-store"
 import { useSetupStore } from "@/stores/setup-store"
 import { LIBRARY, useLibraryAccountStore } from "@/stores/library-account-store"
@@ -32,8 +30,6 @@ export function useEngineWorkspace(): void {
   const attach = useEngineStore((s) => s.attach)
   const detach = useEngineStore((s) => s.detach)
   const refresh = useEngineStore((s) => s.refresh)
-  const attachProposals = useProposalStore((s) => s.attach)
-  const detachProposals = useProposalStore((s) => s.detach)
 
   useEffect(() => {
     if (!projectPath) return
@@ -81,12 +77,10 @@ export function useEngineWorkspace(): void {
   useEffect(() => {
     if (!projectPath) {
       detach()
-      detachProposals()
       return
     }
     attach(projectPath)
-    attachProposals(projectPath)
-  }, [projectPath, attach, detach, attachProposals, detachProposals])
+  }, [projectPath, attach, detach])
 
   useEffect(() => {
     if (!projectPath) return
@@ -99,7 +93,6 @@ export function useEngineWorkspace(): void {
       // review sweep is the engine's most expensive read and the surfaces that
       // show findings ask for it themselves.
       void refresh({ findings: false })
-      void useProposalStore.getState().load()
     }, REFRESH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [projectPath, dataVersion, refresh])

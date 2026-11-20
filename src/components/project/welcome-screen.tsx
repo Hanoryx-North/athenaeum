@@ -10,9 +10,10 @@ interface WelcomeScreenProps {
   onCreateProject: () => void
   onOpenProject: () => void
   onSelectProject: (project: WikiProject) => void
+  onSignedIn: () => Promise<void>
 }
 
-export function WelcomeScreen({ onCreateProject, onOpenProject, onSelectProject }: WelcomeScreenProps) {
+export function WelcomeScreen({ onCreateProject, onOpenProject, onSelectProject, onSignedIn }: WelcomeScreenProps) {
   const [recent, setRecent] = useState<WikiProject[]>([])
   const [cloning, setCloning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +30,7 @@ export function WelcomeScreen({ onCreateProject, onOpenProject, onSelectProject 
   }
 
   return <main className="relative flex h-full overflow-y-auto bg-background px-6 py-10 text-foreground">
-    <div className="absolute right-4 top-4"><LibraryAccountMenu /></div>
+    <div className="absolute right-4 top-4"><LibraryAccountMenu onSignedIn={onSignedIn} /></div>
     <div className="m-auto w-full max-w-md space-y-8">
       <h1 className="text-2xl font-semibold">Open a project</h1>
       <div className="space-y-3">

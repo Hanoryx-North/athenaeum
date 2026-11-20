@@ -78,6 +78,22 @@ class WikiCli(unittest.TestCase):
             self.assertNotIn("private-test-password", result.stdout + result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"]["code"], "invalid_request")
 
+    def test_account_sign_in_persists_the_scoped_token_for_status(self):
+        server, seen = self.server()
+        env = {"ATHENAEUM_CONFIG_DIR": str(self.root / "account"), "ATHENAEUM_LIBRARY_TOKEN": ""}
+        credentials = json.dumps({"username": "tester", "password": "fixture-password"})
+        result = self.cli("library", "sign-in", "--server", server, "--stdin", "--json", input=credentials, env=env)
+        self.assertEqual(json.loads(result.stdout), {"server": server, "username": "tester"})
+        self.assertNotIn("fixture-password", result.stdout + result.stderr)
+        self.assertNotIn("fixture-session", result.stdout + result.stderr)
+        self.assertNotIn("fixture-desktop-token", result.stdout + result.stderr)
+        status = self.data("library", "status", "--server", server, env=env)
+        self.assertEqual(status, [{"server": server, "username": "tester", "reachable": True, "detail": None}])
+        self.assertEqual([row["path"] for row in seen], ["/api/v1/auth/login", "/api/v1/user/tokens", "/api/v1/auth/logout", "/api/v1/user"])
+        self.assertEqual(json.loads(seen[1]["body"])["scopes"], ["repo:read", "repo:write"])
+        self.assertEqual(seen[1]["cookie"], "athenaeum_session=fixture-session")
+        self.assertEqual(seen[-1]["authorization"], "Bearer fixture-desktop-token")
+
     def test_settings_preserve_unrelated_fields_and_backup_first_original(self):
         original = {"other": {"keep": 42}, "llmConfig": {"model": "old", "apiKey": "secret-key"}}
         self.settings.write_text(json.dumps(original), encoding="utf-8")
@@ -493,9 +509,15 @@ sys.exit(runner.main())
             def respond(self):
                 length = int(self.headers.get("content-length", "0"))
                 body = self.rfile.read(length).decode() if length else None
-                seen.append({"method": self.command, "path": self.path, "authorization": self.headers.get("authorization"), "body": body})
+                seen.append({"method": self.command, "path": self.path, "authorization": self.headers.get("authorization"), "cookie": self.headers.get("cookie"), "body": body})
                 if self.path == "/openapi.json":
                     data = {"openapi":"3.1.0", "paths":{"/api/v1/repositories":{"get":{"summary":"List repositories"}, "post":{"summary":"Create repository"}}, "/api/v1/admin/status":{"get":{"summary":"Operator status"}}}}
+                elif self.path == "/api/v1/auth/login":
+                    data = {"user": {"username": "tester"}}
+                elif self.path == "/api/v1/user/tokens":
+                    data = {"token": "fixture-desktop-token"}
+                elif self.path == "/api/v1/user":
+                    data = {"username": "tester"}
                 elif self.path.endswith("redirect"):
                     self.send_response(302)
                     self.send_header("Location", "/api/v1/leaked")
@@ -509,6 +531,8 @@ sys.exit(runner.main())
                 else: data = {"ok":True}
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                if self.path == "/api/v1/auth/login":
+                    self.send_header("Set-Cookie", "athenaeum_session=fixture-session; HttpOnly")
                 self.end_headers()
                 self.wfile.write(json.dumps(data).encode())
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

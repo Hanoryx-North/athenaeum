@@ -19,14 +19,13 @@ export function KnowledgeIntake({ workspace }: { workspace: string }) {
       const result = await invoke<{ status: string }>("background_memory", {
         projectPath: workspace, action: "ingest", document: { title, text, scope, core, wikiRoot: workspace },
       })
-      setMessage(result.status === "already_queued" ? "This source is already queued or processed." : "Queued. Track progress in Coding agents → Background memory.")
+      setMessage(result.status === "already_queued" ? "This source is already queued or processed." : "Queued. See Log for saved notes.")
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
   return <details className="border-b px-4 py-3">
     <summary className="cursor-pointer text-sm font-medium">Extract knowledge from text</summary>
     <div className="mt-3 space-y-3">
-      <p className="text-xs text-muted-foreground">Extract lessons with your configured memory model.</p>
       <div className="space-y-1"><Label htmlFor="intake-title">Source title</Label><Input id="intake-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} disabled={busy} /></div>
       <div className="space-y-1"><Label htmlFor="intake-text">Source text</Label><textarea id="intake-text" className="min-h-40 w-full rounded-md border bg-background p-2 text-sm" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} /></div>
       <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -34,13 +33,12 @@ export function KnowledgeIntake({ workspace }: { workspace: string }) {
         <select id="intake-scope" className="rounded border bg-background p-1" value={scope} onChange={(event) => setScope(event.target.value)} disabled={busy}>
           <option value="project">This project</option><option value="universal">All projects</option>
         </select>
-        <span className="text-xs text-muted-foreground">{bytes.toLocaleString()} / 65,536 bytes</span>
+        {bytes > 65536 && <span role="alert" className="text-sm text-destructive">Shorten the source text to 64 KB or less.</span>}
         <Button size="sm" disabled={busy || !title.trim() || !text.trim() || bytes > 65536} onClick={() => void submit()}>{busy ? "Queueing…" : "Extract lessons"}</Button>
       </div>
       <label className="flex items-center gap-2 text-sm" htmlFor="intake-core">
         <input id="intake-core" type="checkbox" checked={core} onChange={event => setCore(event.target.checked)} disabled={busy} className="accent-primary focus-visible:outline-2 focus-visible:outline-ring" />
         Core guidance
-        <span className="text-xs text-muted-foreground">Include in matching task summaries</span>
       </label>
       {message && <p role="status" className="text-sm">{message}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

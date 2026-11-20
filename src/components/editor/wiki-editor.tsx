@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "katex/dist/katex.min.css"
-import { Pencil, Eye, Link2, Sparkles, X } from "lucide-react"
+import { Link, Pencil, Eye, Link2, Sparkles, X } from "lucide-react"
+import { Popover } from "@base-ui/react/popover"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { FrontmatterPanel } from "@/components/editor/frontmatter-panel"
 import { WikiReader } from "@/components/editor/wiki-reader"
@@ -12,7 +15,7 @@ import { applyTextSelectionEdit, readFile } from "@/commands/fs"
 import { streamChat } from "@/lib/llm-client"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { searchWiki, type SearchResult } from "@/lib/search"
-import { normalizePath } from "@/lib/path-utils"
+import { getFileStem, getRelativePath, normalizePath } from "@/lib/path-utils"
 import { registerDesktopAction } from "@/lib/desktop-control"
 
 interface EditorSelectionRequest {
@@ -32,10 +35,11 @@ interface SelectionConversationTurn {
 
 interface WikiEditorProps {
   content: string
-  onSave: (markdown: string, options?: { immediate?: boolean }) => void
+  onSave: (markdown: string, options?: { immediate?: boolean }) => void | Promise<void>
   /** Absolute path of the file, threaded to WikiReader so relative
    *  image references resolve against the file's own directory. */
   filePath?: string
+  initialMode?: "read" | "edit"
 }
 
 // Selection actions update the parent editor state. Keeping the rendered body
@@ -44,12 +48,14 @@ interface WikiEditorProps {
 const StableWikiReader = memo(WikiReader)
 const StableFrontmatterPanel = memo(FrontmatterPanel)
 
-export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
+export function WikiEditor({ content, onSave, filePath, initialMode = "read" }: WikiEditorProps) {
   const { t } = useTranslation()
   // Default to read mode (ReactMarkdown render). Edit mode is a raw Markdown
   // textarea so metadata/frontmatter can be edited without a WYSIWYG serializer
   // rewriting YAML, wikilinks, or other wiki-specific source syntax.
-  const [mode, setMode] = useState<"read" | "edit">("read")
+  const [mode, setMode] = useState(initialMode)
+  const [linkMenuOpen, setLinkMenuOpen] = useState(false)
+  const [linkQuery, setLinkQuery] = useState("")
   const [selectionRequest, setSelectionRequest] = useState<EditorSelectionRequest | null>(null)
   const [selectionInstruction, setSelectionInstruction] = useState("")
   // The first action defines the interaction for this selection. Mixing Q&A
@@ -62,9 +68,12 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
   const [selectionError, setSelectionError] = useState("")
   const [selectionRunning, setSelectionRunning] = useState(false)
   const readerRef = useRef<HTMLDivElement>(null)
+  const markdownInput = useRef<HTMLTextAreaElement>(null)
+  const linkInput = useRef<HTMLInputElement>(null)
   const selectionAbortRef = useRef<AbortController | null>(null)
   const selectionRunIdRef = useRef(0)
   const project = useWikiStore((state) => state.project)
+  const pathIndex = useWikiStore((state) => state.projectPathIndex)
   const llmConfig = useWikiStore((state) => state.llmConfig)
 
   // Read mode renders frontmatter as UI plus the Markdown body. Edit mode uses
@@ -79,6 +88,21 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
   const editableMarkdown = content
   const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeEditableMarkdown(editableMarkdown))
   const latestMarkdownRef = useRef(normalizeEditableMarkdown(editableMarkdown))
+  const linkTargets = useMemo(() => {
+    if (!linkMenuOpen || !project) return []
+    const query = linkQuery.trim().toLowerCase()
+    return [...pathIndex.byPath.keys()]
+      .map(path => getRelativePath(path, project.path))
+      .filter(path => path.startsWith("wiki/") && path.endsWith(".md") && !/[#|\[\]]/.test(path)
+        && `${project.path}/${path}` !== filePath && path.slice(5).toLowerCase().includes(query))
+      .sort((a, b) => getFileStem(a).localeCompare(getFileStem(b))).slice(0, 20)
+  }, [filePath, linkMenuOpen, linkQuery, pathIndex, project])
+
+  useEffect(() => {
+    if (initialMode !== "edit") return
+    const end = latestMarkdownRef.current.length
+    markdownInput.current?.setSelectionRange(end, end)
+  }, [initialMode])
 
   useEffect(() => {
     if (mode !== "edit") {
@@ -88,9 +112,33 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
     }
   }, [editableMarkdown, mode])
 
-  const saveLatestNow = useCallback(() => {
-    onSave(latestMarkdownRef.current, { immediate: true })
+  const saveLatestNow = useCallback(async () => {
+    await onSave(latestMarkdownRef.current, { immediate: true })
   }, [onSave])
+
+  const insertLink = useCallback((path: string) => {
+    if (mode !== "edit" || !project || !path.startsWith("wiki/") || !path.endsWith(".md") || /[#|\[\]]/.test(path)
+      || path.split("/").includes("..") || !pathIndex.byPath.has(`${project.path}/${path}`)) {
+      throw new Error("Choose an existing Markdown note while editing.")
+    }
+    const input = markdownInput.current
+    const draft = latestMarkdownRef.current
+    const start = input?.selectionStart ?? draft.length
+    const end = input?.selectionEnd ?? start
+    const selection = draft.slice(start, end).trim()
+    const label = selection && !/[\r\n|\[\]]/.test(selection) ? selection : getFileStem(path)
+    const link = `[[${path}|${label}]]`
+    const next = draft.slice(0, start) + link + draft.slice(end)
+    latestMarkdownRef.current = next
+    setDraftMarkdown(next)
+    setSelectionRequest(null)
+    setLinkMenuOpen(false)
+    void onSave(next)
+    window.requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(start + link.length, start + link.length)
+    })
+  }, [mode, onSave, pathIndex, project])
 
   useEffect(() => {
     const stop = [
@@ -101,10 +149,14 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
         setDraftMarkdown(markdown)
         setMode("edit")
       }),
-      registerDesktopAction("editor.save", "(): void", saveLatestNow),
-      registerDesktopAction("editor.setMode", "(mode: 'read' | 'edit'): void", next => {
+      registerDesktopAction("editor.save", "(): Promise<void>", saveLatestNow),
+      registerDesktopAction("editor.insertLink", "(path: string): void", path => {
+        if (typeof path !== "string") throw new Error("Expected a wiki-relative note path.")
+        insertLink(path)
+      }),
+      registerDesktopAction("editor.setMode", "(mode: 'read' | 'edit'): Promise<void>", async next => {
         if (next !== "read" && next !== "edit") throw new Error("mode must be read or edit")
-        if (mode === "edit") saveLatestNow()
+        if (mode === "edit") await saveLatestNow()
         setMode(next)
       }),
       registerDesktopAction("editor.showLinks", "(visible: boolean): void", visible => {
@@ -113,7 +165,7 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
       }),
     ]
     return () => stop.forEach(unregister => unregister())
-  }, [filePath, mode, saveLatestNow])
+  }, [filePath, mode, saveLatestNow, insertLink])
 
   const captureSelection = useCallback((markdown: string, start: number, end: number) => {
     if (!filePath || start === end) {
@@ -195,7 +247,11 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
     if (intent === "edit" && !selectionRequest.sourceMapped) return
     setSelectionMode(intent)
     if (selectionRequest.sourceMapped) {
-      onSave(`${selectionRequest.prefix}${selectionRequest.selectedText}${selectionRequest.suffix}`, { immediate: true })
+      try {
+        await onSave(`${selectionRequest.prefix}${selectionRequest.selectedText}${selectionRequest.suffix}`, { immediate: true })
+      } catch {
+        return
+      }
     }
     const runId = ++selectionRunIdRef.current
     setSelectionRunning(true)
@@ -352,12 +408,40 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
         if (mode !== "edit") return
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault()
-          saveLatestNow()
+          void saveLatestNow().catch(() => undefined)
         }
       }}
     >
-      <div className="relative min-w-0 flex-1 overflow-hidden">
-      <div className="absolute right-3 top-3 z-10 flex items-center gap-1">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 border-b px-3 py-1.5">
+        {mode === "edit" && project && <Popover.Root open={linkMenuOpen} onOpenChange={open => {
+          if (open) setLinkQuery("")
+          setLinkMenuOpen(open)
+        }}>
+          <Popover.Trigger render={<Button size="sm" variant="ghost" />}>
+            <Link className="h-4 w-4" /> Link note
+          </Popover.Trigger>
+          <Popover.Portal>
+            <Popover.Positioner align="end" sideOffset={6} className="z-50">
+              <Popover.Popup initialFocus={linkInput} finalFocus={markdownInput} className="w-72 max-w-[calc(100vw-3rem)] space-y-2 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
+                <Popover.Title className="sr-only">Link note</Popover.Title>
+                <Input ref={linkInput} aria-label="Find a note to link" placeholder="Find a note" value={linkQuery}
+                  onChange={event => setLinkQuery(event.target.value)}
+                  onKeyDown={event => { if (event.key === "Enter" && linkTargets[0]) { event.preventDefault(); insertLink(linkTargets[0]) } }} />
+                <ul className="max-h-56 overflow-auto">
+                  {linkTargets.map(path => <li key={path}>
+                    <Button size="sm" variant="ghost" title={path} onClick={() => insertLink(path)}
+                      className="h-auto min-h-9 w-full flex-col items-start gap-0.5 py-1 text-left">
+                      <span className="w-full truncate">{getFileStem(path)}</span>
+                      <span className="w-full truncate text-xs font-normal text-muted-foreground">{path.slice(5)}</span>
+                    </Button>
+                  </li>)}
+                </ul>
+                {!linkTargets.length && <p role="status" className="px-2 text-sm text-muted-foreground">No matching notes.</p>}
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>}
         {filePath && (
           <button type="button" onClick={() => { setSelectionRequest(null); setShowPageLinks((shown) => !shown) }} title={t("editor.pageLinks.title")} className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground">
             <Link2 className="h-3.5 w-3.5" />
@@ -366,17 +450,18 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
         )}
         <button
           type="button"
-          onClick={() => {
-            if (mode === "edit") saveLatestNow()
-            if (mode === "read") {
+          onClick={() => void (async () => {
+            if (mode === "edit") {
+              await saveLatestNow()
+            } else {
               // Seed edit mode from the latest raw file content before switching;
               // the sync effect intentionally does not reset drafts while editing.
               const normalized = normalizeEditableMarkdown(editableMarkdown)
               setDraftMarkdown(normalized)
               latestMarkdownRef.current = normalized
             }
-            setMode((m) => (m === "read" ? "edit" : "read"))
-          }}
+            setMode(mode === "edit" ? "read" : "edit")
+          })().catch(() => undefined)}
           title={mode === "read" ? t("editor.editRaw") : t("editor.doneEditing")}
           className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
         >
@@ -386,7 +471,7 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
       </div>
 
       {mode === "read" ? (
-        <div ref={readerRef} className="h-full overflow-auto px-6 py-6" onMouseUp={captureRenderedSelection}>
+        <div ref={readerRef} className="min-h-0 flex-1 overflow-auto px-6 py-6" onMouseUp={captureRenderedSelection}>
           {frontmatter && <StableFrontmatterPanel data={frontmatter} />}
           <StableWikiReader
             body={body}
@@ -396,10 +481,12 @@ export function WikiEditor({ content, onSave, filePath }: WikiEditorProps) {
           />
         </div>
       ) : (
-        <div className="h-full overflow-auto p-6">
+        <div className="min-h-0 flex-1 overflow-auto p-6">
           <textarea
+            ref={markdownInput}
             aria-label={t("editor.rawMarkdownEditor")}
             value={draftMarkdown}
+            autoFocus={initialMode === "edit"}
             onChange={(event) => {
               const next = event.currentTarget.value
               setDraftMarkdown(next)

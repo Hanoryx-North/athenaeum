@@ -15,7 +15,6 @@ import { loadKnowledgeGraph, nodeFilePath } from "@/lib/knowledge-index"
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { useTranslation } from "react-i18next"
 import { useAppDialog } from "@/stores/app-dialog-store"
-import { MemoryBriefPanel } from "./memory-brief-panel"
 
 interface WikiPageInfo {
   /** Absolute path of the page's markdown file. */
@@ -27,6 +26,8 @@ interface WikiPageInfo {
 }
 
 const TYPE_CONFIG: Record<string, { icon: typeof FileText; label: string; color: string; order: number }> = {
+  note:        { icon: FileText,    label: "Notes",        color: "text-muted-foreground", order: -2 },
+  journal:     { icon: BookOpen,    label: "Daily notes",  color: "text-muted-foreground", order: -1 },
   overview:    { icon: Layout,      label: "Overview",     color: "text-yellow-500", order: 0 },
   entity:      { icon: Users,       label: "Entities",     color: "text-blue-500",   order: 1 },
   concept:     { icon: Lightbulb,   label: "Concepts",     color: "text-purple-500", order: 2 },
@@ -52,7 +53,7 @@ export function KnowledgeTree() {
   const openPathInPreview = useWikiStore((s) => s.openPathInPreview)
   const dataVersion = useWikiStore((s) => s.dataVersion)
   const [pages, setPages] = useState<WikiPageInfo[]>([])
-  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["overview", "entity", "concept", "source"]))
+  const [expandedTypes, setExpandedTypes] = useState<Set<string>>(new Set(["note", "journal", "overview", "entity", "concept", "source"]))
   // Two-stage delete: first click arms the row, second click executes.
   // Only one row armed at a time (clicking another row replaces).
   const [armedPath, setArmedPath] = useState<string | null>(null)
@@ -163,14 +164,11 @@ export function KnowledgeTree() {
         <div className="mb-2 px-2 text-xs font-semibold uppercase text-muted-foreground">
           {project.name}
         </div>
-        <button className="mb-3 block w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50"
-          title={`Open wiki folder: ${project.path}/wiki`}
-          onClick={() => void openProjectFolder(`${project.path}/wiki`).catch((cause) => appDialog.alert({ message: String(cause) }))}>
-          <span className="block text-foreground">Saved on this computer</span>
-          <span className="block truncate">{project.path}/wiki</span>
+        <button className="mb-2 block w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/50"
+          title={project.path}
+          onClick={() => void openProjectFolder(project.path).catch((cause) => appDialog.alert({ message: String(cause) }))}>
+          Open project folder
         </button>
-
-        <MemoryBriefPanel workspace={normalizePath(project.path)} openPage={openPathInPreview} />
 
         {sortedGroups.length === 0 && (
           <div className="px-2 py-4 text-center text-xs text-muted-foreground">

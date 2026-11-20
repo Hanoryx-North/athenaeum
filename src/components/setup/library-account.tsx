@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cliStatus } from "@/lib/cli-tools"
 import { useSetupStore } from "@/stores/setup-store"
-import { LIBRARY, useLibraryAccountStore } from "@/stores/library-account-store"
+import { LIBRARY, signInToLibrary, useLibraryAccountStore } from "@/stores/library-account-store"
 import { useEngineStore } from "@/stores/engine-store"
 import { useWikiStore } from "@/stores/wiki-store"
 
@@ -14,10 +14,12 @@ export { LIBRARY } from "@/stores/library-account-store"
 /** Account identity. The workspace scheduler starts private backup after sign-in. */
 export function LibraryAccount({
   onContinue,
+  onSignedIn,
   continuing = false,
   server = LIBRARY,
 }: {
   onContinue?: () => void | Promise<void>
+  onSignedIn?: () => void | Promise<void>
   continuing?: boolean
   server?: string
 }) {
@@ -45,7 +47,8 @@ export function LibraryAccount({
     async function check() {
       try {
         if (server === LIBRARY) {
-          await useLibraryAccountStore.getState().refresh()
+          const { checked, refresh } = useLibraryAccountStore.getState()
+          if (!checked) await refresh()
           return
         }
         if (!(await cliStatus()).found) return
@@ -53,7 +56,7 @@ export function LibraryAccount({
         const rows = result?.output
         if (!cancelled && result?.exitCode === 0 && Array.isArray(rows)) {
           const row = rows.find((row) => row && typeof row.username === "string" && !row.detail)
-          if (row) setSignedIn(row.username)
+          if (row) setLocalSignedIn(row.username)
         }
       } catch {
         if (!cancelled) setMessage("Could not check your account. You can try signing in again.")
@@ -76,25 +79,9 @@ export function LibraryAccount({
     const enteredPassword = password
     setPassword("")
     try {
-      if (!(await cliStatus()).found && !(await useSetupStore.getState().install(null))) {
-        setMessage(useSetupStore.getState().error ?? "Could not prepare sign-in. Try again.")
-        return
-      }
-      const result = await useSetupStore
-        .getState()
-        .operate(null, {
-          job: "library_sign_in",
-          server,
-          username: username.trim(),
-          password: enteredPassword,
-        })
-      const output = result?.output as { username?: unknown } | null
-      if (result?.exitCode === 0 && typeof output?.username === "string") {
-        setSignedIn(output.username)
-        await onContinue?.()
-      } else {
-        setMessage(useSetupStore.getState().error ?? "Sign-in did not finish. Try again.")
-      }
+      const identity = await signInToLibrary(username, enteredPassword, server)
+      if (server !== LIBRARY) setLocalSignedIn(identity)
+      await (onSignedIn ?? onContinue)?.()
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -138,9 +125,9 @@ export function LibraryAccount({
             >
               Sign out
             </Button>
-            {onContinue && (
-              <Button onClick={() => void Promise.resolve().then(onContinue).catch((cause) => setMessage(String(cause)))} disabled={working}>
-                {continuing ? "Opening…" : "Open Athenaeum"}
+            {(onContinue || (onSignedIn && message)) && (
+              <Button onClick={() => void Promise.resolve().then(onSignedIn ?? onContinue).catch((cause) => setMessage(String(cause)))} disabled={working}>
+                {continuing ? "Opening…" : onSignedIn ? "Open Log" : "Continue"}
               </Button>
             )}
           </div>

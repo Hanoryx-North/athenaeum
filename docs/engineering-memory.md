@@ -26,7 +26,7 @@ The bridge `context` request and `wiki_context` tool take `selection`:
 `{"project":"my-app","technologies":["react"],"stage":"coding"}`.
 The bridge `create` request and `wiki_create` tool accept `applicability`.
 Filtering precedes seed limits and graph expansion. Task matches seed the brief
-before core guidance; core proposals are excluded until reviewed. Acceptance
+before core guidance. Core guidance enters recall after it is saved. Acceptance
 preserves selectors in Markdown frontmatter and rebuilding restores them.
 Older memories without selectors keep their previous applicability; they are
 not inferred to belong to another project.
@@ -41,11 +41,9 @@ needed. Recall includes selectors only when the MCP tool advertises support.
 
 ## Add lessons
 
-Use **Review → Extract knowledge from text** with the configured memory model.
+Use **Sources → Extract knowledge from text** with the configured memory model.
 Choose **This project** or **All projects**; select **Core guidance** for lessons
-that should seed matching tasks after review. Core guidance waits for a review
-action even when automatic saving is enabled; ordinary lessons follow the wiki’s
-automation settings. Extraction proposes separate lessons
+that should seed matching tasks after saving. Extraction proposes separate lessons
 with stage and technology selectors, evidence and optional check suggestions.
 Project lessons retain the source project identity, including in a shared wiki.
 No lint rule or project template is installed by accepting a lesson.

@@ -1,227 +1,99 @@
-import { useState, useEffect } from "react"
+import { Menu } from "@base-ui/react/menu"
 import {
-  FileText, FolderOpen, Search, Network, ClipboardCheck, Settings, ArrowLeftRight, ClipboardList, Globe, MessageSquare, Sparkles, Activity, PlugZap,
+  Activity, ArrowLeftRight, ClipboardCheck, Ellipsis, FileText, FolderOpen, Globe,
+  MessageSquare, Network, NotebookPen, PlugZap, Search, Settings, Sparkles,
 } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { LibraryAccountMenu } from "@/components/setup/library-account-menu"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { useWikiStore } from "@/stores/wiki-store"
-import { useReviewStore } from "@/stores/review-store"
-import { useProposalStore } from "@/stores/proposal-store"
+import { useWikiStore, type WikiState } from "@/stores/wiki-store"
 import { useResearchStore } from "@/stores/research-store"
 import { useUpdateStore, hasAvailableUpdate } from "@/stores/update-store"
-import { useTranslation } from "react-i18next"
-import logoImg from "@/assets/logo.png"
-import type { WikiState } from "@/stores/wiki-store"
-import { LibraryAccountMenu } from "@/components/setup/library-account-menu"
-import {
-  isResearchPanelVisible,
-  nextResearchPanelNavState,
-} from "./research-panel-nav"
+import { cn } from "@/lib/utils"
+import logo from "@/assets/logo.png"
+import { nextResearchPanelNavState } from "./research-panel-nav"
 
-type NavView = WikiState["activeView"]
+type View = WikiState["activeView"]
 
-const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = [
-  { view: "chat", icon: MessageSquare, labelKey: "nav.chat" },
-  { view: "wiki", icon: FileText, labelKey: "nav.wiki" },
-  { view: "sources", icon: FolderOpen, labelKey: "nav.sources" },
-  { view: "search", icon: Search, labelKey: "nav.search" },
-  { view: "graph", icon: Network, labelKey: "nav.graph" },
-  { view: "lint", icon: ClipboardCheck, labelKey: "nav.lint" },
-  { view: "review", icon: ClipboardList, labelKey: "nav.review" },
-  { view: "knowledge", icon: Activity, labelKey: "nav.knowledge" },
-]
+const WORKSPACE_VIEWS = [
+  { view: "log", icon: NotebookPen, label: "nav.log", fallback: "Log" },
+  { view: "wiki", icon: FileText, label: "nav.notes", fallback: "Notes" },
+  { view: "search", icon: Search, label: "nav.search" },
+  { view: "graph", icon: Network, label: "nav.graph" },
+  { view: "sources", icon: FolderOpen, label: "nav.sources" },
+  { view: "chat", icon: MessageSquare, label: "nav.chat" },
+] satisfies { view: View; icon: typeof FileText; label: string; fallback?: string }[]
 
-interface IconSidebarProps {
+const TOOL_VIEWS = [
+  { view: "knowledge", icon: Activity, label: "nav.knowledge" },
+  { view: "lint", icon: ClipboardCheck, label: "nav.lint" },
+  { view: "connectors", icon: PlugZap, label: "nav.connectors", fallback: "Connectors" },
+  { view: "skills", icon: Sparkles, label: "nav.skills" },
+] satisfies { view: View; icon: typeof FileText; label: string; fallback?: string }[]
+
+const railButton = "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring"
+const menuItem = "flex cursor-default items-center gap-2 rounded-sm px-2.5 py-2 text-sm data-highlighted:bg-accent data-highlighted:text-accent-foreground [&_svg]:h-4 [&_svg]:w-4"
+
+export function IconSidebar({ onSwitchProject, onSignedIn }: {
   onSwitchProject: () => void
-}
-
-export function IconSidebar({ onSwitchProject }: IconSidebarProps) {
+  onSignedIn: () => Promise<void>
+}) {
   const { t } = useTranslation()
   const activeView = useWikiStore((s) => s.activeView)
   const setActiveView = useWikiStore((s) => s.setActiveView)
-  // Two queues share one badge: the engine's proposals (the ones that become
-  // pages if accepted) and the file-based review items.
-  const legacyPendingCount = useReviewStore((s) => s.items.filter((i) => !i.resolved).length)
-  const proposalCount = useProposalStore((s) => s.proposals.length)
-  const pendingCount = legacyPendingCount + proposalCount
-  const researchPanelOpen = useResearchStore((s) => s.panelOpen)
-  const researchActiveCount = useResearchStore((s) => s.tasks.filter((t) => t.status !== "done" && t.status !== "error").length)
-  const toggleResearchPanel = useResearchStore((s) => s.setPanelOpen)
-  // Use `hasAvailableUpdate` (ignores dismiss state) rather than
-  // `shouldShowUpdateBanner`. The dot is a passive signpost — it
-  // should keep marking the gear as long as the update exists, even
-  // after the user closes the more aggressive top banner. Without
-  // this split, dismissing the banner would silently lose the only
-  // remaining indicator that an update is available, so the user
-  // never finds their way back to it.
-  const updateAvailable = useUpdateStore((s) => hasAvailableUpdate(s))
+  const updateAvailable = useUpdateStore(hasAvailableUpdate)
 
-  // Daemon health check
-  const [daemonStatus, setDaemonStatus] = useState<string>("starting")
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const { clipServerStatus } = await import("@/commands/fs")
-        const status = await clipServerStatus()
-        setDaemonStatus(status)
-      } catch {
-        setDaemonStatus("error")
-      }
-    }
-    check()
-    const interval = setInterval(check, 30000)
-    return () => clearInterval(interval)
-  }, [])
-
-  function handleResearchPanelToggle() {
-    const next = nextResearchPanelNavState(activeView, researchPanelOpen)
+  function toggleResearch() {
+    const state = useResearchStore.getState()
+    const next = nextResearchPanelNavState(activeView, state.panelOpen)
     if (next.activeView !== activeView) setActiveView(next.activeView)
-    toggleResearchPanel(next.researchPanelOpen)
+    state.setPanelOpen(next.researchPanelOpen)
   }
 
   return (
     <TooltipProvider delay={300}>
-      <div className="flex h-full w-12 flex-col items-center border-r bg-muted/50 py-2">
-        {/* Logo */}
-        <div className="mb-2 flex items-center justify-center">
-          <img
-            src={logoImg}
-            alt="Athenaeum"
-            className="h-8 w-8 rounded-[22%]"
-          />
-        </div>
-        {/* Top: main nav items + Deep Research */}
-        <div className="flex flex-1 flex-col items-center gap-1">
-          {NAV_ITEMS.map(({ view, icon: Icon, labelKey }) => (
-            <Tooltip key={view}>
-              <TooltipTrigger
-                aria-label={t(labelKey)}
-                aria-pressed={activeView === view}
-                onClick={() => setActiveView(view)}
-                className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                  activeView === view
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                {view === "review" && pendingCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
-                    {pendingCount > 99 ? "99+" : pendingCount}
-                  </span>
-                )}
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {t(labelKey)}
-                {view === "review" && pendingCount > 0 && ` (${pendingCount})`}
-              </TooltipContent>
-            </Tooltip>
-          ))}
-          {/* Deep Research — same row as other nav items */}
-          <Tooltip>
-            <TooltipTrigger
-              aria-label={t("research.title")}
-              onClick={handleResearchPanelToggle}
-              className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                isResearchPanelVisible(activeView, researchPanelOpen)
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-              }`}
-            >
-              <Globe className="h-5 w-5" />
-              {researchActiveCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-bold text-white">
-                  {researchActiveCount}
-                </span>
-              )}
+      <nav aria-label="Workspace" className="flex h-full w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-muted/50 py-2">
+        <img src={logo} alt="Athenaeum" className="mb-1 h-8 w-8 shrink-0 rounded-[22%]" />
+        {WORKSPACE_VIEWS.map(({ view, icon: Icon, label, fallback }) => (
+          <Tooltip key={view}>
+            <TooltipTrigger aria-label={t(label, { defaultValue: fallback })}
+              aria-current={activeView === view ? "page" : undefined}
+              onClick={() => setActiveView(view)}
+              className={cn(railButton, activeView === view && "bg-accent text-accent-foreground")}>
+              <Icon className="h-5 w-5" />
             </TooltipTrigger>
-            <TooltipContent side="right">{t("research.title")}</TooltipContent>
+            <TooltipContent side="right">{t(label, { defaultValue: fallback })}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              aria-label={t("nav.skills")}
-              onClick={() => setActiveView("skills")}
-              className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                activeView === "skills"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-              }`}
-            >
-              <Sparkles className="h-5 w-5" />
-            </TooltipTrigger>
-            <TooltipContent side="right">{t("nav.skills")}</TooltipContent>
-          </Tooltip>
-        </div>
-        {/* Bottom: daemon status + settings + switch project */}
-        <div className="flex flex-col items-center gap-1 pb-1">
-          <LibraryAccountMenu />
-          <Tooltip>
-            <TooltipTrigger aria-label="Connectors" aria-pressed={activeView === "connectors"} onClick={() => setActiveView("connectors")} className={`flex h-10 w-10 items-center justify-center rounded-md ${activeView === "connectors" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent"}`}><PlugZap className="h-5 w-5" /></TooltipTrigger>
-            <TooltipContent side="right">Connectors</TooltipContent>
-          </Tooltip>
-          {/* Daemon status indicator */}
-          <Tooltip>
-            <TooltipTrigger aria-label="Web Clipper status" className="flex h-6 w-6 items-center justify-center">
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  daemonStatus === "running" ? "bg-emerald-500" :
-                  daemonStatus === "starting" ? "bg-amber-400 animate-pulse" :
-                  daemonStatus === "port_conflict" ? "bg-red-500" :
-                  "bg-red-500 animate-pulse"
-                }`}
-              />
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {daemonStatus === "running" && "Clip server running"}
-              {daemonStatus === "starting" && "Clip server starting..."}
-              {daemonStatus === "port_conflict" && "Port 19827 is occupied. Web Clipper unavailable."}
-              {daemonStatus === "error" && "Clip server error. Restarting..."}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              aria-label={t("nav.settings")}
-              onClick={() => setActiveView("settings")}
-              className={`relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                activeView === "settings"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
-              }`}
-            >
-              <Settings className="h-5 w-5" />
-              {updateAvailable && (
-                // Update-available indicator on the Settings gear.
-                // Smaller (8px / `h-2 w-2`) so it doesn't shout —
-                // the top banner is already the loud surface; this
-                // dot is just a quiet "where to go" signpost. Red
-                // (vs. previous primary-blue) gives it enough
-                // visual contrast that it's still noticeable
-                // against the gear icon despite the small size.
-                // Dismissed versions clear it automatically via
-                // shouldShowUpdateBanner.
-                <span
-                  className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500 ring-2 ring-muted/50"
-                  title={t("nav.updateAvailable")}
-                />
-              )}
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {t("nav.settings")}
-              {t("nav.settingsShortcut")}
-              {updateAvailable ? t("nav.updateAvailableSuffix") : ""}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              aria-label={t("nav.switchProject")}
-              onClick={onSwitchProject}
-              className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground"
-            >
-              <ArrowLeftRight className="h-5 w-5" />
-            </TooltipTrigger>
-            <TooltipContent side="right">{t("nav.switchProject")}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+        ))}
+        <div className="flex-1" />
+        <Menu.Root modal={false}>
+          <Menu.Trigger className={cn(railButton, TOOL_VIEWS.some(({ view }) => view === activeView) && "bg-accent text-accent-foreground")}
+            aria-label="More tools" title="More tools">
+            <Ellipsis className="h-5 w-5" />
+          </Menu.Trigger>
+          <Menu.Portal>
+            <Menu.Positioner side="right" align="end" sideOffset={8} className="z-50">
+              <Menu.Popup className="min-w-40 rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+                {TOOL_VIEWS.map(({ view, icon: Icon, label, fallback }) => <Menu.Item key={view} className={menuItem} onClick={() => setActiveView(view)}>
+                  <Icon /> {t(label, { defaultValue: fallback })}
+                </Menu.Item>)}
+                <Menu.Item className={menuItem} onClick={toggleResearch}><Globe /> {t("research.title")}</Menu.Item>
+                <Menu.Separator className="my-1 border-t" />
+                <Menu.Item className={menuItem} onClick={onSwitchProject}><ArrowLeftRight /> {t("nav.switchProject")}</Menu.Item>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
+        <Tooltip>
+          <TooltipTrigger aria-label={t("nav.settings")} aria-current={activeView === "settings" ? "page" : undefined}
+            onClick={() => setActiveView("settings")} className={cn(railButton, activeView === "settings" && "bg-accent text-accent-foreground")}>
+            <Settings className="h-5 w-5" />
+            {updateAvailable && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-destructive ring-2 ring-background" title={t("nav.updateAvailable")} />}
+          </TooltipTrigger>
+          <TooltipContent side="right">{t("nav.settings")}{t("nav.settingsShortcut")}</TooltipContent>
+        </Tooltip>
+        <LibraryAccountMenu onSignedIn={onSignedIn} />
+      </nav>
     </TooltipProvider>
   )
 }

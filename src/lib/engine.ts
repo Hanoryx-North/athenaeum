@@ -22,8 +22,6 @@ import { invoke } from "@tauri-apps/api/core"
 import { normalizePath } from "@/lib/path-utils"
 import {
   engineError,
-  parseEngineAccepted,
-  parseEngineNode,
   parseEngineResponse,
   parseLibraryLink,
   briefRequest,
@@ -35,12 +33,10 @@ import {
   reviewRequest,
   sourcesRequest,
   statusRequest,
-  type EngineAccepted,
   type EngineContext,
   type EngineFinding,
   type EngineGraphPath,
   type EngineIndexReport,
-  type EngineNode,
   type EngineNodeDetail,
   type EngineProposal,
   type EngineRequest,
@@ -51,14 +47,6 @@ import {
   type IndexScope,
   type LibraryLink,
 } from "@/lib/engine-client"
-
-/** The edit a person made to a proposal before accepting it. */
-export interface ProposalEdit {
-  title: string
-  summary: string
-  content: string
-  reason?: string
-}
 
 const inFlight = new Map<string, Promise<EngineResponse>>()
 const generations = new Map<string, number>()
@@ -205,47 +193,6 @@ export async function engineGraphPath(
     throw engineError(`engine_protocol_error: asked for a path, received ${response.method}`)
   }
   return response.path
-}
-
-/**
- * Accept a proposal. This is the only call in the app that can turn a model's
- * proposal into durable Markdown, and it does not write anything itself: the
- * engine writes the page. `edit` is what the person approved, when they
- * changed the text before deciding.
- */
-export async function engineAccept(
-  workspace: string,
-  node: string,
-  edit?: ProposalEdit,
-): Promise<EngineAccepted> {
-  try {
-    const accepted = await invoke<unknown>("engine_accept", {
-      workspace: key(workspace),
-      node,
-      edit: edit ?? null,
-    })
-    return parseEngineAccepted(accepted)
-  } catch (cause) {
-    throw engineError(cause)
-  }
-}
-
-/** Reject a proposal. Writes nothing durable. */
-export async function engineReject(
-  workspace: string,
-  node: string,
-  reason?: string,
-): Promise<EngineNode> {
-  try {
-    const rejected = await invoke<unknown>("engine_reject", {
-      workspace: key(workspace),
-      node,
-      reason: reason ?? null,
-    })
-    return parseEngineNode(rejected)
-  } catch (cause) {
-    throw engineError(cause)
-  }
 }
 
 /**

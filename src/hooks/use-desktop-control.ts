@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { createProject, openProject } from "@/commands/fs"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useChatStore } from "@/stores/chat-store"
+import { signInToLibrary, useLibraryAccountStore } from "@/stores/library-account-store"
 import { flushAndSuspendAutoSave } from "@/lib/auto-save"
 import { registerDesktopAction, startDesktopControl } from "@/lib/desktop-control"
 import { registerPlatformActions } from "@/lib/desktop-platform-actions"
@@ -13,9 +14,15 @@ function text(value: unknown, name: string): string {
   return value
 }
 
-export function useDesktopControl(ready: boolean, onOpen: (project: WikiProject) => Promise<void>): void {
-  const openRef = useRef(onOpen)
-  openRef.current = onOpen
+interface AppActions {
+  openProject: (project: WikiProject) => Promise<void>
+  switchProject: () => Promise<void>
+  openLibraryLog: () => Promise<void>
+}
+
+export function useDesktopControl(ready: boolean, actions: AppActions): void {
+  const actionsRef = useRef(actions)
+  actionsRef.current = actions
   useEffect(() => {
     if (!ready) return
     let disposed = false
@@ -24,13 +31,25 @@ export function useDesktopControl(ready: boolean, onOpen: (project: WikiProject)
       registerPlatformActions(),
       registerDesktopAction("project.open", "(path: string): Promise<WikiProject>", async path => {
         const project = await openProject(text(path, "path"))
-        await openRef.current(project)
+        await actionsRef.current.openProject(project)
         return project
       }),
       registerDesktopAction("project.create", "(name: string, path?: string): Promise<WikiProject>", async (name, path) => {
         const project = await createProject(text(name, "name"), path === undefined ? undefined : text(path, "path"))
-        await openRef.current(project)
+        await actionsRef.current.openProject(project)
         return project
+      }),
+      registerDesktopAction("project.switch", "(): Promise<void>", () => actionsRef.current.switchProject()),
+      registerDesktopAction("account.signIn", "(username: string, password: string): Promise<{ username: string }>", async (username, password) => {
+        const identity = await signInToLibrary(text(username, "username"), text(password, "password"))
+        await actionsRef.current.openLibraryLog()
+        return { username: identity }
+      }),
+      registerDesktopAction("account.openLog", "(): Promise<void>", async () => {
+        await useLibraryAccountStore.getState().refresh()
+        const { error, username } = useLibraryAccountStore.getState()
+        if (error || !username) throw new Error(error ?? "Sign in to open your Log.")
+        await actionsRef.current.openLibraryLog()
       }),
       registerDesktopAction("app.refresh", "(): void", () => {
         useWikiStore.getState().bumpDataVersion()

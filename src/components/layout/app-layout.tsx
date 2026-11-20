@@ -14,20 +14,22 @@ import { getAppLayoutVisibility } from "./app-layout-visibility"
 import { PanelLeftOpen } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useUiPreference } from "@/hooks/useUiPreference"
+import { useGlobalShortcut } from "@/hooks/use-global-shortcut"
 
 const LEFT_PANEL_COLLAPSED_KEY = "athenaeum:left-panel-collapsed"
 
 interface AppLayoutProps {
   onSwitchProject: () => void
+  onSignedIn: () => Promise<void>
 }
 
-export function AppLayout({ onSwitchProject }: AppLayoutProps) {
+export function AppLayout({ onSwitchProject, onSignedIn }: AppLayoutProps) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const activeView = useWikiStore((s) => s.activeView)
+  const setActiveView = useWikiStore((s) => s.setActiveView)
+  useGlobalShortcut({ k: { callback: () => setActiveView("search"), allowInTextInput: true } })
   const researchPanelOpen = useResearchStore((s) => s.panelOpen)
-  // The engine-backed stores follow the open project for the whole app, so the
-  // sidebar badge and every knowledge panel read the same workspace.
   useEngineWorkspace()
   const [leftWidth, setLeftWidth] = useUiPreference("left-panel-width", 220, (value) => Number.isFinite(value) && value >= 150 && value <= 400)
   const [rightWidth, setRightWidth] = useUiPreference("right-panel-width", 400, (value) => Number.isFinite(value) && value >= 250 && value <= 2000)
@@ -112,7 +114,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     <div className="flex h-full flex-col bg-background text-foreground">
       <UpdateBanner />
       <div className="flex min-h-0 flex-1">
-        <IconSidebar onSwitchProject={onSwitchProject} />
+        <IconSidebar onSwitchProject={onSwitchProject} onSignedIn={onSignedIn} />
         <div ref={containerRef} className="relative flex min-w-0 flex-1 overflow-hidden">
           {showLeftPanel && !leftCollapsed && (
             <>

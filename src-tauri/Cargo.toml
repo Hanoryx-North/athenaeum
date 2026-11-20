@@ -71,6 +71,7 @@ md-5 = "0.10"
 futures = "0.3"
 notify = "8"
 walkdir = "2"
+tempfile = "3"
 # tokio's runtime comes from tauri; these features are for async commands and
 # the search backends' request timeouts.
 tokio = { version = "1", features = ["io-util", "sync", "macros", "rt", "time"] }

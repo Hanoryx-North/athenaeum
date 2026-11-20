@@ -17,7 +17,8 @@ See [provenance](docs/provenance.md).
 Download a platform installer from the
 [latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest).
 For local macOS builds through Relay, see [the build contract](docs/relay-build.md).
-Open or create a project, add sources, and review the wiki pages and proposals.
+Sign in to open Log. Capture a daily note, link it to your other notes, or add
+sources. Completed agent proposals save automatically as wiki pages.
 Choose a model provider in Settings to use Athenaeum Agent in chat. Local wiki
 browsing, search and review need no API key. Library sync is optional.
 
@@ -97,9 +98,8 @@ wiki lint
 
 Desktop wikis default to `Athenaeum/Wikis` under the platform data directory,
 outside this source checkout. Within a wiki project, Markdown under `wiki/` is the
-durable source of truth. `.athenaeum/knowledge.db` is a rebuildable index;
-unaccepted proposals live there until review, so include it in backups if
-proposals matter. Raw sources, credentials, indexes and agent
+durable source of truth. `.athenaeum/knowledge.db` is a rebuildable index and
+holds proposals before automatic saving. Raw sources, credentials, indexes and agent
 sessions are excluded from Library sync. The agent's private state lives separately
 under `~/.athenaeum-agent`.
 

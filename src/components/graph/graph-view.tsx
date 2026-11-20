@@ -8,7 +8,6 @@ import forceAtlas2 from "graphology-layout-forceatlas2"
 import { Network, RefreshCw, ZoomIn, ZoomOut, Maximize, Layers, Tag, Lightbulb, AlertTriangle, Link2, X, Search, Loader2, Filter, RotateCcw, EyeOff } from "lucide-react"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { useResearchStore } from "@/stores/research-store"
-import { useProposalStore } from "@/stores/proposal-store"
 import { Button } from "@/components/ui/button"
 import { useWikiStore, type GraphColorMode } from "@/stores/wiki-store"
 import { readFile, writeFile } from "@/commands/fs"
@@ -801,12 +800,7 @@ export function GraphView() {
   const handleNodeClick = useCallback(
     async (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId)
-      if (!node) return
-      if (!node.path) {
-        await useProposalStore.getState().load({ force: true })
-        useWikiStore.getState().setActiveView("review")
-        return
-      }
+      if (!node?.path) return
       try {
         const content = await readFile(node.path)
         setGraphPreview({
@@ -1020,9 +1014,8 @@ export function GraphView() {
   return (
     <div className="relative flex h-full flex-col">
       {edges.length === 0 && nodes.length > 0 && (
-        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 text-xs text-muted-foreground">
-          <p>This knowledge has no links yet. Background memory can propose connections with supporting reasons. Select an unsaved finding to review it.</p>
-          <Button size="sm" variant="outline" onClick={() => useWikiStore.getState().setActiveView("review")}>Review unsaved proposals</Button>
+        <div role="status" className="border-b px-4 py-2 text-xs text-muted-foreground">
+          Link notes to see their connections here.
         </div>
       )}
       {/* Header */}

@@ -4,6 +4,23 @@ import { useSetupStore } from "@/stores/setup-store"
 
 export const LIBRARY = "https://wiki.hanoryx.com"
 
+export async function signInToLibrary(username: string, password: string, server = LIBRARY): Promise<string> {
+  if (!username.trim() || !password) throw new Error("Enter your username and password.")
+  if (useSetupStore.getState().busy) throw new Error("Another account or sync operation is running. Try again.")
+  if (!(await cliStatus()).found && !(await useSetupStore.getState().install(null))) {
+    throw new Error(useSetupStore.getState().error ?? "Could not prepare sign-in. Try again.")
+  }
+  const result = await useSetupStore.getState().operate(null, {
+    job: "library_sign_in", server, username: username.trim(), password,
+  })
+  const output = result?.output as { username?: unknown } | null
+  if (result?.exitCode !== 0 || typeof output?.username !== "string" || !output.username.trim()) {
+    throw new Error(useSetupStore.getState().error ?? "Sign-in did not finish. Try again.")
+  }
+  if (server === LIBRARY) useLibraryAccountStore.getState().setUsername(output.username)
+  return output.username
+}
+
 interface LibraryAccountState {
   username: string | null
   checked: boolean

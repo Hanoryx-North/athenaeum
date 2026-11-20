@@ -247,8 +247,6 @@ enum Command {
     /// Read or change this wiki's local automation settings.
     Automation {
         #[arg(long, action = clap::ArgAction::Set)]
-        accept_proposals: Option<bool>,
-        #[arg(long, action = clap::ArgAction::Set)]
         auto_sync: Option<bool>,
         /// Save every currently pending proposal as a page.
         #[arg(long)]
@@ -766,7 +764,6 @@ fn run(cli: &Cli) -> Result<Outcome> {
 
     match &cli.command {
         Command::Automation {
-            accept_proposals,
             auto_sync,
             accept_all,
         } => {
@@ -774,18 +771,8 @@ fn run(cli: &Cli) -> Result<Outcome> {
                 path: cwd.display().to_string(),
             })?;
             let mut settings = athenaeum_core::portable::automation::Automation::load(&project)?;
-            if let Some(value) = accept_proposals {
-                if !value {
-                    return Err(athenaeum_core::portable::portable_error(
-                        "invalid_input",
-                        "Wiki proposals save automatically; automatic saving cannot be disabled.",
-                    ));
-                }
-            }
             if let Some(value) = auto_sync {
                 settings.auto_sync = *value;
-            }
-            if accept_proposals.is_some() || auto_sync.is_some() {
                 settings.save(&project)?;
             }
             let batch = if *accept_all {

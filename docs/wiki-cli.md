@@ -27,8 +27,9 @@ the native process. `wiki desktop status --json` reports whether the running app
 is live. Do not leave source changes verified only in a bundle while the user
 is looking at a stale snapshot.
 
-These commands create no installer packages or desktop shortcuts. The explicit
-standalone workflow keeps a
+Pin a launcher that runs `wiki start` from the checkout to reopen the live app
+from the macOS Dock. `wiki desktop show` brings the existing window forward.
+The explicit standalone workflow keeps a
 ready app in `athenaeum/target/standalone` (or `$CARGO_TARGET_DIR/standalone`).
 Its frontend is embedded; standalone starts run no compiler or development server
 and return immediately while the app stays open. Source changes take effect after
@@ -66,8 +67,7 @@ otherwise commands discover the nearest ancestor with `.athenaeum/`.
 The MCP server then reaches it even when an agent starts in another folder.
 Reconnecting from another wiki changes the selected wiki; `wiki doctor -C DIR`
 checks that the saved connection actually addresses it. Routine recall and capture
-are quiet; host-controlled tool activity can still be visible. Proposals await
-human acceptance in Review before becoming wiki pages.
+are quiet. Completed proposals save automatically as Markdown pages.
 
 `wiki commands --json` generates the full command and option catalogue from the
 parser, including aliases, accepted enum values and defaults. Use any command's
@@ -102,28 +102,26 @@ wiki sync backup --server https://wiki.hanoryx.com
 wiki sync push --message "Document callback validation"
 ```
 
-Creation retains the existing proposal/review lifecycle. A model proposal becomes
-durable Markdown only when accepted. `--stated` explicitly records a user-stated
-claim. Indexes remain derived and rebuildable. Existing trust and sync rules apply.
+`--stated` immediately records a user-stated claim. A model proposal becomes
+durable Markdown when the engine accepts it. Indexes remain derived and rebuildable.
 
 The bridge remains a closed knowledge contract; developer process execution and
 settings editing are CLI operations and are not exposed as model-facing bridge methods.
 
 ## Saved desktop settings
 
-Per-wiki automation is stored separately in `.athenaeum/automation.json`:
+Per-wiki sync settings are stored in `.athenaeum/automation.json`:
 
 ```sh
 wiki automation --json
-wiki automation --accept-proposals true --auto-sync true
+wiki automation --auto-sync true
 wiki automation --accept-all --json
 ```
 
-Both choices default off until enabled for that wiki. Automatic saving waits
-15 seconds for capture tools to attach evidence and links. The desktop checks
-the queue every 15 seconds; bridge knowledge reads also save settled proposals
-when the policy is enabled. Batch acceptance reconciles once and leaves failed
-proposals available for retry. Saving does not raise a claim's verification status.
+Automatic saving waits 15 seconds for capture tools to attach evidence and links.
+The desktop checks every 15 seconds. Bridge knowledge reads also save settled
+proposals. Log shows recent saves and failures. Acceptance preserves a claim’s
+existing verification status.
 Page-to-page `wiki link` and bridge links update the Markdown itself.
 
 After account sign-in, the desktop backs up the open wiki to a private repository
@@ -333,6 +331,19 @@ their saved locations. `fs.defaultWikiDirectory` returns the resolved default.
 and use its existing processors; they are CLI-accessible while the app is running,
 not new headless model runtimes. Long chat turns return a start acknowledgement;
 read `desktop state chat` for their progress and output.
+
+Library sign-in opens Log in the current or most recent wiki. A fresh sign-in
+creates `My Wiki` in the default data directory. Use these live actions from the CLI.
+
+```sh
+wiki desktop call account.openLog --json
+wiki desktop call wiki-notes.openDailyNote --json
+printf '%s\n' '["Reading notes"]' | wiki desktop call wiki-notes.createNote --stdin --json
+```
+
+`account.openLog` resumes a saved session. `account.signIn` accepts username and
+password via stdin. New notes use `wiki/notes/`. Daily notes use `wiki/daily/`
+and the local calendar date. Reopening a daily note preserves its contents.
 
 Standalone knowledge commands still work without a desktop. `wiki unlink EDGE_ID`
 disconnects saved page relationships in their canonical Markdown and updates the

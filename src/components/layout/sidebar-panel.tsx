@@ -23,7 +23,7 @@ export function SidebarPanel({ onCollapse }: SidebarPanelProps) {
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {t("sidebar.knowledge")}
+          {t("nav.notes", "Notes")}
         </button>
         <button
           onClick={() => setMode("files")}

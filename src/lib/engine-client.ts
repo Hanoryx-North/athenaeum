@@ -10,9 +10,7 @@
  * `@tauri-apps` import, no `@/` alias — is what makes the contract checkable
  * without launching the app.
  *
- * Only the methods the knowledge UI needs are reachable from here. Everything
- * else stays on `coreBridge`, so the interface cannot quietly grow a second
- * way to write knowledge.
+ * This request surface is limited to the knowledge UI's operations.
  *
  * If an answer does not match the protocol, parsing throws an `EngineError`
  * naming the field, and the UI shows a protocol-error state with a recovery
@@ -45,7 +43,7 @@ import type {
 /** The protocol version this desktop speaks. */
 export const ENGINE_PROTOCOL_VERSION = 1
 
-/** Methods the knowledge UI may ask for. Everything else stays on `coreBridge`. */
+/** Methods the knowledge UI may ask for. */
 export type EngineMethod =
   | "status"
   | "review"
@@ -636,22 +634,6 @@ export function parseEngineProposal(value: unknown, path = "proposal"): EnginePr
     node: parseEngineNode(fieldAt(record, "node", path), `${path}.node`),
     relationships: listField(record, "relationships", path, parseEngineRelationship),
     evidence: listField(record, "evidence", path, parseEngineEvidence),
-  }
-}
-
-export type EngineAccepted = BridgeResponseMap["accept"]["accepted"]
-
-export function parseEngineAccepted(value: unknown, path = "accepted"): EngineAccepted {
-  const record = recordAt(value, path)
-  return {
-    node: parseEngineNode(fieldAt(record, "node", path), `${path}.node`),
-    page: parseEnginePage(fieldAt(record, "page", path), `${path}.page`),
-    alreadyAccepted: booleanAt(fieldAt(record, "alreadyAccepted", path), `${path}.alreadyAccepted`),
-    relationshipsWritten: numberAt(
-      fieldAt(record, "relationshipsWritten", path),
-      `${path}.relationshipsWritten`,
-    ),
-    relationshipsLeftLocal: textArrayField(record, "relationshipsLeftLocal", path),
   }
 }
 

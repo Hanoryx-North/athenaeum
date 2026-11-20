@@ -1,11 +1,10 @@
 import { create } from "zustand"
 import { invoke } from "@tauri-apps/api/core"
 import { useWikiStore } from "@/stores/wiki-store"
-import { useProposalStore } from "@/stores/proposal-store"
 import { useEngineStore } from "@/stores/engine-store"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 
-export interface AutomationSettings { acceptProposals: boolean; autoSync: boolean }
+export interface AutomationSettings { autoSync: boolean }
 interface AutomationResult {
   settings: AutomationSettings
   batch: { accepted: unknown[]; errors: string[] }
@@ -17,12 +16,12 @@ interface AutomationState {
   busy: boolean
   error: string | null
   revision: number | null
-  run: (workspace: string, options?: { settings?: AutomationSettings; acceptAll?: boolean }) => Promise<void>
+  run: (workspace: string, options?: { settings?: AutomationSettings }) => Promise<void>
 }
 
 export const useAutomationStore = create<AutomationState>((set, get) => ({
   workspace: null,
-  settings: { acceptProposals: true, autoSync: false },
+  settings: { autoSync: false },
   busy: false,
   error: null,
   revision: null,
@@ -30,17 +29,16 @@ export const useAutomationStore = create<AutomationState>((set, get) => ({
     if (get().busy) return
     const previousRevision = get().workspace === workspace ? get().revision : null
     set({ workspace, busy: true, error: null, ...(get().workspace !== workspace ? {
-      settings: { acceptProposals: true, autoSync: false }, revision: null,
+      settings: { autoSync: false }, revision: null,
     } : {}) })
     try {
       const result = await invoke<AutomationResult>("wiki_automation", {
-        workspace, settings: options.settings, acceptAll: options.acceptAll,
+        workspace, settings: options.settings,
       })
       if (useWikiStore.getState().project?.path !== workspace) return
       set({ settings: result.settings, revision: result.revision, error: result.batch.errors.join("\n") || null })
       if (result.batch.accepted.length || (previousRevision !== null && previousRevision !== result.revision)) {
         await refreshProjectFileTree(workspace, { bumpDataVersion: true })
-        await useProposalStore.getState().load({ force: true })
         await useEngineStore.getState().refresh({ findings: false })
       }
     } catch (cause) {

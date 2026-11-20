@@ -25,6 +25,7 @@ import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { SourceCoverageStrip } from "@/components/sources/source-coverage-strip"
+import { KnowledgeIntake } from "@/components/sources/knowledge-intake"
 import { importSourceUrls, parseImportUrls, type UrlImportResult } from "@/lib/url-source-import"
 import { listIngestedSourceIdentities } from "@/lib/ingest-cache"
 import { getQueue, type IngestTask } from "@/lib/ingest-queue"
@@ -471,6 +472,7 @@ export function SourcesView() {
       )}
 
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
+        {project && <KnowledgeIntake key={project.path} workspace={project.path} />}
         {refreshError && (
           <div className="mx-4 mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {t("sources.refreshFailed", {

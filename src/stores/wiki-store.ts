@@ -403,7 +403,8 @@ interface WikiState {
    * one wiki-relative) still works.
    */
   pendingScrollImageSrc: string | null
-  activeView: "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "review" | "knowledge" | "skills" | "settings" | "connectors"
+  activeView: "log" | "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "knowledge" | "skills" | "settings" | "connectors"
+  previewInitialMode: "read" | "edit"
   llmConfig: LlmConfig
   /** Persisted global/default config, kept separate while a project override is effective. */
   globalLlmConfig: LlmConfig
@@ -432,8 +433,8 @@ interface WikiState {
   setProjectPathIndexFromTree: (tree: FileNode[]) => void
   setSelectedFile: (path: string | null) => void
   setFileContent: (content: string) => void
-  openPathInPreview: (path: string) => void
-  openFileInPreview: (path: string, content: string) => void
+  openPathInPreview: (path: string, mode?: "read" | "edit") => void
+  openFileInPreview: (path: string, content: string, mode?: "read" | "edit") => void
   closePreview: () => void
   setExternalPreview: (preview: ExternalPreview | null) => void
   setPendingScrollImageSrc: (src: string | null) => void
@@ -471,6 +472,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   previewReturnView: null,
   pendingScrollImageSrc: null,
   activeView: "wiki",
+  previewInitialMode: "read",
   llmConfig: {
     provider: "openai",
     apiKey: "",
@@ -507,7 +509,7 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   dataVersion: 0,
 
-  setProject: (project) => set({ project, ...(project ? loadWorkspaceNavigation(project.path) : { activeView: "wiki" as const, selectedFile: null }), previewReturnView: null, externalPreview: null, previewContentPath: null, fileContent: "" }),
+  setProject: (project) => set({ project, ...(project ? loadWorkspaceNavigation(project.path) : { activeView: "wiki" as const, selectedFile: null }), previewReturnView: null, externalPreview: null, previewContentPath: null, fileContent: "", previewInitialMode: "read" }),
   setFileTree: (fileTree, options) => {
     if (options?.syncPathIndex === false) {
       set({ fileTree })
@@ -518,23 +520,25 @@ export const useWikiStore = create<WikiState>((set) => ({
   setProjectPathIndexFromTree: (tree) =>
     set({ projectPathIndex: buildProjectPathIndexFromTree(tree) }),
   setSelectedFile: (selectedFile) =>
-    set({ selectedFile, previewContentPath: null, externalPreview: null }),
+    set({ selectedFile, previewContentPath: null, externalPreview: null, previewInitialMode: "read" }),
   setFileContent: (fileContent) => set({ fileContent }),
-  openPathInPreview: (selectedFile) =>
+  openPathInPreview: (selectedFile, previewInitialMode = "read") =>
     set((state) => ({
       selectedFile,
       previewContentPath: null,
       externalPreview: null,
+      previewInitialMode,
       activeView: "wiki",
       previewReturnView:
         state.activeView === "wiki" ? state.previewReturnView : state.activeView,
     })),
-  openFileInPreview: (selectedFile, fileContent) =>
+  openFileInPreview: (selectedFile, fileContent, previewInitialMode = "read") =>
     set((state) => ({
       selectedFile,
       fileContent,
       previewContentPath: selectedFile,
       externalPreview: null,
+      previewInitialMode,
       activeView: "wiki",
       previewReturnView:
         state.activeView === "wiki" ? state.previewReturnView : state.activeView,
@@ -545,6 +549,7 @@ export const useWikiStore = create<WikiState>((set) => ({
       fileContent: "",
       previewContentPath: null,
       externalPreview: null,
+      previewInitialMode: "read",
       activeView: state.previewReturnView ?? "wiki",
       previewReturnView: null,
     })),

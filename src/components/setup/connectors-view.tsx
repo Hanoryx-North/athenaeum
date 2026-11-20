@@ -1,14 +1,12 @@
-import { Bot, Cloud, PlugZap } from "lucide-react"
+import { Bot, PlugZap } from "lucide-react"
 import { useConnectorsStore, type ConnectorPage } from "@/stores/connectors-store"
 import { CodingAgentsView } from "./coding-agents-view"
 import { ActiveModelStatus } from "./active-model-status"
-import { LibraryAccount } from "./library-account"
 import { LlmProviderSection } from "@/components/settings/sections/llm-provider-section"
 import { cn } from "@/lib/utils"
 
 const PAGES: { id: ConnectorPage; label: string; icon: typeof Bot }[] = [
   { id: "agents", label: "Coding agent", icon: PlugZap },
-  { id: "account", label: "Library account", icon: Cloud },
   { id: "model", label: "AI model", icon: Bot },
 ]
 
@@ -44,7 +42,6 @@ export function ConnectorsView() {
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-8">
           <div className="mx-auto max-w-xl">
             {page === "agents" && <CodingAgentsView />}
-            {page === "account" && <LibraryAccount />}
             {page === "model" && (
               <div className="space-y-6">
                 <header>

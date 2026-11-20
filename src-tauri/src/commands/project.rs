@@ -24,6 +24,8 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
     let dirs = [
         "raw/sources",
         "raw/assets",
+        "wiki/notes",
+        "wiki/daily",
         "wiki/entities",
         "wiki/concepts",
         "wiki/sources",
@@ -45,6 +47,8 @@ fn create_project_impl(name: String, path: String) -> Result<WikiProject, String
 
 | Type | Directory | Purpose |
 |------|-----------|---------|
+| note | wiki/notes/ | Ideas, summaries, and reference notes |
+| journal | wiki/daily/ | Dated notes and observations |
 | entity | wiki/entities/ | Named things (models, companies, people, datasets) |
 | concept | wiki/concepts/ | Ideas, techniques, phenomena |
 | source | wiki/sources/ | Papers, articles, talks, blog posts |
@@ -66,7 +70,7 @@ All pages must include YAML frontmatter:
 
 ```yaml
 ---
-type: entity | concept | source | query | comparison | synthesis | overview
+type: note | journal | entity | concept | source | query | comparison | synthesis | overview
 title: Human-readable title
 tags: []
 related: []
@@ -153,6 +157,10 @@ When sources contradict each other:
     // wiki/index.md
     let index_content = r#"# Wiki Index
 
+## Notes
+
+## Daily notes
+
 ## Entities
 
 ## Concepts
@@ -169,7 +177,7 @@ When sources contradict each other:
 
     // wiki/log.md
     let log_content = format!(
-        r#"# Research Log
+        r#"# Wiki Log
 
 ## {today}
 

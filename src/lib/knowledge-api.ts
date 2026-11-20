@@ -190,7 +190,7 @@ export const api = {
     invoke<Reached[]>("navigate_from", { id, depth, maxNodes }),
   assembleBrief: (task: string, seeds?: string[], depth?: number) =>
     invoke<KnowledgeBrief>("assemble_brief", { task, seeds, depth }),
-  journal: (limit?: number) => invoke<JournalEvent[]>("journal", { limit }),
+  journal: (limit?: number, kind?: string, workspace?: string) => invoke<JournalEvent[]>("journal", { limit, kind, workspace }),
 
   /**
    * Reconcile the derived index against the vault's markdown. Takes no

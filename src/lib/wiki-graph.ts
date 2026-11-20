@@ -124,8 +124,7 @@ export async function buildWikiGraph(
   const visible = new Map<string, IndexGraphNode>()
   for (const node of index.nodes) {
     if (HIDDEN_KINDS.has(node.kind)) continue
-    // Reviewable memory belongs on the graph too. Keep repository extraction
-    // artifacts out of this canvas, while exposing the claims users can review.
+    if (node.status === "proposed") continue
     if (node.origin === "curated" && !["decision", "gotcha", "procedure", "fact", "rule", "observation"].includes(node.kind)) continue
     visible.set(node.id, node)
   }

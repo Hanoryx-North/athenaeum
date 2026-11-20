@@ -5,12 +5,14 @@ import { SettingsView } from "@/components/settings/settings-view"
 import { ConnectorsView } from "@/components/setup/connectors-view"
 import { SkillsSection } from "@/components/settings/sections/skills-section"
 import { SourcesView } from "@/components/sources/sources-view"
-import { ReviewView } from "@/components/review/review-view"
+import { LegacyReviewQueue } from "@/components/review/legacy-review-queue"
 import { KnowledgeView } from "@/components/knowledge/knowledge-view"
 import { LintView } from "@/components/lint/lint-view"
 import { SearchView } from "@/components/search/search-view"
 import { GraphView } from "@/components/graph/graph-view"
 import { PreviewPanel } from "./preview-panel"
+import { LogView } from "./log-view"
+import { Button } from "@/components/ui/button"
 
 export function ContentArea() {
   const activeView = useWikiStore((s) => s.activeView)
@@ -46,7 +48,10 @@ function ActiveContent({
 }: {
   activeView: ReturnType<typeof useWikiStore.getState>["activeView"]
 }) {
+  const workspace = useWikiStore((s) => s.project?.path)
   switch (activeView) {
+    case "log":
+      return workspace ? <LogView key={workspace} workspace={workspace} /> : null
     case "chat":
       return <ChatPanel />
     case "wiki":
@@ -59,12 +64,10 @@ function ActiveContent({
       return <SkillsView />
     case "sources":
       return null
-    case "review":
-      return <ReviewView />
     case "knowledge":
       return <KnowledgeView />
     case "lint":
-      return <LintView />
+      return <MaintenanceView />
     case "search":
       return <SearchView />
     case "graph":
@@ -72,6 +75,17 @@ function ActiveContent({
     default:
       return <PreviewPanel />
   }
+}
+
+function MaintenanceView() {
+  const [followUps, setFollowUps] = useState(false)
+  return <div className="flex h-full flex-col">
+    <div className="flex shrink-0 gap-1 border-b px-3 py-2" aria-label="Wiki maintenance">
+      <Button size="sm" variant={followUps ? "ghost" : "secondary"} aria-pressed={!followUps} onClick={() => setFollowUps(false)}>Checks</Button>
+      <Button size="sm" variant={followUps ? "secondary" : "ghost"} aria-pressed={followUps} onClick={() => setFollowUps(true)}>Follow-ups</Button>
+    </div>
+    <div className="min-h-0 flex-1">{followUps ? <LegacyReviewQueue /> : <LintView />}</div>
+  </div>
 }
 
 function SkillsView() {

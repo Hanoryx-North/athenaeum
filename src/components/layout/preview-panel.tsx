@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react"
+import { useEffect, useCallback, useRef, useState } from "react"
 import { X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile, writeFile } from "@/commands/fs"
@@ -6,34 +6,49 @@ import { getFileCategory, isBinary, isExtractedTextPreviewFile } from "@/lib/fil
 import { WikiEditor } from "@/components/editor/wiki-editor"
 import { FilePreview } from "@/components/editor/file-preview"
 import { getFileName } from "@/lib/path-utils"
+import { Button } from "@/components/ui/button"
+
+const fileWrites = new Map<string, Promise<void>>()
+const failedDrafts = new Map<string, { markdown: string; error: string }>()
 
 export function PreviewPanel() {
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const fileContent = useWikiStore((s) => s.fileContent)
   const previewContentPath = useWikiStore((s) => s.previewContentPath)
+  const initialMode = useWikiStore((s) => s.previewInitialMode)
   const externalPreview = useWikiStore((s) => s.externalPreview)
   const setFileContent = useWikiStore((s) => s.setFileContent)
   const closePreview = useWikiStore((s) => s.closePreview)
+  const [loadedPath, setLoadedPath] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [retryRead, setRetryRead] = useState(0)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Snapshot of what was most recently loaded from disk. Milkdown re-emits
-  // `markdownUpdated` on initial parse (before the user types anything),
-  // which used to trigger an auto-save that could write back a placeholder
-  // marker if read_file had returned one for a missing/locked file. We
-  // skip save when the incoming markdown equals the last-loaded content.
-  const lastLoadedRef = useRef<string>("")
+  const pendingSave = useRef<{ path: string; markdown: string } | null>(null)
+  const lastSaved = useRef<{ path: string; markdown: string } | null>(null)
 
   useEffect(() => {
+    setLoadError(null)
+    setSaveError(null)
     if (!selectedFile) {
       setFileContent("")
-      lastLoadedRef.current = ""
+      setLoadedPath(null)
       return
     }
-    if (previewContentPath === selectedFile) {
-      lastLoadedRef.current = fileContent
-      return
+    function showContent(content: string) {
+      if (!selectedFile) return
+      lastSaved.current = { path: selectedFile, markdown: content }
+      const draft = failedDrafts.get(selectedFile)
+      if (draft) {
+        pendingSave.current = { path: selectedFile, markdown: draft.markdown }
+        setSaveError(draft.error)
+      }
+      setFileContent(draft?.markdown ?? content)
+      setLoadedPath(selectedFile)
     }
-    if (externalPreview?.path === selectedFile) {
-      lastLoadedRef.current = fileContent
+
+    if (previewContentPath === selectedFile || externalPreview?.path === selectedFile) {
+      showContent(useWikiStore.getState().fileContent)
       return
     }
 
@@ -41,60 +56,72 @@ export function PreviewPanel() {
 
     if (isBinary(category) && !isExtractedTextPreviewFile(selectedFile)) {
       setFileContent("")
-      lastLoadedRef.current = ""
+      setLoadedPath(selectedFile)
       return
     }
 
-    readFile(selectedFile)
-      .then((content) => {
-        lastLoadedRef.current = content
-        setFileContent(content)
-      })
+    let cancelled = false
+    setLoadedPath(null)
+    Promise.resolve(fileWrites.get(selectedFile)).catch(() => undefined)
+      .then(() => readFile(selectedFile))
+      .then(content => { if (!cancelled) showContent(content) })
       .catch((err) => {
-        lastLoadedRef.current = ""
-        setFileContent(`Error loading file: ${err}`)
+        if (!cancelled) setLoadError(String(err))
       })
-  }, [selectedFile, previewContentPath, externalPreview, setFileContent])
+    return () => { cancelled = true }
+  }, [selectedFile, previewContentPath, externalPreview, retryRead, setFileContent])
 
-  const writeNow = useCallback((path: string, markdown: string, syncStore = false) => {
-    writeFile(path, markdown)
-      .then(() => {
-        lastLoadedRef.current = markdown
-        if (syncStore) setFileContent(markdown)
-      })
-      .catch((err) => console.error("Failed to save:", err))
-  }, [setFileContent])
-
-  const handleSave = useCallback(
-    (markdown: string, options?: { immediate?: boolean }) => {
-      if (!selectedFile) return
-      // Ignore no-op saves from the editor's initial re-emit. Only write
-      // when the user has actually changed the content relative to the
-      // last disk read.
-      if (markdown === lastLoadedRef.current) return
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      if (options?.immediate) {
-        setFileContent(markdown)
-        writeNow(selectedFile, markdown, true)
-        return
+  const flushSave = useCallback(async () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    const change = pendingSave.current
+    if (!change) return
+    pendingSave.current = null
+    const { path, markdown } = change
+    const previousWrite = fileWrites.get(path)
+    if (!previousWrite && !failedDrafts.has(path) && lastSaved.current?.path === path && lastSaved.current.markdown === markdown) return
+    const write = Promise.resolve(previousWrite).catch(() => undefined).then(() => writeFile(path, markdown))
+    fileWrites.set(path, write)
+    try {
+      await write
+      if (fileWrites.get(path) === write) failedDrafts.delete(path)
+      const wiki = useWikiStore.getState()
+      if (wiki.selectedFile === path) {
+        lastSaved.current = change
+        wiki.setFileContent(markdown)
+        setSaveError(null)
       }
-      saveTimerRef.current = setTimeout(() => {
-        writeNow(selectedFile, markdown, true)
-      }, 1000)
-    },
-    [selectedFile, setFileContent, writeNow]
-  )
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (wiki.project && path.startsWith(`${wiki.project.path}/`)) wiki.bumpDataVersion()
+    } catch (cause) {
+      if (fileWrites.get(path) === write) {
+        const error = String(cause)
+        failedDrafts.set(path, { markdown, error })
+        if (useWikiStore.getState().selectedFile === path) {
+          pendingSave.current ??= change
+          setSaveError(error)
+        }
+      }
+      throw cause
+    } finally {
+      if (fileWrites.get(path) === write) fileWrites.delete(path)
     }
   }, [])
+
+  const handleSave = useCallback((markdown: string, options?: { immediate?: boolean }) => {
+    if (!selectedFile) return
+    pendingSave.current = { path: selectedFile, markdown }
+    if (options?.immediate) return flushSave()
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => void flushSave().catch(() => undefined), 700)
+  }, [selectedFile, flushSave])
+
+  useEffect(() => {
+    return () => { void flushSave().catch(cause => console.error("Could not save note:", cause)) }
+  }, [selectedFile, flushSave])
 
   if (!selectedFile) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Select a file to preview
+        Select a note or open Log to create one.
       </div>
     )
   }
@@ -112,13 +139,21 @@ export function PreviewPanel() {
         </span>
         <button
           onClick={closePreview}
+          aria-label="Close note"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+      {saveError && <div className="flex items-center gap-2 border-b px-3 py-2 text-sm">
+        <p role="alert" className="min-w-0 break-words text-destructive">Could not save this note. {saveError}</p>
+        <Button variant="outline" size="sm" onClick={() => void flushSave().catch(() => undefined)}>Retry</Button>
+      </div>}
       <div className="flex-1 min-w-0 overflow-auto">
-        {externalPreview?.path === selectedFile ? (
+        {loadError ? <div className="space-y-2 p-4">
+          <p role="alert" className="text-sm text-destructive">Could not open this note. {loadError}</p>
+          <Button size="sm" variant="outline" onClick={() => setRetryRead(retryRead + 1)}>Retry</Button>
+        </div> : loadedPath !== selectedFile ? <p role="status" className="p-4 text-sm text-muted-foreground">Loading…</p> : externalPreview?.path === selectedFile ? (
           <ExternalReferencePreview
             source={externalPreview.source}
             title={externalPreview.title}
@@ -131,6 +166,7 @@ export function PreviewPanel() {
             content={fileContent}
             onSave={handleSave}
             filePath={selectedFile}
+            initialMode={saveError ? "edit" : initialMode}
           />
         ) : (
           <FilePreview

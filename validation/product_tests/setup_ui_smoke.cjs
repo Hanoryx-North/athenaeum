@@ -27,6 +27,8 @@ const path = require('node:path');
       window.connected = false;
       window.failSetup = false;
       window.signedIn = false;
+      window.savedSettings = new Map();
+      window.files = new Map();
       window.connectedAgents = [];
       window.modelFails = false;
       window.modelBodyRead = false;
@@ -51,7 +53,41 @@ const path = require('node:path');
           }
           if (command === 'plugin:opener|open_url') { if (window.browserFails) throw new Error('Browser unavailable'); return null; }
           if (command === 'plugin:store|load') return 1;
-          if (command === 'plugin:store|get') return [args.key === 'recentProjects' ? [{ id: 'test', name: 'Test project', path: 'C:/test-project' }] : null, true];
+          if (command === 'plugin:store|get') return [window.savedSettings.get(args.key) ?? null, window.savedSettings.has(args.key)];
+          if (command === 'plugin:store|set') { window.savedSettings.set(args.key, args.value); return null; }
+          if (command === 'plugin:path|resolve_directory') return '/test-data';
+          if (command === 'create_project') {
+            const path = `${args.path}/${args.name}`;
+            window.files.set(`${path}/schema.md`, '# Wiki schema\n');
+            window.files.set(`${path}/wiki/log.md`, '# Wiki Log\n');
+            window.files.set(`${path}/wiki/notes/Link target.md`, '# Link target\n');
+            return { path, name: args.name };
+          }
+          if (command === 'file_exists') return window.files.has(args.path);
+          if (command === 'read_file') {
+            if (!window.files.has(args.path)) throw new Error('File not found');
+            return window.files.get(args.path);
+          }
+          if (command === 'write_file' || command === 'write_file_atomic') {
+            if (window.failNoteWrite && args.path.endsWith('Capture test.md')) throw new Error('Disk unavailable');
+            window.files.set(args.path, args.contents);
+            return null;
+          }
+          if (command === 'list_directory') return [...window.files.keys()]
+            .filter(file => file.startsWith(`${args.path}/`) && !file.includes('/.athenaeum/'))
+            .map(file => ({ name: file.split('/').at(-1), path: file, is_dir: false }));
+          if (command === 'open_wiki_note') {
+            const date = '2026-11-20';
+            const noteTitle = args.note.kind === 'daily' ? date : args.note.title;
+            const relative = `wiki/${args.note.kind === 'daily' ? 'daily' : 'notes'}/${noteTitle}.md`;
+            const absolute = `${args.projectPath}/${relative}`;
+            if (!window.files.has(absolute)) window.files.set(absolute, `# ${noteTitle}\n`);
+            return relative;
+          }
+          if (command === 'journal') return [];
+          if (command === 'start_project_file_watcher') return { queue: { version: 1, tasks: [] }, changedTasks: [] };
+          if (command === 'wiki_automation') return { settings: { autoSync: false }, batch: { accepted: [], errors: [] }, revision: 0 };
+          if (command === 'knowledge_graph') return { nodes: [], edges: [] };
           if (command === 'cli_status') return { found: true, path: '/test/wiki', version: 'test', agentInstalled: false };
           if (command === 'cli_run') {
             const job = args.job.job;
@@ -69,6 +105,7 @@ const path = require('node:path');
         },
       };
     });
+    await page.route('http://127.0.0.1:19827/**', route => route.fulfill({ json: {} }));
     await page.goto(`${process.env.SETUP_UI_BASE || 'http://localhost:1420'}/__setup_test__`);
     await page.evaluate(async () => {
       const runtime = await import('/src/test-helpers/setup-runtime.ts');
@@ -79,7 +116,7 @@ const path = require('node:path');
       window.mount = async (file, name, props = {}) => {
         window.root.render(window.React.createElement((await import(file))[name], props));
       };
-      await window.mount('/src/components/project/first-launch.tsx', 'FirstLaunch', { onComplete: async () => { window.completed = true; window.completionCount = (window.completionCount || 0) + 1; } });
+      await window.mount('/src/App.tsx', 'default');
     });
     await page.getByRole('heading', { name: 'Sign in to Athenaeum', exact: true }).waitFor();
     await page.getByLabel('Username or email').waitFor();
@@ -90,15 +127,62 @@ const path = require('node:path');
     await page.evaluate(() => { window.libraryFails = true; });
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Invalid sign-in' }).waitFor();
-    assert.equal(await page.evaluate(() => !!window.completed), false);
+    assert.equal(await page.getByRole('heading', { name: 'Log', exact: true }).count(), 0);
     await page.evaluate(() => { window.libraryFails = false; });
     await page.getByLabel('Password', { exact: true }).fill('test-only-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.waitForFunction(() => window.completed === true);
-    assert.equal(await page.evaluate(() => window.completionCount), 1);
+    await page.getByRole('heading', { name: 'Log', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.savedSettings.get('onboardingComplete')), true);
+    assert.equal(await page.evaluate(() => window.calls.filter(call => call.command === 'create_project').length), 1);
     const signIn = await page.evaluate(() => window.calls.find(call => call.args?.job?.job === 'library_sign_in'));
     assert.deepEqual(signIn.args.job, { job: 'library_sign_in', server: 'https://wiki.hanoryx.com' });
     assert.equal(signIn.args.credentials.password, 'test-only-password');
+    const logButton = page.getByRole('button', { name: 'Log', exact: true });
+    const dailyButton = page.getByRole('button', { name: 'Today’s note', exact: true });
+    const noteEditor = page.getByRole('textbox', { name: 'Raw Markdown editor', exact: true });
+    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-log.png') });
+    await page.setViewportSize({ width: 720, height: 480 });
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-log-small-dark.png') });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await dailyButton.click();
+    await noteEditor.fill('# 2026-11-20\n\nCaptured today.\n');
+    await logButton.click();
+    await dailyButton.click();
+    await noteEditor.waitFor();
+    assert.match(await noteEditor.inputValue(), /Captured today/);
+    await logButton.click();
+    await page.getByRole('button', { name: 'New note', exact: true }).click();
+    await page.getByLabel('Note title').fill('Capture test');
+    await page.getByRole('button', { name: 'Create note', exact: true }).click();
+    await noteEditor.waitFor();
+    await page.getByRole('button', { name: 'Link note', exact: true }).click();
+    await page.getByLabel('Find a note to link').fill('Link target');
+    await page.getByRole('button', { name: /Link target/ }).click();
+    assert.match(await noteEditor.inputValue(), /\[\[wiki\/notes\/Link target\.md\|Link target\]\]/);
+    await page.evaluate(() => { window.failNoteWrite = true; });
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Could not save this note' }).waitFor();
+    await page.evaluate(() => { window.failNoteWrite = false; });
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    await page.getByRole('link', { name: 'Link target', exact: true }).click();
+    await page.getByRole('heading', { name: 'Link target', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Connectors', exact: true }).focus();
+    assert.equal(await page.getByRole('menuitem', { name: /Review|Accept/ }).count(), 0);
+    await page.keyboard.press('Escape');
+    await page.getByRole('menuitem', { name: 'Connectors', exact: true }).waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Library account: tester', exact: true }).click();
+    await page.getByText('Signed in as tester', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.getByLabel('Username or email').fill('tester');
+    await page.getByLabel('Password', { exact: true }).fill('test-only-password');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await page.getByRole('heading', { name: 'Log', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Close account menu', exact: true }).count(), 0);
     await page.evaluate(async () => {
       await window.mount('/src/components/project/welcome-screen.tsx', 'WelcomeScreen', {
         onCreateProject() {}, onOpenProject() {}, onSelectProject() {},
@@ -119,7 +203,7 @@ const path = require('node:path');
     await page.evaluate(() => { window.chatgptSignedIn = true; });
     await page.getByText('tester@example.com', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Open chat', exact: true }).click();
-    assert.equal(await page.evaluate(() => window.wiki.getState().activeView), 'chat');
+    await page.waitForFunction(() => window.wiki.getState().activeView === 'chat');
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('athenaeum.ui:chat-agent-runtime'))), 'chatgpt');
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await page.evaluate(() => { window.browserFails = true; });
@@ -160,35 +244,8 @@ const path = require('node:path');
     await page.getByRole('button', { name: 'Check model', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Model check failed' }).waitFor();
     assert.equal(await page.getByText('Model responded successfully.', { exact: true }).count(), 0);
-    await page.evaluate(async () => {
-      await window.mount('/src/components/setup/library-account-menu.tsx', 'LibraryAccountMenu');
-    });
-    await page.getByRole('button', { name: 'Library account: tester', exact: true }).click();
-    await page.getByText('Signed in as tester', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await page.getByLabel('Username or email').fill('tester');
-    await page.getByLabel('Password', { exact: true }).fill('test-only-password');
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByText('Signed in as tester', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Close account menu', exact: true }).click();
-    await page.evaluate(async () => {
-      const { useProposalStore } = await import('/src/stores/proposal-store.ts');
-      const { useEngineStore } = await import('/src/stores/engine-store.ts');
-      useEngineStore.setState({ state: { kind: 'ready' } });
-      useProposalStore.setState({ workspace: 'C:/test-project', proposals: [{ node: {
-        id: 'pending', title: 'Validate callback state', summary: 'Validate the state before creating a session.',
-        content: 'Keep state validation before session creation.', provenance: { detail: 'athenaeum-background-memory' },
-      }, evidence: [] }], load: async () => {}, reject: async id => { window.discarded = id; } });
-      await window.mount('/src/components/review/proposal-queue.tsx', 'ProposalQueue');
-    });
-    await page.getByText('Waiting for source evidence', { exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: /Accept/ }).count(), 0);
-    assert.equal(await page.getByRole('checkbox', { name: /Automatically save/ }).count(), 0);
-    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-pending-pages.png') });
-    await page.getByRole('button', { name: 'Discard', exact: true }).click();
-    assert.equal(await page.evaluate(() => window.discarded), 'pending');
     assert.deepEqual(errors, []);
-    console.log('Setup UI passed: single sign-in and automatic completion; login failure/retry; direct browser OAuth, callback, cancellation, browser failure and expiry; direct external-agent failure/retry; model checks; account persistence; small-window light/dark layout.');
+    console.log('Setup UI passed: Library sign-in and retry, direct landing in Log, daily note reopening, linked notes, save recovery, account persistence and connector flows.');
   } catch (error) {
     if (page) console.error("Setup fixture at failure:", (await page.locator("body").innerText()).slice(0, 4000));
     throw error;

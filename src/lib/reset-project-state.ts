@@ -14,7 +14,6 @@ import { useLintStore } from "@/stores/lint-store"
 import { useActivityStore } from "@/stores/activity-store"
 import { useResearchStore } from "@/stores/research-store"
 import { useEngineStore } from "@/stores/engine-store"
-import { useProposalStore } from "@/stores/proposal-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useSetupStore } from "@/stores/setup-store"
 
@@ -31,7 +30,6 @@ export async function resetProjectState(): Promise<void> {
   // answer still in flight, so a reply for the outgoing project cannot land
   // after the next one opens.
   useEngineStore.getState().detach()
-  useProposalStore.getState().detach()
 
   useChatStore.setState({
     conversations: [],

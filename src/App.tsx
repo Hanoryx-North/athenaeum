@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { invoke } from "@tauri-apps/api/core"
 import { useWikiStore } from "@/stores/wiki-store"
@@ -6,7 +6,7 @@ import { useReviewStore } from "@/stores/review-store"
 import { useLintStore } from "@/stores/lint-store"
 import { useChatStore } from "@/stores/chat-store"
 import { BASE_FONT_SIZE_PX, useZoomStore } from "@/stores/zoom-store"
-import { openProject } from "@/commands/fs"
+import { createProject, defaultWikiDirectory, fileExists, openProject } from "@/commands/fs"
 import { getLastProject, getRecentProjects, saveLastProject, loadOutputLanguage, loadProjectLlmOverride, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig } from "@/lib/project-store"
 import { hydrateApplicationSettings } from "@/lib/app-startup"
 import { loadReviewItems, loadLintItems, loadChatHistory, loadChatPreferences } from "@/lib/persist"
@@ -23,6 +23,9 @@ import type { WikiProject } from "@/types/wiki"
 import { useAppDialog } from "@/stores/app-dialog-store"
 import { useDesktopControl } from "@/hooks/use-desktop-control"
 import { useBackgroundMemory } from "@/hooks/use-background-memory"
+import { useLibraryAccountStore } from "@/stores/library-account-store"
+
+const DEFAULT_WIKI_NAME = "My Wiki"
 
 function applyDocumentZoom(level: number) {
   document.documentElement.style.fontSize = `${BASE_FONT_SIZE_PX * level}px`
@@ -39,12 +42,42 @@ function App() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [loading, setLoading] = useState(true)
   const [firstLaunch, setFirstLaunch] = useState(false)
-  useDesktopControl(!loading, handleProjectOpened)
+  const libraryEntry = useRef<Promise<void> | null>(null)
+  useDesktopControl(!loading, { openProject: handleProjectOpened, switchProject: handleSwitchProject, openLibraryLog })
   useBackgroundMemory(project?.path, !loading)
 
-  async function completeOnboarding() {
-    await saveOnboardingComplete()
-    setFirstLaunch(false)
+  function openLibraryLog(): Promise<void> {
+    if (libraryEntry.current) return libraryEntry.current
+    const entering = (async () => {
+      if (!useLibraryAccountStore.getState().username) throw new Error("Sign in to open your Log.")
+      if (!useWikiStore.getState().project) {
+        const last = await getLastProject()
+        const recent = await getRecentProjects()
+        const candidates = new Set([...(last ? [last.path] : []), ...recent.map(({ path }) => path)])
+        let workspace: WikiProject | undefined
+        for (const path of candidates) {
+          try {
+            workspace = await openProject(path)
+            break
+          } catch (cause) {
+            console.warn("Could not reopen a recent wiki:", cause)
+          }
+        }
+        if (!workspace) {
+          const parent = await defaultWikiDirectory()
+          const path = `${parent}/${DEFAULT_WIKI_NAME}`
+          workspace = await fileExists(`${path}/schema.md`)
+            ? await openProject(path)
+            : await createProject(DEFAULT_WIKI_NAME, parent)
+        }
+        await handleProjectOpened(workspace)
+      }
+      setActiveView("log")
+      if (firstLaunch) await saveOnboardingComplete()
+      setFirstLaunch(false)
+    })().finally(() => { libraryEntry.current = null })
+    libraryEntry.current = entering
+    return entering
   }
 
   function isCurrentProject(proj: WikiProject): boolean {
@@ -501,7 +534,7 @@ function App() {
     )
   }
 
-  if (firstLaunch) return <FirstLaunch onComplete={completeOnboarding} />
+  if (firstLaunch) return <FirstLaunch onComplete={openLibraryLog} />
 
   if (!project) {
     return (
@@ -510,6 +543,7 @@ function App() {
           onCreateProject={() => setShowCreateDialog(true)}
           onOpenProject={handleOpenProject}
           onSelectProject={handleSelectRecent}
+          onSignedIn={openLibraryLog}
         />
         <CreateProjectDialog
           open={showCreateDialog}
@@ -522,7 +556,7 @@ function App() {
 
   return (
     <>
-      <AppLayout onSwitchProject={handleSwitchProject} />
+      <AppLayout onSwitchProject={handleSwitchProject} onSignedIn={openLibraryLog} />
       <CreateProjectDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}

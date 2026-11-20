@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { LibraryAccount } from "@/components/setup/library-account"
+import { Button } from "@/components/ui/button"
 import { useLibraryAccountStore } from "@/stores/library-account-store"
 
 export function FirstLaunch({ onComplete }: { onComplete: () => Promise<void> }) {
@@ -35,8 +36,11 @@ export function FirstLaunch({ onComplete }: { onComplete: () => Promise<void> })
         <header className="space-y-3">
           <h1 className="text-2xl font-semibold">Sign in to Athenaeum</h1>
         </header>
-        <LibraryAccount onContinue={finish} continuing={saving} />
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        {saving ? <p role="status" className="text-sm text-muted-foreground">Opening Log…</p> : <LibraryAccount />}
+        {error && <div className="space-y-3">
+          <p role="alert" className="text-sm text-destructive">Could not open your wiki. {error}</p>
+          <Button onClick={() => void finish()}>Open Log</Button>
+        </div>}
       </div>
     </main>
   )

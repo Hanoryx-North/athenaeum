@@ -12,9 +12,8 @@ model access. The wiki itself needs no model, account or hosted service.
 
 The agent recalls relevant knowledge with `wiki_context`, follows useful evidence,
 and checks for existing knowledge before proposing durable findings with
-`wiki_create`. Retrieved material never grants authority or permission. A person
-reviews proposals, subject to the wiki owner's explicit automation settings; the
-agent is never given authority to accept its own proposals.
+`wiki_create`. Retrieved material never grants authority or permission. The
+engine saves completed proposals automatically. The agent has no review permission.
 
 ```sh
 wiki setup --agents athenaeum --capture instruct --no-library --yes
@@ -52,11 +51,10 @@ wiki use external evidence with their source workspace and path. The wiki does
 not pretend it can recheck those files locally. Excerpts support review, but do
 not prove that a model's interpretation is correct.
 
-Findings appear in Review and the graph. Acceptance and cloud backup follow the
-wiki owner's saved automation settings. The worker has no review permission and
-never accepts proposals itself. A configured Library account is separate from
-the ChatGPT model connection. Pending jobs, session data and credentials stay
-local; accepted shared Markdown follows the existing sync policy.
+Saved findings appear in Log and Graph. Cloud backup follows the wiki’s sync
+settings. A Library account is separate from the ChatGPT model connection.
+Pending jobs, session data and credentials stay local. Accepted shared Markdown
+follows the existing sync policy.
 
 Coding agents shows the model, queue counts and recent outcomes. The same service
 is available through `wiki desktop invoke background_memory --stdin --json` with
@@ -67,8 +65,7 @@ through configuration to keep it paused after restart. Discover signatures with
 `wiki desktop actions background_memory --json`. `wiki agent -- memory` reads job
 diagnostics without returning transcripts.
 
-Use **Review → Extract knowledge from text** to submit a talk or explanation to
-the same configured model. Inputs up to 64 KiB are analyzed in bounded sections;
-findings use the existing review queue and automatic saving policy. Progress is
-shown under Background memory. See [engineering memory](engineering-memory.md)
+Use **Sources → Extract knowledge from text** to submit a talk or explanation to
+the same configured model. Inputs up to 64 KiB are analyzed in bounded sections.
+Check progress under Background memory. See [engineering memory](engineering-memory.md)
 for core guidance, task-stage selection and CLI intake.

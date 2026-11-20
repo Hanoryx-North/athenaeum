@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use athenaeum_core::journal::Event;
+use athenaeum_core::journal::{Event, EventKind};
 use athenaeum_core::prelude::*;
 use athenaeum_core::vault::{
     lint, KnowledgeGraph, LintOptions, VaultIndexReport, VaultIndexer, VaultLintReport,
@@ -342,9 +342,24 @@ pub fn assemble_brief(
 pub fn journal(
     state: tauri::State<'_, AppState>,
     limit: Option<u32>,
+    kind: Option<EventKind>,
+    workspace: Option<String>,
 ) -> std::result::Result<Vec<Event>, String> {
     run_guarded("journal", || {
-        state.with(|store| store.events(&EventFilter::default().limit(limit.unwrap_or(50))))
+        let filter = EventFilter {
+            kind,
+            limit: Some(limit.unwrap_or(50).min(1000)),
+            ..Default::default()
+        };
+        if let Some(path) = workspace {
+            let workspace =
+                Workspace::discover(Path::new(&path)).ok_or("No wiki is open at this path")?;
+            return workspace
+                .open()
+                .and_then(|store| store.events(&filter))
+                .map_err(|error| error.to_string());
+        }
+        state.with(|store| store.events(&filter))
     })
 }
 
