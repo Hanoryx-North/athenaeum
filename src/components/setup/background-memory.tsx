@@ -17,7 +17,7 @@ export function BackgroundMemory({ workspace }: { workspace: string }) {
   return (
     <section className="space-y-3 border-t pt-5" aria-labelledby="background-memory-title">
       <h3 id="background-memory-title" className="font-medium">Background memory</h3>
-      <p className="max-w-prose text-sm text-muted-foreground">Save lessons from completed coding turns using your ChatGPT connection. Saved notes appear in Log.</p>
+      <p className="max-w-prose text-sm text-muted-foreground">Save lessons from completed coding turns. Find them in Files and Graph.</p>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={settings.enabled} disabled={busy || !status} onChange={(event) => void configure(workspace, { ...settings, model, enabled: event.target.checked })} />
         Learn in the background

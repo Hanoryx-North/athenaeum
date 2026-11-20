@@ -3,14 +3,14 @@ import { normalizePath } from "@/lib/path-utils"
 import { readUiPreference, saveUiPreference } from "@/lib/ui-preferences"
 
 type Navigation = Pick<WikiState, "activeView" | "selectedFile">
-const VIEWS: WikiState["activeView"][] = ["log", "chat", "wiki", "sources", "search", "graph", "lint", "knowledge", "skills", "settings", "connectors"]
+const VIEWS: WikiState["activeView"][] = ["chat", "wiki", "sources", "search", "graph", "lint", "knowledge", "skills", "settings", "connectors"]
 
 export function loadWorkspaceNavigation(path: string): Navigation {
   const workspace = normalizePath(path)
   const saved = readUiPreference<Partial<Navigation> | null>(`navigation:${workspace}`, null)
   const selected = saved?.selectedFile
   return {
-    activeView: saved?.activeView && VIEWS.includes(saved.activeView) ? saved.activeView : "log",
+    activeView: saved?.activeView && VIEWS.includes(saved.activeView) ? saved.activeView : "sources",
     selectedFile: typeof selected === "string" && normalizePath(selected).startsWith(`${workspace}/`) && !selected.split(/[\\/]/).includes("..") ? selected : null,
   }
 }

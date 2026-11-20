@@ -11,7 +11,6 @@ import { LintView } from "@/components/lint/lint-view"
 import { SearchView } from "@/components/search/search-view"
 import { GraphView } from "@/components/graph/graph-view"
 import { PreviewPanel } from "./preview-panel"
-import { LogView } from "./log-view"
 import { Button } from "@/components/ui/button"
 
 export function ContentArea() {
@@ -48,10 +47,7 @@ function ActiveContent({
 }: {
   activeView: ReturnType<typeof useWikiStore.getState>["activeView"]
 }) {
-  const workspace = useWikiStore((s) => s.project?.path)
   switch (activeView) {
-    case "log":
-      return workspace ? <LogView key={workspace} workspace={workspace} /> : null
     case "chat":
       return <ChatPanel />
     case "wiki":

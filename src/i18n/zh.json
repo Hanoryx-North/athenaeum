@@ -17,8 +17,7 @@
     "diagram": "图表"
   },
   "nav": {
-    "log": "日志",
-    "notes": "笔记",
+    "addKnowledge": "添加知识",
     "connectors": "连接器",
     "chat": "对话",
     "wiki": "Wiki",
@@ -173,6 +172,14 @@
   },
   "sources": {
     "title": "原始资料",
+    "intake": {
+      "label": "粘贴文本",
+      "submit": "整理文本",
+      "submitting": "正在加入队列…",
+      "tooLong": "请将文本缩短至 64 KiB 以内。",
+      "queued": "已加入队列。保存后可在文件和关系图中查看。",
+      "duplicate": "此文本已加入队列或已处理。"
+    },
     "import": "导入",
     "importing": "导入中...",
     "noSources": "暂无资料",
@@ -194,7 +201,7 @@
     "refreshFolder": "刷新文件夹",
     "refreshingFolder": "刷新中...",
     "refreshFolderHint": "重新扫描资料文件夹，并处理新增、修改或删除的文件。",
-    "refreshFolderTooltip": "按自动监控相同规则重新扫描当前项目的资料文件夹。允许的新增或修改文件会加入提取队列；已删除的资料会走正常的 Wiki 与索引清理流程；随后重建文件树。",
+    "refreshFolderTooltip": "检查是否有新增、修改或删除的资料文件。",
     "refreshFailed": "刷新原始资料失败：{{error}}",
     "openExternal": "用默认应用打开",
     "openExternalFailed": "无法打开「{{name}}」：{{error}}",

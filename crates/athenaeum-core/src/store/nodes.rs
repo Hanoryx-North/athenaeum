@@ -20,6 +20,9 @@ pub(crate) const NODE_COLUMNS: &str =
      provenance_source, provenance_detail, provenance_session, last_verified_at, \
      created_at, updated_at, version, applicability";
 
+const PENDING_PROPOSAL_SQL: &str =
+    "provenance_source = 'model' AND status IN ('valid', 'stale', 'stale_requires_review')";
+
 /// [`NODE_COLUMNS`] qualified with a table alias, for queries that join.
 pub(crate) fn node_columns_for(alias: &str) -> String {
     NODE_COLUMNS
@@ -269,18 +272,21 @@ impl KnowledgeStore {
         )? as u64)
     }
 
+    pub(crate) fn list_proposals(&self, limit: Option<u32>) -> Result<Vec<KnowledgeNode>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE {PENDING_PROPOSAL_SQL}
+             ORDER BY updated_at DESC LIMIT ?1"
+        ))?;
+        let nodes = stmt
+            .query_map([limit.map(i64::from).unwrap_or(-1)], map_node)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(nodes)
+    }
+
     /// Count the model proposals awaiting a decision, without loading them.
-    ///
-    /// The same predicate as [`crate::portable::memory::is_proposal`] — a live
-    /// node a model proposed that the vault does not own — expressed as a count
-    /// so a status line does not pay for the whole list. The two must agree;
-    /// change them together.
     pub fn count_proposals(&self) -> Result<u64> {
         Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM nodes
-             WHERE provenance_source = 'model'
-               AND status IN ('valid', 'stale', 'stale_requires_review')
-               AND (provenance_detail IS NULL OR provenance_detail NOT LIKE 'vault%')",
+            &format!("SELECT COUNT(*) FROM nodes WHERE {PENDING_PROPOSAL_SQL}"),
             [],
             |row| row.get::<_, i64>(0),
         )? as u64)

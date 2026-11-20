@@ -14,12 +14,10 @@ test('discovery maps actual domain operations and native commands without exposi
   assert.ok(names.has('fs.readFile'))
   assert.ok(names.has('research.addTask'))
   assert.ok(names.has('knowledge-api.api.linkNodes'))
-  assert.ok(names.has('wiki-notes.createNote'))
-  assert.ok(names.has('wiki-notes.openDailyNote'))
   assert.ok(!names.has('engine.engineAccept'))
   assert.ok(!names.has('app-dialog.enqueue')) // request.resolve is a required callback
   assert.ok(catalog.native.some(command => command.name === 'list_directory'))
-  assert.ok(catalog.native.some(command => command.name === 'open_wiki_note'))
+  assert.ok(catalog.native.some(command => command.name === 'background_memory'))
   assert.ok(!catalog.native.some(command => ['engine_accept', 'engine_reject'].includes(command.name)))
   assert.ok(!catalog.native.some(command => command.name === 'desktop_control_respond'))
   assert.equal(names.size, catalog.entries.length)
@@ -28,7 +26,8 @@ test('discovery maps actual domain operations and native commands without exposi
 test('invalid enum, required object fields and argument types are refused', () => {
   const view = catalog.entries.find(action => action.name === 'wiki.setActiveView')
   assert.ok(matchesArgument('graph', view.parameters[0].schema))
-  assert.ok(matchesArgument('log', view.parameters[0].schema))
+  assert.ok(matchesArgument('sources', view.parameters[0].schema))
+  assert.ok(!matchesArgument('log', view.parameters[0].schema))
   assert.ok(!matchesArgument('review', view.parameters[0].schema))
   assert.ok(!matchesArgument('invented-view', view.parameters[0].schema))
   const graph = catalog.entries.find(action => action.name === 'wiki.setGraphUiState')

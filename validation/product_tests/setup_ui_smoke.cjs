@@ -69,20 +69,15 @@ const path = require('node:path');
             return window.files.get(args.path);
           }
           if (command === 'write_file' || command === 'write_file_atomic') {
-            if (window.failNoteWrite && args.path.endsWith('Capture test.md')) throw new Error('Disk unavailable');
             window.files.set(args.path, args.contents);
             return null;
           }
           if (command === 'list_directory') return [...window.files.keys()]
             .filter(file => file.startsWith(`${args.path}/`) && !file.includes('/.athenaeum/'))
             .map(file => ({ name: file.split('/').at(-1), path: file, is_dir: false }));
-          if (command === 'open_wiki_note') {
-            const date = '2026-11-20';
-            const noteTitle = args.note.kind === 'daily' ? date : args.note.title;
-            const relative = `wiki/${args.note.kind === 'daily' ? 'daily' : 'notes'}/${noteTitle}.md`;
-            const absolute = `${args.projectPath}/${relative}`;
-            if (!window.files.has(absolute)) window.files.set(absolute, `# ${noteTitle}\n`);
-            return relative;
+          if (command === 'background_memory' && args.action === 'ingest') {
+            if (window.intakeFails) throw new Error('Configure a memory model in Coding agents first.');
+            return { status: 'queued' };
           }
           if (command === 'journal') return [];
           if (command === 'start_project_file_watcher') return { queue: { version: 1, tasks: [] }, changedTasks: [] };
@@ -127,48 +122,47 @@ const path = require('node:path');
     await page.evaluate(() => { window.libraryFails = true; });
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Invalid sign-in' }).waitFor();
-    assert.equal(await page.getByRole('heading', { name: 'Log', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('heading', { name: 'Add knowledge', exact: true }).count(), 0);
     await page.evaluate(() => { window.libraryFails = false; });
     await page.getByLabel('Password', { exact: true }).fill('test-only-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByRole('heading', { name: 'Log', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Add knowledge', exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.savedSettings.get('onboardingComplete')), true);
     assert.equal(await page.evaluate(() => window.calls.filter(call => call.command === 'create_project').length), 1);
     const signIn = await page.evaluate(() => window.calls.find(call => call.args?.job?.job === 'library_sign_in'));
     assert.deepEqual(signIn.args.job, { job: 'library_sign_in', server: 'https://wiki.hanoryx.com' });
     assert.equal(signIn.args.credentials.password, 'test-only-password');
-    const logButton = page.getByRole('button', { name: 'Log', exact: true });
-    const dailyButton = page.getByRole('button', { name: 'Today’s note', exact: true });
-    const noteEditor = page.getByRole('textbox', { name: 'Raw Markdown editor', exact: true });
-    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-log.png') });
+    const primaryViews = page.getByRole('navigation', { name: 'Workspace' });
+    assert.equal(await primaryViews.getByRole('button', { name: /^(Log|Notes)$/ }).count(), 0);
+    assert.equal(await primaryViews.getByRole('button', { name: 'Graph', exact: true }).count(), 1);
+    assert.equal(await primaryViews.getByRole('button', { name: 'Files', exact: true }).count(), 1);
+    const paste = page.getByRole('textbox', { name: 'Paste text' });
+    const organize = page.getByRole('button', { name: 'Organize text' });
+    assert.equal(await organize.isDisabled(), true);
+    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-intake.png') });
     await page.setViewportSize({ width: 720, height: 480 });
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-log-small-dark.png') });
+    await page.screenshot({ animations: 'disabled', path: path.join(process.env.TEMP || '/tmp', 'athenaeum-intake-small-dark.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await page.setViewportSize({ width: 1200, height: 800 });
-    await dailyButton.click();
-    await noteEditor.fill('# 2026-11-20\n\nCaptured today.\n');
-    await logButton.click();
-    await dailyButton.click();
-    await noteEditor.waitFor();
-    assert.match(await noteEditor.inputValue(), /Captured today/);
-    await logButton.click();
-    await page.getByRole('button', { name: 'New note', exact: true }).click();
-    await page.getByLabel('Note title').fill('Capture test');
-    await page.getByRole('button', { name: 'Create note', exact: true }).click();
-    await noteEditor.waitFor();
-    await page.getByRole('button', { name: 'Link note', exact: true }).click();
-    await page.getByLabel('Find a note to link').fill('Link target');
-    await page.getByRole('button', { name: /Link target/ }).click();
-    assert.match(await noteEditor.inputValue(), /\[\[wiki\/notes\/Link target\.md\|Link target\]\]/);
-    await page.evaluate(() => { window.failNoteWrite = true; });
-    await page.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.getByRole('alert').filter({ hasText: 'Could not save this note' }).waitFor();
-    await page.evaluate(() => { window.failNoteWrite = false; });
-    await page.getByRole('button', { name: 'Retry', exact: true }).click();
-    await page.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.getByRole('link', { name: 'Link target', exact: true }).click();
+    await paste.fill('x'.repeat(65537));
+    await page.getByText('Shorten the text to 64 KiB or less.').waitFor();
+    assert.equal(await organize.isDisabled(), true);
+    const text = 'Bound retries so an outage cannot exhaust the shared quota.';
+    await paste.fill(text);
+    await page.evaluate(() => { window.intakeFails = true; });
+    await organize.click();
+    await page.getByRole('alert').filter({ hasText: 'Configure a memory model' }).waitFor();
+    assert.equal(await paste.inputValue(), text);
+    await page.evaluate(() => { window.intakeFails = false; });
+    await organize.click();
+    await page.getByText('Queued. Saved knowledge appears in Files and Graph.').waitFor();
+    assert.equal(await paste.inputValue(), '');
+    const intake = await page.evaluate(() => window.calls.findLast(call => call.command === 'background_memory' && call.args.action === 'ingest').args);
+    assert.deepEqual(intake, { projectPath: '/test-data/Athenaeum/Wikis/My Wiki', action: 'ingest', document: { text, wikiRoot: '/test-data/Athenaeum/Wikis/My Wiki' } });
+    await primaryViews.getByRole('button', { name: 'Files', exact: true }).click();
+    await page.getByRole('button', { name: 'Link target.md', exact: true }).click();
     await page.getByRole('heading', { name: 'Link target', exact: true }).waitFor();
     await page.getByRole('button', { name: 'More tools', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Connectors', exact: true }).focus();
@@ -181,7 +175,7 @@ const path = require('node:path');
     await page.getByLabel('Username or email').fill('tester');
     await page.getByLabel('Password', { exact: true }).fill('test-only-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await page.getByRole('heading', { name: 'Log', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Add knowledge', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Close account menu', exact: true }).count(), 0);
     await page.evaluate(async () => {
       await window.mount('/src/components/project/welcome-screen.tsx', 'WelcomeScreen', {
@@ -245,7 +239,7 @@ const path = require('node:path');
     await page.getByRole('alert').filter({ hasText: 'Model check failed' }).waitFor();
     assert.equal(await page.getByText('Model responded successfully.', { exact: true }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log('Setup UI passed: Library sign-in and retry, direct landing in Log, daily note reopening, linked notes, save recovery, account persistence and connector flows.');
+    console.log('Setup UI passed: sign-in and retry, paste and recovery, file preview, account persistence and connectors.');
   } catch (error) {
     if (page) console.error("Setup fixture at failure:", (await page.locator("body").innerText()).slice(0, 4000));
     throw error;

@@ -1,7 +1,7 @@
 import { Menu } from "@base-ui/react/menu"
 import {
   Activity, ArrowLeftRight, ClipboardCheck, Ellipsis, FileText, FolderOpen, Globe,
-  MessageSquare, Network, NotebookPen, PlugZap, Search, Settings, Sparkles,
+  MessageSquare, Network, PlugZap, Plus, Search, Settings, Sparkles,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { LibraryAccountMenu } from "@/components/setup/library-account-menu"
@@ -16,15 +16,14 @@ import { nextResearchPanelNavState } from "./research-panel-nav"
 type View = WikiState["activeView"]
 
 const WORKSPACE_VIEWS = [
-  { view: "log", icon: NotebookPen, label: "nav.log", fallback: "Log" },
-  { view: "wiki", icon: FileText, label: "nav.notes", fallback: "Notes" },
-  { view: "search", icon: Search, label: "nav.search" },
+  { view: "sources", icon: Plus, label: "nav.addKnowledge" },
+  { view: "wiki", icon: FolderOpen, label: "sidebar.files" },
   { view: "graph", icon: Network, label: "nav.graph" },
-  { view: "sources", icon: FolderOpen, label: "nav.sources" },
-  { view: "chat", icon: MessageSquare, label: "nav.chat" },
 ] satisfies { view: View; icon: typeof FileText; label: string; fallback?: string }[]
 
 const TOOL_VIEWS = [
+  { view: "search", icon: Search, label: "nav.search" },
+  { view: "chat", icon: MessageSquare, label: "nav.chat" },
   { view: "knowledge", icon: Activity, label: "nav.knowledge" },
   { view: "lint", icon: ClipboardCheck, label: "nav.lint" },
   { view: "connectors", icon: PlugZap, label: "nav.connectors", fallback: "Connectors" },
@@ -54,15 +53,15 @@ export function IconSidebar({ onSwitchProject, onSignedIn }: {
     <TooltipProvider delay={300}>
       <nav aria-label="Workspace" className="flex h-full w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-muted/50 py-2">
         <img src={logo} alt="Athenaeum" className="mb-1 h-8 w-8 shrink-0 rounded-[22%]" />
-        {WORKSPACE_VIEWS.map(({ view, icon: Icon, label, fallback }) => (
+        {WORKSPACE_VIEWS.map(({ view, icon: Icon, label }) => (
           <Tooltip key={view}>
-            <TooltipTrigger aria-label={t(label, { defaultValue: fallback })}
+            <TooltipTrigger aria-label={t(label)}
               aria-current={activeView === view ? "page" : undefined}
               onClick={() => setActiveView(view)}
               className={cn(railButton, activeView === view && "bg-accent text-accent-foreground")}>
               <Icon className="h-5 w-5" />
             </TooltipTrigger>
-            <TooltipContent side="right">{t(label, { defaultValue: fallback })}</TooltipContent>
+            <TooltipContent side="right">{t(label)}</TooltipContent>
           </Tooltip>
         ))}
         <div className="flex-1" />

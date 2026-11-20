@@ -127,7 +127,7 @@ export function LibraryAccount({
             </Button>
             {(onContinue || (onSignedIn && message)) && (
               <Button onClick={() => void Promise.resolve().then(onSignedIn ?? onContinue).catch((cause) => setMessage(String(cause)))} disabled={working}>
-                {continuing ? "Opening…" : onSignedIn ? "Open Log" : "Continue"}
+                {continuing ? "Opening…" : onSignedIn ? "Open wiki" : "Continue"}
               </Button>
             )}
           </div>

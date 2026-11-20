@@ -51,7 +51,7 @@ wiki use external evidence with their source workspace and path. The wiki does
 not pretend it can recheck those files locally. Excerpts support review, but do
 not prove that a model's interpretation is correct.
 
-Saved findings appear in Log and Graph. Cloud backup follows the wiki’s sync
+Saved findings appear in Files and Graph. Cloud backup follows the wiki’s sync
 settings. A Library account is separate from the ChatGPT model connection.
 Pending jobs, session data and credentials stay local. Accepted shared Markdown
 follows the existing sync policy.
@@ -59,13 +59,13 @@ follows the existing sync policy.
 Coding agents shows the model, queue counts and recent outcomes. The same service
 is available through `wiki desktop invoke background_memory --stdin --json` with
 `projectPath`, `action` and optional `settings`. Actions are `status`, `configure`,
-`run`, `restart` and `stop`. Configuration takes `enabled`, `includeCodex`,
+`run`, `restart`, `stop` and `ingest`. Configuration takes `enabled`, `includeCodex`,
 `model` and `wikiRoot`. Stop is a development lifecycle operation; disable learning
 through configuration to keep it paused after restart. Discover signatures with
 `wiki desktop actions background_memory --json`. `wiki agent -- memory` reads job
 diagnostics without returning transcripts.
 
-Use **Sources → Extract knowledge from text** to submit a talk or explanation to
+Use **Add knowledge → Paste text** to submit a rule or explanation to
 the same configured model. Inputs up to 64 KiB are analyzed in bounded sections.
 Check progress under Background memory. See [engineering memory](engineering-memory.md)
 for core guidance, task-stage selection and CLI intake.

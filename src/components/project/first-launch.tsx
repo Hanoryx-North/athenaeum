@@ -36,10 +36,10 @@ export function FirstLaunch({ onComplete }: { onComplete: () => Promise<void> })
         <header className="space-y-3">
           <h1 className="text-2xl font-semibold">Sign in to Athenaeum</h1>
         </header>
-        {saving ? <p role="status" className="text-sm text-muted-foreground">Opening Log…</p> : <LibraryAccount />}
+        {saving ? <p role="status" className="text-sm text-muted-foreground">Opening wiki…</p> : <LibraryAccount />}
         {error && <div className="space-y-3">
           <p role="alert" className="text-sm text-destructive">Could not open your wiki. {error}</p>
-          <Button onClick={() => void finish()}>Open Log</Button>
+          <Button onClick={() => void finish()}>Retry</Button>
         </div>}
       </div>
     </main>

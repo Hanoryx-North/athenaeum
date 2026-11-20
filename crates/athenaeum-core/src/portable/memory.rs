@@ -51,20 +51,12 @@ pub struct Accepted {
 ///
 /// A proposal is a live node whose provenance is a model and that the vault does not own.
 pub fn proposals(store: &KnowledgeStore, limit: Option<u32>) -> Result<Vec<KnowledgeNode>> {
-    let mut found: Vec<KnowledgeNode> = store
-        .list_nodes(&NodeFilter::live())?
-        .into_iter()
-        .filter(is_proposal)
-        .collect();
-    if let Some(limit) = limit {
-        found.truncate(limit as usize);
-    }
-    Ok(found)
+    store.list_proposals(limit)
 }
 
 /// True for a node a model proposed and nothing has yet decided.
 pub fn is_proposal(node: &KnowledgeNode) -> bool {
-    node.provenance.source == ProvenanceSource::Model && !is_vault_owned(node) && node.is_live()
+    node.provenance.source == ProvenanceSource::Model && node.is_live()
 }
 
 /// Accept a model's proposal: write it to the vault as a page.
@@ -995,6 +987,64 @@ mod tests {
                     .with_provenance(Provenance::model("curator").with_session("sess_1".into())),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn proposal_queries_only_return_live_model_nodes() {
+        let mut store = KnowledgeStore::open_in_memory().unwrap();
+        for (title, provenance, status) in [
+            (
+                "Draft",
+                Provenance::model("vault-reader"),
+                NodeStatus::Valid,
+            ),
+            (
+                "Stale draft",
+                Provenance::model("curator"),
+                NodeStatus::Stale,
+            ),
+            (
+                "Draft awaiting review",
+                Provenance::model("curator"),
+                NodeStatus::StaleRequiresReview,
+            ),
+            (
+                "Retired draft",
+                Provenance::model("curator"),
+                NodeStatus::Superseded,
+            ),
+            (
+                "Rejected draft",
+                Provenance::model("curator"),
+                NodeStatus::Archived,
+            ),
+            (
+                "Saved page",
+                Provenance::deterministic("vault_index:page"),
+                NodeStatus::Valid,
+            ),
+            (
+                "Indexed symbol",
+                Provenance::deterministic("repository_index:symbol"),
+                NodeStatus::Valid,
+            ),
+        ] {
+            let mut node = KnowledgeNode::new(NodeType::Fact, title).with_provenance(provenance);
+            node.status = status;
+            store.create_node(node).unwrap();
+        }
+        let expected: Vec<_> = store
+            .list_nodes(&NodeFilter::all())
+            .unwrap()
+            .into_iter()
+            .filter(is_proposal)
+            .collect();
+        let found = proposals(&store, None).unwrap();
+        assert_eq!(found.len(), 3);
+        assert_eq!(found, expected);
+        assert_eq!(store.count_proposals().unwrap(), 3);
+        assert_eq!(proposals(&store, Some(1)).unwrap(), found[..1]);
+        assert!(proposals(&store, Some(0)).unwrap().is_empty());
     }
 
     #[test]

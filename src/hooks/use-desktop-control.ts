@@ -17,7 +17,7 @@ function text(value: unknown, name: string): string {
 interface AppActions {
   openProject: (project: WikiProject) => Promise<void>
   switchProject: () => Promise<void>
-  openLibraryLog: () => Promise<void>
+  openLibraryWorkspace: () => Promise<void>
 }
 
 export function useDesktopControl(ready: boolean, actions: AppActions): void {
@@ -42,14 +42,14 @@ export function useDesktopControl(ready: boolean, actions: AppActions): void {
       registerDesktopAction("project.switch", "(): Promise<void>", () => actionsRef.current.switchProject()),
       registerDesktopAction("account.signIn", "(username: string, password: string): Promise<{ username: string }>", async (username, password) => {
         const identity = await signInToLibrary(text(username, "username"), text(password, "password"))
-        await actionsRef.current.openLibraryLog()
+        await actionsRef.current.openLibraryWorkspace()
         return { username: identity }
       }),
-      registerDesktopAction("account.openLog", "(): Promise<void>", async () => {
+      registerDesktopAction("account.openWorkspace", "(): Promise<void>", async () => {
         await useLibraryAccountStore.getState().refresh()
         const { error, username } = useLibraryAccountStore.getState()
-        if (error || !username) throw new Error(error ?? "Sign in to open your Log.")
-        await actionsRef.current.openLibraryLog()
+        if (error || !username) throw new Error(error ?? "Sign in to open your wiki.")
+        await actionsRef.current.openLibraryWorkspace()
       }),
       registerDesktopAction("app.refresh", "(): void", () => {
         useWikiStore.getState().bumpDataVersion()

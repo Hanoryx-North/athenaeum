@@ -12,7 +12,7 @@ People working on local projects with their existing coding agent.
 
 ## Product Purpose
 
-Capture daily notes and keep linked knowledge in a local Markdown wiki. The desktop opens Log after Library sign-in and saves completed agent proposals automatically. Wikis can sync with a private or public Library repository. The built-in Athenaeum Agent is the primary coding experience; its terminal is optional.
+Organize pasted text, imported sources and lessons from coding into linked knowledge in a local Markdown wiki. The desktop focuses on Add knowledge, Files and Graph. Wikis can sync with a private or public Library repository. The built-in Athenaeum Agent is the primary coding experience; its terminal is optional.
 
 ## Capabilities and Constraints
 

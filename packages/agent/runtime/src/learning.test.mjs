@@ -11,6 +11,12 @@ const candidate = () => ({ type: 'gotcha', title: 'Retry budget protects the sha
   lesson: { recommendation: 'Keep the shared retry budget at three attempts.', rationale: 'Unbounded retries amplify outages and consume the shared quota.',
     whenToUse: 'When changing retry behavior in this project.', validation: 'The configured budget was inspected; outage behavior has not been tested.', limits: 'Do not infer behavior under concurrent failures from this constant alone.' },
   evidence: [{ path: 'retry.mjs', excerpt: 'export const retryBudget = 3' }] })
+const textCandidate = (overrides = {}) => ({
+  type: 'procedure', title: candidate().title, summary: candidate().summary,
+  content: 'Keep the retry budget bounded so an outage cannot exhaust the shared quota.',
+  evidence: [{ source: 'text_1_1' }], ...overrides,
+})
+
 async function fixture(t, candidates = [candidate()], { duplicate = false, related = false, tools = true, gate } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'athenaeum-learning-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
@@ -242,13 +248,14 @@ test('text intake is opt-in, bounded, deduplicated and tied to the selected wiki
   await assert.rejects(enqueueText(f.home, { ...document, text: 'x'.repeat(65537) }, config), /64 KiB/)
   await assert.rejects(enqueueText(f.home, { ...document, text: 'password = abcdefghijklmnop' }, config), /credentials/)
   await assert.rejects(enqueueText(f.home, { ...document, wikiRoot: f.home }, config), /another wiki/)
+  assert.equal((await enqueueText(f.home, { text: document.text, wikiRoot: f.session.root }, config)).status, 'queued')
   assert.equal((await enqueueText(f.home, document, config)).status, 'queued')
   assert.equal((await enqueueText(f.home, document, config)).status, 'already_queued')
   assert.equal(f.requests.length, 0)
 })
 
 test('an explicitly submitted document runs while automatic session learning stays off', async (t) => {
-  const f = await fixture(t, [{ ...candidate(), evidence: [{ source: 'text_1_1' }] }])
+  const f = await fixture(t, [textCandidate()])
   await enqueueLearning(f.home, f.session, f.config)
   const [name] = await readdir(join(f.home, 'memory-jobs'))
   const file = join(f.home, 'memory-jobs', name)
@@ -267,13 +274,13 @@ test('an explicitly submitted document runs while automatic session learning sta
 })
 
 test('long text is analyzed completely, resumes at its checkpoint and proposes reviewable lessons with separate evidence', async (t) => {
-  const f = await fixture(t, [{ ...candidate(), evidence: [{ source: 'text_1_1' }] }])
+  const f = await fixture(t, [textCandidate()])
   const calls = []
   const client = { request: async (_method, params) => {
     calls.push(params)
     return { structuredContent: params.name === 'wiki_search' ? { items: [] } : params.name === 'wiki_create' ? { node: { id: 'lesson' }, pendingReview: true, durable: false } : { evidence: {} } }
   } }
-  const connection = { handlers: new Map(['wiki_search', 'wiki_create', 'wiki_attach_evidence'].map((tool) => [tool, { tool, client }])) }
+  const connection = { handlers: new Map(['wiki_search', 'wiki_create', 'wiki_attach_evidence', 'wiki_link'].map((tool) => [tool, { tool, client }])) }
   const text = ('Enforce dependency boundaries with types and tests. Preserve CLI errors and measure unnecessary retries.\n\n').repeat(280) + 'Final unique lesson: verify the application at runtime.'
   const job = { root: f.session.root, model: 'cheap-model', inputHash: 'source-hash', document: { title: 'Two engineering talks', text, scope: 'universal' } }
   let checkpoints = 0
@@ -292,6 +299,43 @@ test('long text is analyzed completely, resumes at its checkpoint and proposes r
   const before = f.requests.length
   await captureText(job, f.config, connection, new AbortController().signal)
   assert.equal(f.requests.length, before)
+})
+
+test('pasted knowledge applies selectors per lesson and links only known, supported targets', async (t) => {
+  const reason = 'The retry limit protects the quota described by the validation procedure.'
+  const f = await fixture(t, [
+    textCandidate({ type: 'rule', scope: 'project', technologies: ['node'], stages: ['coding'], related: [
+      { candidate: 2, reason }, { node: 'invented', reason },
+    ] }),
+    textCandidate({ title: 'Check the quota during outage tests', scope: 'universal', stages: ['verification'], related: [
+      { candidate: 1, reason }, { node: 'existing', reason: 'The established outage checklist covers this test.' },
+    ] }),
+    textCandidate({ title: 'Keep the design background separate', related: [{ candidate: 3, reason }] }),
+  ])
+  const text = 'In this Node project, bound retries. In every project, check the quota during outage tests. Keep the design background separate.'
+  const job = { root: f.session.root, inputHash: 'source-hash', document: { title: 'Pasted text', text } }
+  const calls = []
+  let created = 0
+  const client = { request: async (_method, params) => {
+    calls.push(params)
+    if (params.name === 'wiki_search') return { structuredContent: { items: params.arguments.query === text ? [{ node: { id: 'existing', title: 'Outage checklist' } }] : [] } }
+    if (params.name === 'wiki_create') return { structuredContent: { node: { id: `lesson-${++created}` }, pendingReview: true, durable: false } }
+    return { structuredContent: {} }
+  } }
+  const connection = { handlers: new Map(['wiki_search', 'wiki_create', 'wiki_attach_evidence', 'wiki_link'].map(tool => [tool, { tool, client }])) }
+
+  const result = await captureText(job, f.config, connection, new AbortController().signal)
+
+  assert.deepEqual(result.proposed, ['lesson-1', 'lesson-2', 'lesson-3'])
+  const proposals = calls.filter(call => call.name === 'wiki_create').map(call => call.arguments)
+  const links = calls.filter(call => call.name === 'wiki_link').map(call => call.arguments)
+  assert.deepEqual(proposals.map(({ type, scope, applicability }) => [type, scope, applicability]), [
+    ['rule', 'project', { core: false, projects: [job.root], technologies: ['node'], stages: ['coding'] }],
+    ['procedure', 'universal', { core: false, projects: [], technologies: [], stages: ['verification'] }],
+    ['procedure', 'project', { core: false, projects: [job.root], technologies: [], stages: [] }],
+  ])
+  assert.ok(calls.findLastIndex(call => call.name === 'wiki_attach_evidence') < calls.findIndex(call => call.name === 'wiki_link'))
+  assert.deepEqual(links.map(({ from, to }) => [from, to]), [['lesson-1', 'lesson-2'], ['lesson-2', 'existing']])
 })
 
 test('memory verifies observed source beyond the default file-read window and preserves project selectors', async t => {

@@ -11,7 +11,7 @@ export const SERVICES = [
   'lib/lint', 'lib/lint-fixes', 'lib/sweep-reviews', 'lib/source-lifecycle',
   'lib/wiki-page-delete', 'lib/wiki-cleanup', 'lib/page-merge', 'lib/chat-save-to-wiki',
   'lib/url-source-import', 'lib/search', 'lib/scheduled-import', 'lib/connection-tests',
-  'lib/self-update', 'lib/theme', 'lib/templates', 'lib/project-file-tree-refresh', 'lib/wiki-notes',
+  'lib/self-update', 'lib/theme', 'lib/templates', 'lib/project-file-tree-refresh',
 ]
 
 export function buildDesktopCatalog(root) {

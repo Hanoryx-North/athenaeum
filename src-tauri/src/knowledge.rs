@@ -16,6 +16,7 @@ use athenaeum_core::vault::{
 };
 use athenaeum_core::wiki::{WikiNodeDetail, WikiService};
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
 
 use crate::panic_guard::run_guarded;
 
@@ -385,13 +386,22 @@ pub struct Vocabularies {
 /// is the project directory containing `.athenaeum/`, so no path is passed
 /// — asking the UI which vault to index would let the two disagree.
 #[tauri::command]
-pub fn index_vault(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<VaultIndexReport, String> {
-    run_guarded("index_vault", || {
-        let root = state.project_root()?;
-        state.with(|store| VaultIndexer::scan_and_index(store, &root, VaultScanOptions::default()))
+pub async fn index_vault(app: AppHandle) -> std::result::Result<VaultIndexReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_guarded("index_vault", || {
+            app.state::<AppState>().with(|store| {
+                let root = store
+                    .project_root()
+                    .ok_or_else(|| athenaeum_core::Error::Portable {
+                        code: "invalid_request".into(),
+                        message: "the workspace has no project directory".into(),
+                    })?;
+                VaultIndexer::scan_and_index(store, &root, VaultScanOptions::default())
+            })
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// What the wiki links at, and what links at nothing.
@@ -414,12 +424,15 @@ pub fn lint_vault(
 
 /// The whole live knowledge graph, in one read, for the graph view.
 #[tauri::command]
-pub fn knowledge_graph(
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<KnowledgeGraph, String> {
-    run_guarded("knowledge_graph", || {
-        state.with(|store| athenaeum_core::vault::graph::project(store))
+pub async fn knowledge_graph(app: AppHandle) -> std::result::Result<KnowledgeGraph, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        run_guarded("knowledge_graph", || {
+            app.state::<AppState>()
+                .with(|store| athenaeum_core::vault::graph::project(store))
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Served from the library rather than duplicated in TypeScript, so adding a

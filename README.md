@@ -17,8 +17,9 @@ See [provenance](docs/provenance.md).
 Download a platform installer from the
 [latest release](https://github.com/Hanoryx-North/athenaeum/releases/latest).
 For local macOS builds through Relay, see [the build contract](docs/relay-build.md).
-Sign in to open Log. Capture a daily note, link it to your other notes, or add
-sources. Completed agent proposals save automatically as wiki pages.
+Sign in to add knowledge. Paste text or import sources, then browse saved
+knowledge in Files and see its relationships in Graph. Completed agent proposals
+save automatically as wiki pages.
 Choose a model provider in Settings to use Athenaeum Agent in chat. Local wiki
 browsing, search and review need no API key. Library sync is optional.
 

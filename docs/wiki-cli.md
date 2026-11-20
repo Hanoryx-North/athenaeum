@@ -332,18 +332,17 @@ and use its existing processors; they are CLI-accessible while the app is runnin
 not new headless model runtimes. Long chat turns return a start acknowledgement;
 read `desktop state chat` for their progress and output.
 
-Library sign-in opens Log in the current or most recent wiki. A fresh sign-in
+Library sign-in opens Add knowledge in the current or most recent wiki. A fresh sign-in
 creates `My Wiki` in the default data directory. Use these live actions from the CLI.
 
 ```sh
-wiki desktop call account.openLog --json
-wiki desktop call wiki-notes.openDailyNote --json
-printf '%s\n' '["Reading notes"]' | wiki desktop call wiki-notes.createNote --stdin --json
+wiki desktop call account.openWorkspace --json
+printf '%s\n' '["wiki"]' | wiki desktop call wiki.setActiveView --stdin --json
+printf '%s\n' '["graph"]' | wiki desktop call wiki.setActiveView --stdin --json
 ```
 
-`account.openLog` resumes a saved session. `account.signIn` accepts username and
-password via stdin. New notes use `wiki/notes/`. Daily notes use `wiki/daily/`
-and the local calendar date. Reopening a daily note preserves its contents.
+`account.openWorkspace` resumes a saved session. `account.signIn` accepts username
+and password via stdin. Use `background_memory` for [text intake](engineering-memory.md#add-lessons).
 
 Standalone knowledge commands still work without a desktop. `wiki unlink EDGE_ID`
 disconnects saved page relationships in their canonical Markdown and updates the

@@ -1,47 +1,41 @@
 import { useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 export function KnowledgeIntake({ workspace }: { workspace: string }) {
-  const [title, setTitle] = useState("")
+  const { t } = useTranslation()
   const [text, setText] = useState("")
-  const [scope, setScope] = useState("project")
-  const [core, setCore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
-  const bytes = new TextEncoder().encode(text).length
+  const oversized = new TextEncoder().encode(text).length > 64 * 1024
+  const canSubmit = !busy && !!text.trim() && !oversized
+
   const submit = async () => {
+    if (!canSubmit) return
     setBusy(true); setError(""); setMessage("")
     try {
-      const result = await invoke<{ status: string }>("background_memory", {
-        projectPath: workspace, action: "ingest", document: { title, text, scope, core, wikiRoot: workspace },
+      const result = await invoke<{ status: "queued" | "already_queued" }>("background_memory", {
+        projectPath: workspace, action: "ingest", document: { text, wikiRoot: workspace },
       })
-      setMessage(result.status === "already_queued" ? "This source is already queued or processed." : "Queued. See Log for saved notes.")
+      setText("")
+      setMessage(t(result.status === "already_queued" ? "sources.intake.duplicate" : "sources.intake.queued"))
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
     finally { setBusy(false) }
   }
-  return <details className="border-b px-4 py-3">
-    <summary className="cursor-pointer text-sm font-medium">Extract knowledge from text</summary>
-    <div className="mt-3 space-y-3">
-      <div className="space-y-1"><Label htmlFor="intake-title">Source title</Label><Input id="intake-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={200} disabled={busy} /></div>
-      <div className="space-y-1"><Label htmlFor="intake-text">Source text</Label><textarea id="intake-text" className="min-h-40 w-full rounded-md border bg-background p-2 text-sm" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} /></div>
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <Label htmlFor="intake-scope">Applies to</Label>
-        <select id="intake-scope" className="rounded border bg-background p-1" value={scope} onChange={(event) => setScope(event.target.value)} disabled={busy}>
-          <option value="project">This project</option><option value="universal">All projects</option>
-        </select>
-        {bytes > 65536 && <span role="alert" className="text-sm text-destructive">Shorten the source text to 64 KB or less.</span>}
-        <Button size="sm" disabled={busy || !title.trim() || !text.trim() || bytes > 65536} onClick={() => void submit()}>{busy ? "Queueing…" : "Extract lessons"}</Button>
+  return (
+    <form className="space-y-3 border-b px-4 py-3" onSubmit={(event) => { event.preventDefault(); void submit() }}>
+      <div className="space-y-2">
+        <Label htmlFor="intake-text">{t("sources.intake.label")}</Label>
+        <textarea id="intake-text" className="min-h-32 w-full resize-y rounded-md border bg-background p-2 text-sm focus-visible:outline-2 focus-visible:outline-ring" value={text}
+          onChange={(event) => { setText(event.target.value); setMessage(""); setError("") }} disabled={busy} />
       </div>
-      <label className="flex items-center gap-2 text-sm" htmlFor="intake-core">
-        <input id="intake-core" type="checkbox" checked={core} onChange={event => setCore(event.target.checked)} disabled={busy} className="accent-primary focus-visible:outline-2 focus-visible:outline-ring" />
-        Core guidance
-      </label>
+      {oversized && <p role="alert" className="text-sm text-destructive">{t("sources.intake.tooLong")}</p>}
+      <Button type="submit" size="sm" disabled={!canSubmit}>{t(busy ? "sources.intake.submitting" : "sources.intake.submit")}</Button>
       {message && <p role="status" className="text-sm">{message}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    </div>
-  </details>
+    </form>
+  )
 }

@@ -89,8 +89,11 @@ pub struct KnowledgeGraph {
     pub edges: Vec<GraphEdge>,
 }
 
+const REPOSITORY_INVENTORY: &str = "repository_index:*";
+
 /// Project the live knowledge graph.
 ///
+/// Repository scan inventory stays searchable, but is not wiki knowledge.
 /// Live nodes only: superseded and archived knowledge is retained for
 /// history but must not be drawn as though it were current. Traversable
 /// edges only, for the same reason — with the exception that a proposed
@@ -108,10 +111,12 @@ pub fn project(store: &KnowledgeStore) -> Result<KnowledgeGraph> {
                   LIMIT 1) AS path
            FROM nodes n
           WHERE n.status IN ('valid', 'stale', 'stale_requires_review')
+            AND NOT (n.provenance_source = 'deterministic'
+                     AND COALESCE(n.provenance_detail, '') GLOB ?1)
           ORDER BY n.id",
     )?;
     let mut nodes = statement
-        .query_map([], |row| {
+        .query_map([REPOSITORY_INVENTORY], |row| {
             let node_type: NodeType = crate::store::parse_enum(&row.get::<_, String>(1)?, "type")?;
             let detail: Option<String> = row.get(6)?;
             let origin = origin_of(detail.as_deref());
@@ -141,10 +146,12 @@ pub fn project(store: &KnowledgeStore) -> Result<KnowledgeGraph> {
         "SELECT from_node, to_node, type, provenance_source
            FROM edges
           WHERE status IN ('valid', 'stale', 'proposed')
+            AND NOT (provenance_source = 'deterministic'
+                     AND COALESCE(provenance_detail, '') GLOB ?1)
           ORDER BY from_node, to_node, type",
     )?;
     let edges = statement
-        .query_map([], |row| {
+        .query_map([REPOSITORY_INVENTORY], |row| {
             Ok(GraphEdge {
                 from: row.get(0)?,
                 to: row.get(1)?,
@@ -395,6 +402,31 @@ mod tests {
             .edges
             .iter()
             .any(|edge| edge.to == openai.id || edge.from == openai.id));
+    }
+
+    #[test]
+    fn wiki_graph_does_not_project_repository_inventory() {
+        let (_dir, mut store) = indexed_vault();
+        let before = project(&store).unwrap();
+        let symbol = store
+            .create_node(
+                KnowledgeNode::new(NodeType::Symbol, "RepositoryInventorySample")
+                    .with_provenance(Provenance::deterministic("repository_index:symbol")),
+            )
+            .unwrap();
+        store
+            .connect(
+                KnowledgeEdge::new(
+                    symbol.id.clone(),
+                    EdgeType::RelatedTo,
+                    before.nodes[0].id.clone(),
+                )
+                .with_provenance(Provenance::deterministic("repository_index:imports")),
+            )
+            .unwrap();
+
+        assert_eq!(project(&store).unwrap(), before);
+        assert_eq!(store.get_node(&symbol.id).unwrap().id, symbol.id);
     }
 
     #[test]

@@ -6,7 +6,10 @@ The product owner requested restoration of the desktop from `ffbf092` on
 
 Mode: Operate; wiki content is Read. Preserve the compact knowledge workspace:
 an icon sidebar, resizable file tree and research panes, a small project header,
-and a centered project picker with recent projects. A successful Library sign-in opens Log in the current or most recent wiki. Log offers today's note, new notes and recent saves. Notes, Search, Graph, Sources and Chat stay on the rail. Coding-agent connections and maintenance are grouped under More tools.
+and a centered project picker with recent projects. Library sign-in opens Add
+knowledge in the current or most recent wiki. Add knowledge, Files and Graph stay
+on the rail. Search, Chat, coding-agent connections and maintenance are under
+More tools. Existing Markdown files remain visible in Files.
 
 The implementation restored from `ffbf092` is the visual authority. Theme roles
 live in `src/index.css`, native window colors in `src/lib/theme.ts`, and controls

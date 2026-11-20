@@ -30,8 +30,7 @@
     "diagram": "Diagramma"
   },
   "nav": {
-    "log": "Diario",
-    "notes": "Note",
+    "addKnowledge": "Aggiungi conoscenze",
     "connectors": "Connessioni",
     "chat": "Chat",
     "wiki": "Wiki",
@@ -195,6 +194,14 @@
   },
   "sources": {
     "title": "Fonti grezze",
+    "intake": {
+      "label": "Incolla testo",
+      "submit": "Organizza testo",
+      "submitting": "Inserimento in coda…",
+      "tooLong": "Riduci il testo a 64 KiB o meno.",
+      "queued": "In coda. Le conoscenze salvate appaiono in File e Grafo.",
+      "duplicate": "Il testo è già in coda o è stato elaborato."
+    },
     "import": "Importa",
     "importing": "Importazione...",
     "noSources": "Ancora nessuna fonte",
@@ -216,7 +223,7 @@
     "refreshFolder": "Aggiorna la cartella",
     "refreshingFolder": "Aggiornamento...",
     "refreshFolderHint": "Riesamina la cartella delle fonti ed elabora i file nuovi, modificati o eliminati.",
-    "refreshFolderTooltip": "Riesamina la cartella delle fonti del progetto con le stesse regole del monitoraggio automatico. I file consentiti nuovi o modificati vengono messi in coda per l'elaborazione; le fonti eliminate avviano la normale pulizia di wiki e indice; infine l'albero dei file viene ricostruito.",
+    "refreshFolderTooltip": "Controlla se sono stati aggiunti, modificati o rimossi file sorgente.",
     "refreshFailed": "Impossibile aggiornare le fonti: {{error}}",
     "openExternal": "Apri nell'app predefinita",
     "openExternalFailed": "Impossibile aprire {{name}}: {{error}}",

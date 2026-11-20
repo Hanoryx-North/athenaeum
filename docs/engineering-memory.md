@@ -41,15 +41,16 @@ needed. Recall includes selectors only when the MCP tool advertises support.
 
 ## Add lessons
 
-Use **Sources → Extract knowledge from text** with the configured memory model.
-Choose **This project** or **All projects**; select **Core guidance** for lessons
-that should seed matching tasks after saving. Extraction proposes separate lessons
-with stage and technology selectors, evidence and optional check suggestions.
-Project lessons retain the source project identity, including in a shared wiki.
-No lint rule or project template is installed by accepting a lesson.
+Use **Add knowledge → Paste text** with the configured memory model. Athenaeum
+splits the text into scoped lessons, cites the submitted source and proposes
+supported relationships to existing and newly extracted knowledge. Selectors are
+chosen per lesson; unclear applicability stays local to the wiki. Saving a rule
+does not install a lint rule or a project template.
 
 CLI equivalent: `wiki desktop invoke background_memory --stdin --json` with
-`{"projectPath":"/project","action":"ingest","document":{"title":"Source","text":"...","scope":"universal","core":true,"wikiRoot":"/project"}}`.
+`{"projectPath":"/wiki","action":"ingest","document":{"text":"...","wikiRoot":"/wiki"}}`.
+CLI callers can optionally set `title`, override `scope` (`project` or `universal`),
+or mark the result `core` guidance.
 Inputs are limited to 64 KiB and processed in bounded chunks. Interrupted work
 uses chunk checkpoints; a crash during proposal creation can leave partial side
 effects, so inspect failed jobs before resubmitting. This uses the separate

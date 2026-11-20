@@ -115,13 +115,13 @@ export function PreviewPanel() {
   }, [selectedFile, flushSave])
 
   useEffect(() => {
-    return () => { void flushSave().catch(cause => console.error("Could not save note:", cause)) }
+    return () => { void flushSave().catch(cause => console.error("Could not save file:", cause)) }
   }, [selectedFile, flushSave])
 
   if (!selectedFile) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Select a note or open Log to create one.
+        Select a file to preview it.
       </div>
     )
   }
@@ -139,19 +139,19 @@ export function PreviewPanel() {
         </span>
         <button
           onClick={closePreview}
-          aria-label="Close note"
+          aria-label="Close preview"
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
         >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
       {saveError && <div className="flex items-center gap-2 border-b px-3 py-2 text-sm">
-        <p role="alert" className="min-w-0 break-words text-destructive">Could not save this note. {saveError}</p>
+        <p role="alert" className="min-w-0 break-words text-destructive">Could not save this file. {saveError}</p>
         <Button variant="outline" size="sm" onClick={() => void flushSave().catch(() => undefined)}>Retry</Button>
       </div>}
       <div className="flex-1 min-w-0 overflow-auto">
         {loadError ? <div className="space-y-2 p-4">
-          <p role="alert" className="text-sm text-destructive">Could not open this note. {loadError}</p>
+          <p role="alert" className="text-sm text-destructive">Could not open this file. {loadError}</p>
           <Button size="sm" variant="outline" onClick={() => setRetryRead(retryRead + 1)}>Retry</Button>
         </div> : loadedPath !== selectedFile ? <p role="status" className="p-4 text-sm text-muted-foreground">Loading…</p> : externalPreview?.path === selectedFile ? (
           <ExternalReferencePreview

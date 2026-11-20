@@ -43,10 +43,10 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [firstLaunch, setFirstLaunch] = useState(false)
   const libraryEntry = useRef<Promise<void> | null>(null)
-  useDesktopControl(!loading, { openProject: handleProjectOpened, switchProject: handleSwitchProject, openLibraryLog })
+  useDesktopControl(!loading, { openProject: handleProjectOpened, switchProject: handleSwitchProject, openLibraryWorkspace })
   useBackgroundMemory(project?.path, !loading)
 
-  function openLibraryLog(): Promise<void> {
+  function openLibraryWorkspace(): Promise<void> {
     if (libraryEntry.current) return libraryEntry.current
     const entering = (async () => {
       if (!useLibraryAccountStore.getState().username) throw new Error("Sign in to open your Log.")
@@ -72,7 +72,7 @@ function App() {
         }
         await handleProjectOpened(workspace)
       }
-      setActiveView("log")
+      setActiveView("sources")
       if (firstLaunch) await saveOnboardingComplete()
       setFirstLaunch(false)
     })().finally(() => { libraryEntry.current = null })
@@ -534,7 +534,7 @@ function App() {
     )
   }
 
-  if (firstLaunch) return <FirstLaunch onComplete={openLibraryLog} />
+  if (firstLaunch) return <FirstLaunch onComplete={openLibraryWorkspace} />
 
   if (!project) {
     return (
@@ -543,7 +543,7 @@ function App() {
           onCreateProject={() => setShowCreateDialog(true)}
           onOpenProject={handleOpenProject}
           onSelectProject={handleSelectRecent}
-          onSignedIn={openLibraryLog}
+          onSignedIn={openLibraryWorkspace}
         />
         <CreateProjectDialog
           open={showCreateDialog}
@@ -556,7 +556,7 @@ function App() {
 
   return (
     <>
-      <AppLayout onSwitchProject={handleSwitchProject} onSignedIn={openLibraryLog} />
+      <AppLayout onSwitchProject={handleSwitchProject} onSignedIn={openLibraryWorkspace} />
       <CreateProjectDialog
         open={showCreateDialog}
         onOpenChange={setShowCreateDialog}

@@ -403,7 +403,7 @@ interface WikiState {
    * one wiki-relative) still works.
    */
   pendingScrollImageSrc: string | null
-  activeView: "log" | "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "knowledge" | "skills" | "settings" | "connectors"
+  activeView: "chat" | "wiki" | "sources" | "search" | "graph" | "lint" | "knowledge" | "skills" | "settings" | "connectors"
   previewInitialMode: "read" | "edit"
   llmConfig: LlmConfig
   /** Persisted global/default config, kept separate while a project override is effective. */

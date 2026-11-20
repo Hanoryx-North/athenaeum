@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
+import { useAutomationStore } from "@/stores/automation-store"
 import { listDirectory, openPathInProject, readFile } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { useTranslation } from "react-i18next"
@@ -24,7 +25,6 @@ import {
 import { filterRawSourceTree } from "@/lib/source-filter"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { SourceCoverageStrip } from "@/components/sources/source-coverage-strip"
 import { KnowledgeIntake } from "@/components/sources/knowledge-intake"
 import { importSourceUrls, parseImportUrls, type UrlImportResult } from "@/lib/url-source-import"
 import { listIngestedSourceIdentities } from "@/lib/ingest-cache"
@@ -38,6 +38,7 @@ export function SourcesView() {
   const { t } = useTranslation()
   const appDialog = useAppDialog()
   const project = useWikiStore((s) => s.project)
+  const savingError = useAutomationStore((s) => s.workspace === project?.path ? s.error : null)
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const openFileInPreview = useWikiStore((s) => s.openFileInPreview)
@@ -365,27 +366,9 @@ export function SourcesView() {
   return (
     <TooltipProvider delay={300}>
       <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">{t("sources.title")}</h2>
-        <div className="flex gap-1">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleRefreshSources}
-                  disabled={refreshing}
-                  aria-label={t("sources.refreshFolder")}
-                />
-              }
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            </TooltipTrigger>
-            <TooltipContent side="bottom" align="end" className="max-w-80 whitespace-normal leading-relaxed">
-              {t("sources.refreshFolderTooltip")}
-            </TooltipContent>
-          </Tooltip>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+        <h2 className="text-sm font-semibold">{t("nav.addKnowledge")}</h2>
+        <div className="flex flex-wrap gap-1">
           <Button size="sm" onClick={handleImport} disabled={importing}>
             <Plus className="mr-1 h-4 w-4" />
             {importing ? t("sources.importing") : t("sources.import")}
@@ -400,10 +383,6 @@ export function SourcesView() {
           </Button>
         </div>
       </div>
-
-      {/* What the engine did with what is in this folder: a file listing is not
-          an index, so scan coverage is stated rather than implied. */}
-      <SourceCoverageStrip />
 
       <Dialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -473,6 +452,7 @@ export function SourcesView() {
 
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         {project && <KnowledgeIntake key={project.path} workspace={project.path} />}
+        {savingError && <p role="alert" className="px-4 py-3 text-sm text-destructive">{savingError}</p>}
         {refreshError && (
           <div className="mx-4 mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {t("sources.refreshFailed", {
@@ -482,20 +462,7 @@ export function SourcesView() {
           </div>
         )}
         {sources.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 p-8 text-center text-sm text-muted-foreground">
-            <p>{t("sources.noSources")}</p>
-            <p>{t("sources.importHint")}</p>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleImport}>
-                <Plus className="mr-1 h-4 w-4" />
-                {t("sources.importFiles")}
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleImportFolder}>
-                <Plus className="mr-1 h-4 w-4" />
-                {t("sources.importFolder")}
-              </Button>
-            </div>
-          </div>
+          <p className="px-4 py-6 text-sm text-muted-foreground">{t("sources.noSources")}</p>
         ) : filteredSources.length === 0 ? (
           <div className="flex h-32 items-center justify-center px-6 text-center text-sm text-muted-foreground">
             {t("sources.noSearchResults", { query: sourceQuery.trim() })}
@@ -520,14 +487,13 @@ export function SourcesView() {
       </ScrollArea>
 
       <div className="flex items-center justify-between gap-2 border-t px-4 py-2 text-xs text-muted-foreground">
-        <span>
-          {sourceQuery.trim()
-            ? t("sources.filteredSourceCount", {
-                count: filteredSourceCount,
-                total: totalSourceCount,
-              })
-            : t("sources.sourceCount", { count: totalSourceCount })}
-        </span>
+        {totalSourceCount > 0 && (
+          <span>
+            {sourceQuery.trim()
+              ? t("sources.filteredSourceCount", { count: filteredSourceCount, total: totalSourceCount })
+              : t("sources.sourceCount", { count: totalSourceCount })}
+          </span>
+        )}
         <Tooltip>
           <TooltipTrigger
             render={
@@ -536,7 +502,7 @@ export function SourcesView() {
                 size="sm"
                 onClick={handleRefreshSources}
                 disabled={!project || refreshing}
-                className="h-7 px-2 text-xs"
+                className="ml-auto h-7 px-2 text-xs"
               />
             }
           >

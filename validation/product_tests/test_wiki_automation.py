@@ -32,6 +32,7 @@ class WikiAutomation(unittest.TestCase):
         first = self.propose("First proposal")
         second = self.propose("Second proposal")
         self.bridge.request("link", input={"from": first, "to": second, "type": "depends_on"}, caller={"model": "validation"})
+        self.bridge.request("link", input={"from": first, "to": second, "type": "related_to"}, caller={"model": "validation"})
         batch = run_json(self.root, "automation", "--accept-all")["batch"]
         self.assertEqual(len(batch["accepted"]), 2)
         self.assertEqual(batch["errors"], [])
@@ -44,7 +45,8 @@ class WikiAutomation(unittest.TestCase):
             database.with_name(database.name + suffix).unlink(missing_ok=True)
         run(self.root, "index-vault")
         detail = self.bridge.request("open", node=first)
-        self.assertTrue(any(edge["id"] == second for edge in detail["detail"]["relationships"]))
+        self.assertEqual({edge["edgeType"] for edge in detail["detail"]["relationships"] if edge["id"] == second},
+                         {"depends_on", "related_to"})
         self.assertEqual(run_json(self.root, "automation", "--accept-all")["batch"]["accepted"], [])
 
     def test_agent_can_link_saved_pages_and_reindex_keeps_the_link(self):
